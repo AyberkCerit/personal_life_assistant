@@ -8,12 +8,9 @@ Bu proje, geleneksel şelale (waterfall) modeli yerine, değişen gereksinimlere
 Bu faz, projenin "Neyi, neden çözüyoruz?" sorusunu yanıtlar ve teknik iskeleti hazırlamadan önceki tüm kavramsal tasarımları içerir.
 - [x] **Problem ve Çözüm Tanımlaması:** Karmaşık uygulamaların yarattığı bilişsel yükün analizi ve minimalist çözüm tasarımı.
 - [x] **Hedef Kitle ve Kapsam:** Birincil personaların belirlenmesi ve MVP (Minimum Viable Product) modüllerinin kilitlenmesi.
-<a href="./docs/prd.md" style="display: inline-flex; align-items: center; gap: 10px; padding: 4px 8px; background-color: #A8C7FA; color: #101218; border-radius: 40px; text-decoration: none; font-family: sans-serif; font-weight: bold; font-size: 16px; border: none;">
-  <span>Review the PRD</span></a>
-
+[Review PRD](./docs/prd.md)
 - [x] **UML Use Case Analizi:** Sistem sınırlarının ve aktör (User, AI Services) etkileşimlerinin şematize edilmesi.
-<a href="./docs/images/use-case.svg" style="display: inline-flex; align-items: center; gap: 10px; padding: 4px 8px; background-color: #A8C7FA; color: #101218; border-radius: 40px; text-decoration: none; font-family: sans-serif; font-weight: bold; font-size: 16px; border: none;">
-  <span>Use Case</span></a>
+[Personal Life Assistant Use Case Diyagramı](./docs/images/use-case.svg)
 - [ ] **Gereksinim Çıkarımı (Requirement Elicitation):** 7 adımlı standart analiz süreci ile veri toplanması.
 - [ ] **EARS Şablonu Entegrasyonu:** Gereksinimlerin kafa karışıklığını önleyecek EARS (Easy Approach to Requirements Syntax) standartlarında yazılması.
 - [ ] **Risk Yönetimi Analizi:** Teknik (AI API limitleri) ve operasyonel (veri gizliliği) risklerin belirlenmesi.
@@ -31,7 +28,7 @@ Planlanan mimarinin çevik sprintler (kısa geliştirme döngüleri) halinde kod
 - [x] **Sürüm Kontrol Ortamı:** Git/GitHub repolarının yapılandırılması ve `.gitignore` standartlarının oturtulması.
 - [ ] **Sprint 1 (Çekirdek Modül):** Kullanıcı oturumu, görev ekleme/silme işlevlerine sahip To-Do altyapısının C++ ve Qt ile geliştirilmesi.
 - [ ] **Sprint 2 (Veri Entegrasyonu):** Gym (Antrenman/Set) ve Health (Uyku/Su/Kalori) veritabanlarının oluşturulması ve To-Do listesi ile çift yönlü bağlanması.
-- [ ] **Sprint 3 (AI Beyni):** Doğal Dil İşleme (NLP) yetenekleriyle AI (LLM) servislerinin entegrasyonu ve dinamik tavsiye/özetleme motorunun kodlanması.
+- [ ] **Sprint 3 (AI Beyni):** Doğal Dil İşleme (NLP) yetenekleriyle AI (LLM) servislerinin entegrasyonu ve dinam tavsiye/özetleme motorunun kodlanması.
 
 ### 🧪 Faz 4: Kalite Güvence ve Test (Quality Assurance & Testing)
 Yazılımın güvenilirliğinin ve sınır durumlarının (edge cases) ölçülmesi.
