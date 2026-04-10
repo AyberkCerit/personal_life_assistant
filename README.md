@@ -8,7 +8,12 @@ Bu proje, geleneksel şelale (waterfall) modeli yerine, değişen gereksinimlere
 Bu faz, projenin "Neyi, neden çözüyoruz?" sorusunu yanıtlar ve teknik iskeleti hazırlamadan önceki tüm kavramsal tasarımları içerir.
 - [x] **Problem ve Çözüm Tanımlaması:** Karmaşık uygulamaların yarattığı bilişsel yükün analizi ve minimalist çözüm tasarımı.
 - [x] **Hedef Kitle ve Kapsam:** Birincil personaların belirlenmesi ve MVP (Minimum Viable Product) modüllerinin kilitlenmesi.
+<a href="./docs/prd.md" style="display: inline-flex; align-items: center; gap: 10px; padding: 4px 8px; background-color: #A8C7FA; color: #101218; border-radius: 40px; text-decoration: none; font-family: sans-serif; font-weight: bold; font-size: 16px; border: none;">
+  <span>Review the PRD</span></a>
+
 - [x] **UML Use Case Analizi:** Sistem sınırlarının ve aktör (User, AI Services) etkileşimlerinin şematize edilmesi.
+<a href="./docs/images/use-case.svg" style="display: inline-flex; align-items: center; gap: 10px; padding: 4px 8px; background-color: #A8C7FA; color: #101218; border-radius: 40px; text-decoration: none; font-family: sans-serif; font-weight: bold; font-size: 16px; border: none;">
+  <span>Use Case</span></a>
 - [ ] **Gereksinim Çıkarımı (Requirement Elicitation):** 7 adımlı standart analiz süreci ile veri toplanması.
 - [ ] **EARS Şablonu Entegrasyonu:** Gereksinimlerin kafa karışıklığını önleyecek EARS (Easy Approach to Requirements Syntax) standartlarında yazılması.
 - [ ] **Risk Yönetimi Analizi:** Teknik (AI API limitleri) ve operasyonel (veri gizliliği) risklerin belirlenmesi.
