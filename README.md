@@ -25,8 +25,8 @@ Kodlamaya geçmeden önce, arayüz deneyimi ve veritabanı yapılarının görse
 
 ### 💻 Faz 3: Yinelenmeli Geliştirme (Iterative Development)
 Planlanan mimarinin çevik sprintler (kısa geliştirme döngüleri) halinde kodlandığı üretim aşaması.
-- [x] **Sürüm Kontrol Ortamı:** Git/GitHub repolarının yapılandırılması ve `.gitignore` standartlarının oturtulması.
-- [ ] **Sprint 1 (Çekirdek Modül):** Kullanıcı oturumu, görev ekleme/silme işlevlerine sahip To-Do altyapısının C++ ve Qt ile geliştirilmesi.
+- [x] **Sürüm Kontrol Ortamı:** Git/GitHub repolarının yapılandırılması ve `.gitignore` standartlarının oturtulması.C++ projesi içinde QSqlDatabase sınıfı kullanılarak ana personal_assistant.db SQLite dosyasının yerel bilgisayarda oluşturulması.
+- [ ] **Sprint 1 (Çekirdek Modül ve SQLite entegrasyonu):** Kullanıcı oturumu, görev ekleme/silme işlevlerine sahip To-Do altyapısının C++ ve Qt ile geliştirilmesi.
 - [ ] **Sprint 2 (Veri Entegrasyonu):** Gym (Antrenman/Set) ve Health (Uyku/Su/Kalori) veritabanlarının oluşturulması ve To-Do listesi ile çift yönlü bağlanması.
 - [ ] **Sprint 3 (AI Beyni):** Doğal Dil İşleme (NLP) yetenekleriyle AI (LLM) servislerinin entegrasyonu ve dinam tavsiye/özetleme motorunun kodlanması.
 
@@ -34,6 +34,7 @@ Planlanan mimarinin çevik sprintler (kısa geliştirme döngüleri) halinde kod
 Yazılımın güvenilirliğinin ve sınır durumlarının (edge cases) ölçülmesi.
 - [ ] **Birim Testleri (Unit Testing):** Yazılan her fonksiyonun (örn: yağ oranı hesaplama, kalori hesabı) izole edilerek test edilmesi.
 - [ ] **Entegrasyon Testleri:** Modüllerin (Örn: Gym ile Health modülü) birbiriyle tutarlı veri alışverişi yapıp yapmadığının doğrulanması.
+- [ ] **AI Entegrasyon ve Hallucination Testleri:** AI modelinin sisteme girilen To-Do ve Gym verileri dışına çıkmadan, sadece istenilen formatta yanıt verdiğinin test edilmesi.
 - [ ] **Kullanıcı Kabul Testleri (UAT):** Geliştirilen uygulamanın MVP gereksinimlerini karşılayıp karşılamadığının test edilmesi.
 
 ### 🚀 Faz 5: Yayınlama ve Bakım (Deployment & Maintenance)
