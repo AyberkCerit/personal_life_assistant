@@ -18,6 +18,7 @@
 - Sağlık/verimlilik metrikleri geri geldi: notlardan çıkarım + hızlı giriş paneli.
 - Tarih hesabı modelden alınıp Rust'a verildi; model yalnız göreli zaman üretir.
 - Model uyarlama stratejisi eklendi: fine-tuning biçim için değil anlamsal doğruluk için, MVP sonrası ve koşullu (§8.2).
+- Obsidian uyumluluğu bir tasarım ilkesi oldu (§5.1).
 - Yeni bölümler: kapsam dışı, çoklu dil, başarı kriterleri, riskler, açık kararlar, kilometre taşları.
 
 ---
@@ -46,7 +47,7 @@
 - Mobil platformlar.
 - Bulut senkronizasyonu, çok cihaz, çok kullanıcı.
 - Uygulama içi disk şifrelemesi (V2'de opsiyonel ayar).
-- Vault'un dışarıdan (başka editörlerle) düzenlenmesinin resmi desteği.
+- Obsidian ile aynı anda düzenlemede canlı eşitleme (dosya izleyici). MVP'de dış değişiklik algılanır ve üzerine yazılmaz (§5.1).
 - Notlardaki `- [ ]` onay kutularının görevlerle iki yönlü eşitlenmesi (V2).
 - Giyilebilir cihaz entegrasyonu, sesli komut.
 - Bulut LLM API'leri.
@@ -109,6 +110,14 @@ Uygulama **isteğe bağlı yükleme** (on-demand load) stratejisiyle çalışır
 
 ### 5.1. Vault ve Markdown Not Sistemi
 Obsidian benzeri, ancak uygulamanın kendi içinde inşa edilen bir not sistemi.
+
+**Tasarım ilkesi: Obsidian uyumluluğu.** PLA vault'u Obsidian'da açılabilir kalmalı, bir Obsidian vault'u da PLA'da açılabilmelidir. Böylece kullanıcı Obsidian'ı bırakmadan PLA'yı arka plan işçisi olarak kullanabilir.
+- Yalnız Obsidian'ın anladığı sözdizimi kullanılır: CommonMark + GFM, `[[not]]`, `[[not|takma ad]]`, `[[not#başlık]]`, `![[gömme]]`, `#etiket`, `#iç/içe` etiketler, YAML frontmatter (`tags`, `aliases`).
+- PLA'ya özgü veri notların gövdesine yazılmaz. Gerekirse yalnız frontmatter'da `pla_` önekli alanlar kullanılır (ör. `pla_generated: true`); vault düzeyindeki ayarlar `.pla/` klasöründedir.
+- `.obsidian/` klasörüne dokunulmaz. Dosya adlarında Obsidian'ın desteklemediği karakterler (`[ ] # ^ | \ :` vb.) kullanılmaz.
+- Sistem klasörlerinin yolları (`daily/`, `reports/`…) `.pla/config` üzerinden değiştirilebilir. Böylece mevcut bir vault'un kendi düzeni (ör. Obsidian'ın günlük not klasörü) kullanılabilir.
+- **Dış değişiklik güvenliği:** Kaydetmeden önce dosyanın değiştirilme zamanı ve hash'i kontrol edilir. Dosya dışarıda (ör. Obsidian'da) değişmişse üzerine yazılmaz, kullanıcıya çakışma gösterilir. Uygulama açılışında ve pencere odağa geldiğinde değişen dosyalar yeniden indekslenir.
+
 - Vault varsayılan olarak `Belgeler/PLA Vault` altındadır (ilk açılışta değiştirilebilir); notlar düz `.md` dosyalarıdır ve dışarıdan okunabilir.
 - SQLite, model dosyaları ve loglar vault'un **dışında**, uygulama veri dizininde (`%APPDATA%/PLA`) durur. Böylece vault yalnız kullanıcı içeriğidir ve bulut senkron klasörüne konsa bile SQLite dosyaları bozulmaz. İndeks ve vektörler yeniden üretilebilir.
 - **Klasör düzeni:** sabit sistem klasörleri + serbest kullanıcı alanı. Diskteki adlar sabit ve İngilizcedir; arayüz bunları seçili dilde gösterir (ör. `daily/` → "Günlük"), dil değişince klasörler yeniden adlandırılmaz.
@@ -133,7 +142,7 @@ Obsidian benzeri, ancak uygulamanın kendi içinde inşa edilen bir not sistemi.
 - YAML frontmatter (ör. `tags`, `created`, `updated`).
 - `[[wikilink]]` bağlantıları, geri bağlantı (backlinks) paneli, `#etiket` desteği.
 - Klasör ağacı, hızlı dosya açma, tam metin arama (SQLite FTS5).
-- Uygulama açılışında dosya özetleri (hash) karşılaştırılarak indeks tazelenir. Canlı dosya izleyici (dış düzenleme desteği) V2'dedir.
+- Uygulama açılışında dosya özetleri (hash) karşılaştırılarak indeks tazelenir. Canlı dosya izleyici V2'dedir.
 - Otomatik oluşturulan içerik (raporlar, günlük özetler) de vault'a not olarak yazılır, örn. `reports/weekly/2026-W39.md`.
 
 ### 5.2. Otonom Veri Çıkarımı (Structured Extraction)
