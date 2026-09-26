@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PLA kullanım senaryoları</title>
+  <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&amp;family=Geist:wght@400;500;600&amp;family=Geist+Mono:wght@400;500;600&amp;family=Noto+Serif:ital@0;1&amp;display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root { --color-paper: #f5f5f5; --color-ink: #2d3142; --color-muted: #4f5d75;
+             --font-sans: 'Geist', system-ui, sans-serif; --font-serif: 'Instrument Serif', 'Noto Serif', serif;
+             --font-mono: 'Geist Mono', ui-monospace, monospace; }
+    body { font-family: var(--font-sans); background: var(--color-paper); color: var(--color-ink);
+           min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 3rem 2rem; }
+    .frame { max-width: 1200px; width: 100%; }
+    .eyebrow { font-family: var(--font-mono); font-size: 0.66rem; font-weight: 500; letter-spacing: 0.18em;
+               text-transform: uppercase; color: var(--color-muted); margin-bottom: 0.5rem; }
+    h1 { font-family: var(--font-serif); font-size: clamp(1.5rem, 2.4vw + 0.75rem, 2rem); font-weight: 400;
+         letter-spacing: -0.02em; line-height: 1.15; color: var(--color-ink); margin-bottom: 1.5rem; }
+    svg { width: 100%; min-width: 760px; display: block; }
+  </style>
+</head>
+<body>
+  <div class="frame">
+    <p class="eyebrow">Kullanım senaryoları · PLA SRS</p>
+    <h1>PLA kullanım senaryoları</h1>
+    <svg viewBox="0 0 800 680" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="pla-use-case-title pla-use-case-desc">
+      <title id="pla-use-case-title">PLA kullanım senaryoları</title>
+      <desc id="pla-use-case-desc">Kullanıcının yedi kullanım senaryosu; otomatik çıkarım not yazmayı genişletir, yerel dil modeli çıkarım, soru-cevap ve bakıma katılır, zamanlayıcı günlük bakımı tetikler.</desc>
+      <defs>
+        <marker id="arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#4f5d75"/></marker>
+        <marker id="arrow-accent" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#eb6c36"/></marker>
+        <marker id="arrow-link" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#2e5aa8"/></marker>
+        <marker id="arrow-open" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polyline points="0 0, 8 3, 0 6" fill="none" stroke="#4f5d75" stroke-width="1.2"/></marker>
+      </defs>
+      <rect width="100%" height="100%" fill="#f5f5f5"/>
+<rect x="248" y="44" width="304" height="556" rx="8" fill="rgba(45,49,66,0.02)" stroke="rgba(45,49,66,0.14)" stroke-width="0.8"/><rect x="260" y="38" width="82" height="12" rx="2" fill="#f5f5f5"/><text x="301" y="47" fill="#7a8399" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.14em">PLA SİSTEMİ</text>
+<path d="M 114,284 L 136,284 Q 144,284 144,276 L 144,88 Q 144,80 152,80 L 264,80" fill="none" stroke="#4f5d75" stroke-width="1.2"/>
+<path d="M 114,296 L 152,296 Q 160,296 160,288 L 160,148 Q 160,140 168,140 L 264,140" fill="none" stroke="#4f5d75" stroke-width="1.2"/>
+<path d="M 114,308 L 168,308 Q 176,308 176,300 L 176,268 Q 176,260 184,260 L 264,260" fill="none" stroke="#4f5d75" stroke-width="1.2"/>
+<path d="M 114,332 L 168,332 Q 176,332 176,340 L 176,372 Q 176,380 184,380 L 264,380" fill="none" stroke="#4f5d75" stroke-width="1.2"/>
+<path d="M 114,344 L 152,344 Q 160,344 160,352 L 160,432 Q 160,440 168,440 L 264,440" fill="none" stroke="#4f5d75" stroke-width="1.2"/>
+<path d="M 114,356 L 136,356 Q 144,356 144,364 L 144,492 Q 144,500 152,500 L 264,500" fill="none" stroke="#4f5d75" stroke-width="1.2"/>
+<path d="M 114,320 L 264,320" fill="none" stroke="#4f5d75" stroke-width="1.2"/>
+<path d="M 400,180 L 400,160" fill="none" stroke="#4f5d75" stroke-width="1.2" stroke-dasharray="5,4" marker-end="url(#arrow)"/>
+<rect x="408" y="164" width="52" height="12" rx="2" fill="#f5f5f5"/><text x="413" y="173" fill="#7a8399" font-size="8" font-family="'Geist Mono', monospace" text-anchor="start" letter-spacing="0.06em">«extend»</text>
+<path d="M 632,364 L 592,364 Q 584,364 584,356 L 584,208 Q 584,200 576,200 L 536,200" fill="none" stroke="#4f5d75" stroke-width="1.2"/>
+<path d="M 632,384 L 584,384 Q 576,384 576,392 L 576,492 Q 576,500 568,500 L 536,500" fill="none" stroke="#4f5d75" stroke-width="1.2"/>
+<path d="M 632,400 L 608,400 Q 600,400 600,408 L 600,544 Q 600,552 592,552 L 524,552" fill="none" stroke="#4f5d75" stroke-width="1.2"/>
+<path d="M 632,568 L 524,568" fill="none" stroke="#4f5d75" stroke-width="1.2"/>
+<g stroke="#2d3142" stroke-width="1.2" fill="none" stroke-linecap="round">
+<circle cx="76" cy="274" r="10" fill="#f5f5f5"/>
+<line x1="76" y1="284" x2="76" y2="314"/>
+<line x1="58" y1="294" x2="94" y2="294"/>
+<line x1="76" y1="314" x2="64" y2="334"/>
+<line x1="76" y1="314" x2="88" y2="334"/>
+</g>
+<text x="76" y="354" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Kullanıcı</text>
+<ellipse cx="400" cy="80" rx="136" ry="20" fill="#f5f5f5"/><ellipse cx="400" cy="80" rx="136" ry="20" fill="#ffffff" stroke="#2d3142" stroke-width="1"/><text x="400" y="84" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Kurulum ve model yönetimi</text>
+<ellipse cx="400" cy="140" rx="136" ry="20" fill="#f5f5f5"/><ellipse cx="400" cy="140" rx="136" ry="20" fill="#ffffff" stroke="#2d3142" stroke-width="1"/><text x="400" y="144" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Not yaz ve düzenle</text>
+<ellipse cx="400" cy="200" rx="136" ry="20" fill="#f5f5f5"/><ellipse cx="400" cy="200" rx="136" ry="20" fill="rgba(235,108,54,0.08)" stroke="#eb6c36" stroke-width="1"/><text x="400" y="204" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Otomatik veri çıkarımı</text>
+<ellipse cx="400" cy="260" rx="136" ry="20" fill="#f5f5f5"/><ellipse cx="400" cy="260" rx="136" ry="20" fill="#ffffff" stroke="#2d3142" stroke-width="1"/><text x="400" y="264" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Notlarda ara ve gezin</text>
+<ellipse cx="400" cy="320" rx="136" ry="20" fill="#f5f5f5"/><ellipse cx="400" cy="320" rx="136" ry="20" fill="#ffffff" stroke="#2d3142" stroke-width="1"/><text x="400" y="324" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Görev ve hatırlatıcı yönet</text>
+<ellipse cx="400" cy="380" rx="136" ry="20" fill="#f5f5f5"/><ellipse cx="400" cy="380" rx="136" ry="20" fill="#ffffff" stroke="#2d3142" stroke-width="1"/><text x="400" y="384" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Metrik kaydet ve izle</text>
+<ellipse cx="400" cy="440" rx="136" ry="20" fill="#f5f5f5"/><ellipse cx="400" cy="440" rx="136" ry="20" fill="#ffffff" stroke="#2d3142" stroke-width="1"/><text x="400" y="444" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Yedekle · geri yükle · dışa aktar</text>
+<ellipse cx="400" cy="500" rx="136" ry="20" fill="#f5f5f5"/><ellipse cx="400" cy="500" rx="136" ry="20" fill="#ffffff" stroke="#2d3142" stroke-width="1"/><text x="400" y="504" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Asistana sor / komut ver</text>
+<ellipse cx="400" cy="560" rx="136" ry="20" fill="#f5f5f5"/><ellipse cx="400" cy="560" rx="136" ry="20" fill="#ffffff" stroke="#2d3142" stroke-width="1"/><text x="400" y="564" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Günlük bakım ve haftalık rapor</text>
+<rect x="632" y="352" width="128" height="56" rx="6" fill="#f5f5f5"/>
+<rect x="632" y="352" width="128" height="56" rx="6" fill="rgba(45,49,66,0.03)" stroke="rgba(45,49,66,0.30)" stroke-width="1"/>
+<text x="696" y="381.5" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Yerel dil modeli</text>
+<text x="696" y="394.5" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">llama-server</text>
+<rect x="640" y="358" width="40" height="12" rx="2" fill="transparent" stroke="rgba(45,49,66,0.30)" stroke-opacity="0.45" stroke-width="0.8"/>
+<text x="660" y="367" fill="#4f5d75" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">SİSTEM</text>
+<rect x="632" y="544" width="128" height="48" rx="6" fill="#f5f5f5"/>
+<rect x="632" y="544" width="128" height="48" rx="6" fill="rgba(45,49,66,0.03)" stroke="rgba(45,49,66,0.30)" stroke-width="1"/>
+<text x="696" y="565.5" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Zamanlayıcı</text>
+<text x="696" y="578.5" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">zaman olayı</text>
+<line x1="30" y1="626" x2="770" y2="626" stroke="rgba(45,49,66,0.10)" stroke-width="0.8"/>
+<text x="30" y="647" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" letter-spacing="0.14em">LEJANT</text>
+<g stroke="#2d3142" stroke-width="1" fill="none"><circle cx="96" cy="640" r="3"/><line x1="96" y1="643" x2="96" y2="649"/><line x1="91" y1="645" x2="101" y2="645"/></g>
+<text x="108" y="647" fill="#4f5d75" font-size="9" font-family="'Geist', sans-serif">Birincil aktör</text>
+<rect x="209" y="638" width="18" height="12" rx="2" fill="rgba(45,49,66,0.03)" stroke="rgba(45,49,66,0.30)" stroke-width="1"/>
+<text x="233" y="647" fill="#4f5d75" font-size="9" font-family="'Geist', sans-serif">İkincil aktör</text>
+<ellipse cx="341" cy="644" rx="12" ry="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+<text x="359" y="647" fill="#4f5d75" font-size="9" font-family="'Geist', sans-serif">Kullanım senaryosu</text>
+<ellipse cx="494" cy="644" rx="12" ry="6" fill="rgba(235,108,54,0.08)" stroke="#eb6c36" stroke-width="1"/>
+<text x="512" y="647" fill="#4f5d75" font-size="9" font-family="'Geist', sans-serif">Odak senaryo</text>
+<line x1="602" y1="644" x2="624" y2="644" stroke="#4f5d75" stroke-width="1.2" stroke-dasharray="5,4" marker-end="url(#arrow)"/>
+<text x="632" y="647" fill="#4f5d75" font-size="9" font-family="'Geist', sans-serif">«extend»</text>
+    </svg>
+  </div>
+</body>
+</html>

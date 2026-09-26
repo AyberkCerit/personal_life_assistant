@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PLA bileşen mimarisi</title>
+  <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&amp;family=Geist:wght@400;500;600&amp;family=Geist+Mono:wght@400;500;600&amp;family=Noto+Serif:ital@0;1&amp;display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root { --color-paper: #f5f5f5; --color-ink: #2d3142; --color-muted: #4f5d75;
+             --font-sans: 'Geist', system-ui, sans-serif; --font-serif: 'Instrument Serif', 'Noto Serif', serif;
+             --font-mono: 'Geist Mono', ui-monospace, monospace; }
+    body { font-family: var(--font-sans); background: var(--color-paper); color: var(--color-ink);
+           min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 3rem 2rem; }
+    .frame { max-width: 1200px; width: 100%; }
+    .eyebrow { font-family: var(--font-mono); font-size: 0.66rem; font-weight: 500; letter-spacing: 0.18em;
+               text-transform: uppercase; color: var(--color-muted); margin-bottom: 0.5rem; }
+    h1 { font-family: var(--font-serif); font-size: clamp(1.5rem, 2.4vw + 0.75rem, 2rem); font-weight: 400;
+         letter-spacing: -0.02em; line-height: 1.15; color: var(--color-ink); margin-bottom: 1.5rem; }
+    svg { width: 100%; min-width: 760px; display: block; }
+  </style>
+</head>
+<body>
+  <div class="frame">
+    <p class="eyebrow">Mimari diyagram · PLA SRS</p>
+    <h1>PLA bileşen mimarisi</h1>
+    <svg viewBox="0 0 800 480" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="pla-bilesenler-title pla-bilesenler-desc">
+      <title id="pla-bilesenler-title">PLA bileşen mimarisi</title>
+      <desc id="pla-bilesenler-desc">Svelte arayüzü, dört Rust çekirdek modülü, üç veri deposu ve ayrı süreç olarak çalışan llama-server arasındaki bağlantılar.</desc>
+      <defs>
+        <marker id="arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#4f5d75"/></marker>
+        <marker id="arrow-accent" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#eb6c36"/></marker>
+        <marker id="arrow-link" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#2e5aa8"/></marker>
+        <marker id="arrow-open" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polyline points="0 0, 8 3, 0 6" fill="none" stroke="#4f5d75" stroke-width="1.2"/></marker>
+      </defs>
+      <rect width="100%" height="100%" fill="#f5f5f5"/>
+<rect x="48" y="16" width="704" height="88" rx="8" fill="rgba(45,49,66,0.02)" stroke="rgba(45,49,66,0.14)" stroke-width="0.8"/><rect x="60" y="10" width="112" height="12" rx="2" fill="#f5f5f5"/><text x="116" y="19" fill="#7a8399" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.14em">SUNUM · WEBVIEW2</text>
+<rect x="40" y="132" width="720" height="104" rx="8" fill="rgba(45,49,66,0.02)" stroke="rgba(45,49,66,0.14)" stroke-width="0.8"/><rect x="52" y="126" width="94" height="12" rx="2" fill="#f5f5f5"/><text x="99" y="135" fill="#7a8399" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.14em">RUST ÇEKİRDEK</text>
+<rect x="40" y="300" width="552" height="96" rx="8" fill="rgba(45,49,66,0.02)" stroke="rgba(45,49,66,0.14)" stroke-width="0.8"/><rect x="52" y="294" width="40" height="12" rx="2" fill="#f5f5f5"/><text x="72" y="303" fill="#7a8399" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.14em">VERİ</text>
+<path d="M 376,88 L 376,108 Q 376,116 368,116 L 176,116 Q 168,116 168,124 L 168,160" fill="none" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+<path d="M 424,88 L 424,108 Q 424,116 432,116 L 484,116 Q 492,116 492,124 L 492,160" fill="none" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+<path d="M 192,188 L 240,188" fill="none" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+<path d="M 608,188 L 560,188" fill="none" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+<path d="M 124,216 L 124,324" fill="none" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+<path d="M 308,216 L 308,324" fill="none" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+<path d="M 472,216 V 268 a 8,8 0 0,0 0,16 V 324" fill="none" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+<path d="M 340,216 L 340,268 Q 340,276 348,276 L 644,276 Q 652,276 652,284 L 652,324" fill="none" stroke="#eb6c36" stroke-width="1.2" marker-end="url(#arrow-accent)"/>
+<path d="M 512,216 L 512,252 Q 512,260 520,260 L 676,260 Q 684,260 684,268 L 684,324" fill="none" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+<rect x="258.5" y="98" width="27" height="13" rx="2" fill="#f5f5f5"/><text x="272" y="108" fill="#7a8399" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">IPC</text>
+<rect x="444.5" y="98" width="27" height="13" rx="2" fill="#f5f5f5"/><text x="458" y="108" fill="#7a8399" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">IPC</text>
+<rect x="195.5" y="169" width="41" height="12" rx="2" fill="#f5f5f5"/><text x="216" y="178" fill="#7a8399" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">KUYRUK</text>
+<rect x="566" y="169" width="36" height="12" rx="2" fill="#f5f5f5"/><text x="584" y="178" fill="#7a8399" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">BAKIM</text>
+<rect x="132" y="263.0" width="63" height="13" rx="2" fill="#f5f5f5"/><text x="137" y="273.0" fill="#7a8399" font-size="9" font-family="'Geist Mono', monospace" text-anchor="start" letter-spacing="0.06em">OKU / YAZ</text>
+<rect x="262" y="284" width="39" height="13" rx="2" fill="#f5f5f5"/><text x="296" y="294" fill="#7a8399" font-size="9" font-family="'Geist Mono', monospace" text-anchor="end" letter-spacing="0.06em">KAYIT</text>
+<rect x="438" y="246" width="27" height="13" rx="2" fill="#f5f5f5"/><text x="460" y="256" fill="#7a8399" font-size="9" font-family="'Geist Mono', monospace" text-anchor="end" letter-spacing="0.06em">ARA</text>
+<rect x="353.5" y="282" width="93" height="13" rx="2" fill="#f5f5f5"/><text x="400" y="292" fill="#7a8399" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">ÇIKARIM İSTEĞİ</text>
+<rect x="584.5" y="239" width="75" height="13" rx="2" fill="#f5f5f5"/><text x="622.0" y="249" fill="#7a8399" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">SORU · ARAÇ</text>
+<rect x="280" y="40" width="240" height="48" rx="6" fill="#f5f5f5"/>
+<rect x="280" y="40" width="240" height="48" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+<text x="400" y="61.5" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Svelte arayüzü</text>
+<text x="400" y="74.5" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">CodeMirror · paneller · tepsi</text>
+<rect x="56" y="160" width="136" height="56" rx="6" fill="#f5f5f5"/>
+<rect x="56" y="160" width="136" height="56" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+<text x="124" y="185.5" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Vault ve indeks</text>
+<text x="124" y="198.5" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">dosya · FTS</text>
+<rect x="240" y="160" width="136" height="56" rx="6" fill="#f5f5f5"/>
+<rect x="240" y="160" width="136" height="56" rx="6" fill="rgba(235,108,54,0.08)" stroke="#eb6c36" stroke-width="1"/>
+<text x="308" y="185.5" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Çıkarım hattı</text>
+<text x="308" y="198.5" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">blok · doğrulama</text>
+<rect x="424" y="160" width="136" height="56" rx="6" fill="#f5f5f5"/>
+<rect x="424" y="160" width="136" height="56" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+<text x="492" y="185.5" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Soru-cevap</text>
+<text x="492" y="198.5" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">RAG · araçlar · emb.</text>
+<rect x="608" y="160" width="136" height="56" rx="6" fill="#f5f5f5"/>
+<rect x="608" y="160" width="136" height="56" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+<text x="676" y="185.5" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Zamanlayıcı</text>
+<text x="676" y="198.5" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">bakım · rapor · telafi</text>
+<rect x="56" y="324" width="136" height="48" rx="6" fill="#f5f5f5"/>
+<rect x="56" y="324" width="136" height="48" rx="6" fill="rgba(45,49,66,0.05)" stroke="#4f5d75" stroke-width="1"/>
+<text x="124" y="345.5" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Vault (.md)</text>
+<text x="124" y="358.5" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">notlar · raporlar</text>
+<rect x="240" y="324" width="136" height="48" rx="6" fill="#f5f5f5"/>
+<rect x="240" y="324" width="136" height="48" rx="6" fill="rgba(45,49,66,0.05)" stroke="#4f5d75" stroke-width="1"/>
+<text x="308" y="345.5" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">pla.db</text>
+<text x="308" y="358.5" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">kullanıcı verisi</text>
+<rect x="424" y="324" width="136" height="48" rx="6" fill="#f5f5f5"/>
+<rect x="424" y="324" width="136" height="48" rx="6" fill="rgba(45,49,66,0.05)" stroke="#4f5d75" stroke-width="1"/>
+<text x="492" y="345.5" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">cache.db</text>
+<text x="492" y="358.5" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">FTS · vektör · özet</text>
+<rect x="608" y="324" width="136" height="48" rx="6" fill="#f5f5f5"/>
+<rect x="608" y="324" width="136" height="48" rx="6" fill="rgba(45,49,66,0.03)" stroke="rgba(45,49,66,0.30)" stroke-width="1"/>
+<text x="676" y="345.5" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">llama-server</text>
+<text x="676" y="358.5" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">127.0.0.1 · alt süreç</text>
+<line x1="30" y1="426" x2="770" y2="426" stroke="rgba(45,49,66,0.10)" stroke-width="0.8"/>
+<text x="30" y="447" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" letter-spacing="0.14em">LEJANT</text>
+<rect x="90" y="438" width="18" height="12" rx="2" fill="rgba(235,108,54,0.08)" stroke="#eb6c36" stroke-width="1"/>
+<text x="114" y="447" fill="#4f5d75" font-size="9" font-family="'Geist', sans-serif">Odak modül</text>
+<rect x="194" y="438" width="18" height="12" rx="2" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+<text x="218" y="447" fill="#4f5d75" font-size="9" font-family="'Geist', sans-serif">Modül</text>
+<rect x="271" y="438" width="18" height="12" rx="2" fill="rgba(45,49,66,0.05)" stroke="#4f5d75" stroke-width="1"/>
+<text x="295" y="447" fill="#4f5d75" font-size="9" font-family="'Geist', sans-serif">Veri deposu</text>
+<rect x="380" y="438" width="18" height="12" rx="2" fill="rgba(45,49,66,0.03)" stroke="rgba(45,49,66,0.30)" stroke-width="1"/>
+<text x="404" y="447" fill="#4f5d75" font-size="9" font-family="'Geist', sans-serif">Ayrı süreç</text>
+<line x1="484" y1="444" x2="506" y2="444" stroke="#eb6c36" stroke-width="1.2" marker-end="url(#arrow-accent)"/>
+<text x="514" y="447" fill="#4f5d75" font-size="9" font-family="'Geist', sans-serif">Çıkarım isteği</text>
+    </svg>
+  </div>
+</body>
+</html>
