@@ -45,6 +45,7 @@
 - Bulut senkronizasyonu, çok cihaz, çok kullanıcı.
 - Uygulama içi disk şifrelemesi (V2'de opsiyonel ayar).
 - Vault'un dışarıdan (başka editörlerle) düzenlenmesinin resmi desteği.
+- Notlardaki `- [ ]` onay kutularının görevlerle iki yönlü eşitlenmesi (V2).
 - Giyilebilir cihaz entegrasyonu, sesli komut.
 - Bulut LLM API'leri.
 
@@ -60,7 +61,7 @@ Birincil kullanıcı geliştiricinin kendisi; ürün kişisel kullanım üzerind
 
 | Katman | Teknoloji | Görev |
 |---|---|---|
-| Sunum | Tauri 2 (HTML/CSS/JS), Markdown editörü (ör. CodeMirror 6) | Koyu tema odaklı arayüz, editör, görev/metrik panelleri, soru-cevap paneli, sistem tepsisi |
+| Sunum | Tauri 2 + Svelte 5 + TypeScript (Vite), Markdown editörü CodeMirror 6 | Koyu tema odaklı arayüz, editör, görev/metrik panelleri, soru-cevap paneli, sistem tepsisi |
 | İş mantığı | Rust | Vault ve dosya işlemleri, SQLite, zamanlayıcı, çıkarım hattı, araç (tool) yürütme, model sürecinin yaşam döngüsü |
 | Çıkarım | llama.cpp (`llama-server` alt süreci) | GGUF modelini CPU/GPU üzerinde çalıştırmak; gramer/JSON şemasıyla kısıtlı çıktı; embedding üretimi |
 | Depolama | Vault klasörü (`.md`) + SQLite + `sqlite-vec` | Notlar (asıl kaynak), görevler, metrikler, iş kayıtları, vektör indeksi |
@@ -105,12 +106,32 @@ Uygulama **isteğe bağlı yükleme** (on-demand load) stratejisiyle çalışır
 
 ### 5.1. Vault ve Markdown Not Sistemi
 Obsidian benzeri, ancak uygulamanın kendi içinde inşa edilen bir not sistemi.
-- Vault, uygulamanın veri dizinindeki bir klasördür; notlar düz `.md` dosyalarıdır ve dışarıdan okunabilir.
+- Vault varsayılan olarak `Belgeler/PLA Vault` altındadır (ilk açılışta değiştirilebilir); notlar düz `.md` dosyalarıdır ve dışarıdan okunabilir.
+- SQLite, model dosyaları ve loglar vault'un **dışında**, uygulama veri dizininde (`%APPDATA%/PLA`) durur. Böylece vault yalnız kullanıcı içeriğidir ve bulut senkron klasörüne konsa bile SQLite dosyaları bozulmaz. İndeks ve vektörler yeniden üretilebilir.
+- **Klasör düzeni:** sabit sistem klasörleri + serbest kullanıcı alanı. Diskteki adlar sabit ve İngilizcedir; arayüz bunları seçili dilde gösterir (ör. `daily/` → "Günlük"), dil değişince klasörler yeniden adlandırılmaz.
+
+  ```
+  Belgeler/PLA Vault/
+  ├── .pla/                      vault ayarları, sürüm
+  ├── inbox/                     hızlı yakalama
+  ├── daily/2026/2026-09-26.md   günlük notlar
+  ├── notes/                     serbest alan (alt klasörler kullanıcının)
+  ├── reports/weekly/2026-W39.md haftalık raporlar (otomatik)
+  ├── summaries/daily/…          gece özetleri (otomatik, yeniden üretilebilir)
+  ├── attachments/
+  └── templates/
+
+  %APPDATA%/PLA/
+  ├── pla.db                     görevler, metrikler, not indeksi, iş kayıtları, vektörler
+  ├── models/*.gguf
+  └── logs/
+  ```
+- Görevler SQLite'ta tutulur. Notlardaki `- [ ]` onay kutuları MVP'de düz metindir; görevlerle iki yönlü eşitleme V2'dedir.
 - YAML frontmatter (ör. `tags`, `created`, `updated`).
 - `[[wikilink]]` bağlantıları, geri bağlantı (backlinks) paneli, `#etiket` desteği.
 - Klasör ağacı, hızlı dosya açma, tam metin arama (SQLite FTS5).
 - Uygulama açılışında dosya özetleri (hash) karşılaştırılarak indeks tazelenir. Canlı dosya izleyici (dış düzenleme desteği) V2'dedir.
-- Otomatik oluşturulan içerik (raporlar, günlük özetler) de vault'a not olarak yazılır, örn. `Raporlar/2026-W39.md`.
+- Otomatik oluşturulan içerik (raporlar, günlük özetler) de vault'a not olarak yazılır, örn. `reports/weekly/2026-W39.md`.
 
 ### 5.2. Otonom Veri Çıkarımı (Structured Extraction)
 Kullanıcının serbest metin olarak yazdığı notlardan görev, hatırlatıcı ve metrik çıkarılır ve **otomatik olarak** eklenir.
@@ -120,7 +141,7 @@ Kullanıcının serbest metin olarak yazdığı notlardan görev, hatırlatıcı
 - Çıktı:
   ```json
   {"items": [{"type": "task", "title": "Omuz antrenmanı", "date": "2026-09-27", "time": "08:00",
-              "details": "shoulder press", "source": {"note": "Günlük/2026-09-26.md", "block": "b3f1"}}]}
+              "details": "shoulder press", "source": {"note": "daily/2026/2026-09-26.md", "block": "b3f1"}}]}
   ```
 - Sonuç: Görev, panele "AI tarafından eklendi" rozetiyle düşer.
 
@@ -237,11 +258,13 @@ Amaç: Dil modelinin bağlam sınırını aşmadan ve RAM taşmasına (OOM) yol 
 ## 12. Açık Kararlar
 
 - [ ] Ürün adı ("İşletim Sistemi" ifadesi başlıktan çıkarıldı).
-- [ ] Frontend yaklaşımı: düz JS mi, Svelte mi, React mı?
+- [x] Frontend: **Svelte 5 + TypeScript** (Vite). *(2026-09-26)*
 - [ ] llama.cpp entegrasyonu: sidecar (önerilen) mi, `llama-cpp-2` crate'i mi?
 - [ ] LLM ve embedding modeli (değerlendirme setinden sonra).
 - [ ] MVP'de GPU hızlandırması olacak mı?
-- [ ] Vault klasör yapısı ve varsayılan şablonlar (Günlük, Raporlar, Özetler…).
+- [x] Vault konumu ve klasör yapısı: `Belgeler/PLA Vault`, sistem klasörleri + serbest alan, diskte İngilizce adlar (§5.1). *(2026-09-26)*
+- [x] `- [ ]` onay kutuları: MVP'de görev sayılmaz, iki yönlü eşitleme V2. *(2026-09-26)*
+- [ ] Varsayılan şablonların içeriği (günlük not, haftalık rapor).
 - [ ] Metrik setinin kesinleşmesi.
 - [ ] Soru-cevap geçmişi saklanacak mı, hafızaya (RAG) dahil edilecek mi?
 - [ ] Bağlam penceresi boyutu ve token bütçesi.
