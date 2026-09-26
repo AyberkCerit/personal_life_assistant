@@ -1,41 +1,59 @@
-# Prerequisites
-*.d
+# Rust / Cargo
+target/
+**/*.rs.bk
 
-# Compiled Object files
-*.slo
-*.lo
-*.o
-*.obj
+# Tauri
+src-tauri/target/
+src-tauri/gen/schemas/
+src-tauri/binaries/
 
-# Precompiled Headers
-*.gch
-*.pch
+# Node / frontend
+node_modules/
+dist/
+build/
+.vite/
+.svelte-kit/
+npm-debug.log*
+yarn-error.log*
+pnpm-debug.log*
 
-# Linker files
-*.ilk
+# Models and runtime data (downloaded on first run, never committed)
+*.gguf
+*.safetensors
+models/
 
-# Debugger Files
-*.pdb
+# Local databases and test vaults
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+data/
+vault-dev/
 
-# Compiled Dynamic libraries
-*.so
-*.dylib
-*.dll
+# Python (R&D / evaluation scripts)
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.ipynb_checkpoints/
 
-# Fortran module files
-*.mod
-*.smod
+# Env and secrets
+.env
+.env.*
+!.env.example
 
-# Compiled Static libraries
-*.lai
-*.la
-*.a
-*.lib
+# Editors / OS
+.vscode/*
+!.vscode/extensions.json
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+desktop.ini
 
-# Executables
-*.exe
-*.out
-*.app
+# Office lock files
+~$*
 
-# debug information files
-*.dwo
+# code-review-graph
+.code-review-graph/
