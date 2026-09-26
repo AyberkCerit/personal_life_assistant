@@ -16,6 +16,8 @@
 - SQLite-vss / Chroma yerine `sqlite-vec`; embedding modeli bütçeye eklendi.
 - Terim düzeltmesi: "Gizli Enjeksiyon / Prompt Injection" → **RAG ile bağlam ekleme** (prompt injection bir saldırı türüdür, bkz. §9).
 - Sağlık/verimlilik metrikleri geri geldi: notlardan çıkarım + hızlı giriş paneli.
+- Tarih hesabı modelden alınıp Rust'a verildi; model yalnız göreli zaman üretir.
+- Model uyarlama stratejisi eklendi: fine-tuning biçim için değil anlamsal doğruluk için, MVP sonrası ve koşullu (§8.2).
 - Yeni bölümler: kapsam dışı, çoklu dil, başarı kriterleri, riskler, açık kararlar, kilometre taşları.
 
 ---
@@ -48,6 +50,7 @@
 - Notlardaki `- [ ]` onay kutularının görevlerle iki yönlü eşitlenmesi (V2).
 - Giyilebilir cihaz entegrasyonu, sesli komut.
 - Bulut LLM API'leri.
+- Modelin fine-tuning ile uyarlanması (MVP sonrası, §8.2).
 
 ---
 
@@ -138,17 +141,23 @@ Kullanıcının serbest metin olarak yazdığı notlardan görev, hatırlatıcı
 
 **Örnek**
 - Metin: *"Yarın sabah 8'de kalkıp omuz çalışacağım, shoulder press hedefi."*
-- Çıktı:
+- Model çıktısı (göreli zaman, mutlak tarih yok):
   ```json
-  {"items": [{"type": "task", "title": "Omuz antrenmanı", "date": "2026-09-27", "time": "08:00",
-              "details": "shoulder press", "source": {"note": "daily/2026/2026-09-26.md", "block": "b3f1"}}]}
+  {"items": [{"type": "task", "title": "Omuz antrenmanı", "details": "shoulder press",
+              "when": {"day_offset": 1, "time": "08:00"}}]}
+  ```
+- Rust'ın kaydettiği öğe (mutlak tarih + kaynak eklenmiş):
+  ```json
+  {"type": "task", "title": "Omuz antrenmanı", "details": "shoulder press", "date": "2026-09-27", "time": "08:00",
+   "source": {"note": "daily/2026/2026-09-26.md", "block": "b3f1"}, "origin": "extracted"}
   ```
 - Sonuç: Görev, panele "AI tarafından eklendi" rozetiyle düşer.
 
 **Kurallar**
 - **Tetikleme:** Not kaydedildiğinde (veya yazma 2 sn durduğunda) yalnız **değişen bloklar** işlenir.
-- **Tarih bağlamı:** Modele bugünün tarihi, günü ve saat dilimi verilir. Göreli ifadeler ("yarın", "cuma") model çıktısında ISO tarihine dönüşür; Rust tarafı tarihi doğrular.
-- **Kısıtlı çıktı:** JSON şeması / GBNF grameri kullanılır. Şemaya uymayan veya doğrulamayı geçmeyen çıktı eklenmez, "İnceleme" kutusuna düşer.
+- **Tarih hesabı modelde değil, Rust'ta:** Küçük modeller tarih aritmetiğinde güvenilmezdir. Model zamanı yalnız göreli ve yapılandırılmış biçimde verir (ör. `{"day_offset": 1}`, `{"weekday": "friday", "which": "next"}`, `{"date": "2026-10-03"}` yalnız metinde açık tarih varsa). Mutlak tarihi bugünün tarihi ve saat dilimiyle Rust hesaplar ve doğrular. Modele bağlam olarak bugünün tarihi ve günü yine verilir.
+- **Kısıtlı çıktı:** JSON şeması / GBNF grameri kullanılır; böylece sözdizimsel olarak geçersiz JSON üretilemez. Rust'ın anlamsal doğrulamasını (zorunlu alanlar, geçerli saat/tarih, metrik birimleri) geçemeyen çıktı eklenmez, "İnceleme" kutusuna düşer.
+- **Gerekirse iki adım:** Doğruluk yetersiz kalırsa çıkarım ikiye bölünür: önce sınıflandırma (görev / hatırlatıcı / metrik / hiçbiri), sonra yalnız ilgili türün alanlarının çıkarılması.
 - **Tür ayrımı:** Model gelecekteki niyetleri (`task` / `reminder`) geçmiş kayıtlardan (`metric`, örn. "dün 7 saat uyudum") ayırır.
 - **Tekrar önleme:** Her öğe kaynak bloğun hash'iyle ilişkilendirilir. Aynı blok yeniden işlendiğinde yeni öğe oluşmaz, var olan güncellenir; blok silinirse öğe "kaynağı silindi" olarak işaretlenir (silinmez).
 - **Geri alma:** Her otomatik ekleme bir bildirim ve "Geri al" eylemiyle gösterilir; görevden kaynak nota tek tıkla gidilebilir.
@@ -199,8 +208,8 @@ Amaç: Dil modelinin bağlam sınırını aşmadan ve RAM taşmasına (OOM) yol 
 - **Arayüz:** i18n altyapısı baştan kurulur; MVP'de Türkçe ve İngilizce.
 - **İçerik:** Notlar herhangi bir dilde olabilir. LLM ve embedding modeli çok dilli seçilir.
 - **Model seçim ölçütü:** Türkçe + İngilizce en az 50 örneklik bir değerlendirme seti hazırlanır. Aday modeller (1.5–4B aralığı, Q4 kuantizasyon) şu ölçütlerle karşılaştırılır:
-  - JSON geçerlilik oranı
-  - Alan doğruluğu (tarih, saat, tür)
+  - Rust doğrulamasını geçme oranı (sözdizimi gramerle zaten garanti)
+  - Alan doğruluğu (tür, başlık, göreli zaman, metrik değeri)
   - Araç çağırma doğruluğu
   - Hız
   - RAM
@@ -208,12 +217,30 @@ Amaç: Dil modelinin bağlam sınırını aşmadan ve RAM taşmasına (OOM) yol 
 
 ---
 
-## 8. Model Dağıtımı
+## 8. Model Dağıtımı ve Uyarlama
 
+### 8.1. Dağıtım
 - Kurulum paketi model içermez. **İlk açılışta** kullanıcıya önerilen model gösterilir ve açık onayıyla indirilir.
 - İndirme sonrasında SHA-256 doğrulaması yapılır; indirme yarıda kalırsa devam ettirilebilir.
 - İleri kullanıcı, diskteki kendi GGUF dosyasını seçebilir.
 - İndirme tamamlandıktan sonra uygulama ağ erişimi olmadan tam işlevseldir.
+
+### 8.2. Model Uyarlama Stratejisi
+İlke: JSON'un **biçimini** gramer garanti eder; fine-tuning biçim için değil, küçük modelin **anlamsal doğruluğunu** (tür ayrımı, alanlar, Türkçe ifadeler) artırmak ve gerekirse daha küçük bir modelle yetinmek için yapılır. Fine-tuning **MVP kapsamı dışındadır.**
+
+| Aşama | Ne yapılır | Ne zaman |
+|---|---|---|
+| 1. Taban çizgisi | Kısıtlı gramer + sistem talimatı + 3–5 örnek (few-shot) + tarih hesabının Rust'ta yapılması; 2–3 aday model değerlendirme setinde ölçülür (§7) | MVP (M1–M2) |
+| 2. Karar noktası | §10'daki çıkarım hedefleri tutuyorsa fine-tuning yapılmaz. Tutmuyorsa önce daha büyük model (RAM bütçesi içinde) ve iki adımlı çıkarım denenir. | MVP sonu |
+| 3. Fine-tuning | LoRA/QLoRA ile yalnız çıkarım görevine özel uyarlama | MVP sonrası (M6) |
+
+**Aşama 3 ayrıntıları (MVP sonrası)**
+- **Veri:** 1–3 bin etiketli TR + EN örnek. Büyük bir modelle sentetik not + doğru JSON üretimi (distillation), bir kısmının elle kontrolü ve geliştiricinin kendi notlarından örnekler. Değerlendirme seti eğitim verisinden tamamen ayrı tutulur.
+- **Eğitim:** Python Ar-Ge ortamında (uygulamayla dağıtılmaz), Unsloth veya Hugging Face TRL ile QLoRA. Referans donanım: RTX 4050 Laptop (6 GB VRAM), 4B'ye kadar modeller.
+- **Dağıtım biçimi:** (a) adaptör ana modelle birleştirilip kuantize edilir, tek GGUF dosyası olarak dağıtılır; ya da (b) adaptör GGUF'a çevrilir ve `llama-server`'a `--lora` ile yalnız çıkarım isteklerinde takılır. Seçim, soru-cevap ve özet kalitesinde gerileme olup olmadığına göre yapılır.
+- **Ön koşul:** Çıkarım JSON şeması donmuş olmalıdır; şema değişikliği yeniden eğitim gerektirir.
+- **Başarı ölçütü:** Aynı değerlendirme setinde taban çizgisine göre alan doğruluğunda ölçülebilir artış, ya da daha küçük bir modelle aynı doğruluk (daha az RAM, daha hızlı yanıt). Soru-cevap ve özet test setlerinde gerileme olmamalı.
+- **Bakım maliyeti:** Ana model değiştirildiğinde adaptör taşınamaz; eğitim yeniden yapılır.
 
 ---
 
@@ -233,7 +260,7 @@ Amaç: Dil modelinin bağlam sınırını aşmadan ve RAM taşmasına (OOM) yol 
 
 ## 10. Başarı Kriterleri (MVP kabul ölçütleri)
 
-1. **Çıkarım kalitesi:** Değerlendirme setinde JSON geçerliliği ≥ %95; tarih, saat ve tür alanlarında doğruluk ≥ %85 (TR ve EN ayrı ayrı).
+1. **Çıkarım kalitesi:** Değerlendirme setinde sözdizimsel JSON geçerliliği %100 (gramer), Rust doğrulamasını geçme ≥ %95; tür, göreli zaman ve metrik alanlarında doğruluk ≥ %85 (TR ve EN ayrı ayrı).
 2. **Kaynak:** Boşta ve çıkarım sırasında §4'teki RAM hedefleri ölçümle sağlanır.
 3. **Veri güvenliği:** Hiçbir otomatik işlem ham veri silmez; buna ait bir test kapsamı vardır.
 4. **Güvenilirlik:** Kapalı geçen bir Pazar'dan sonraki ilk açılışta haftalık rapor telafi edilerek üretilir.
@@ -246,7 +273,7 @@ Amaç: Dil modelinin bağlam sınırını aşmadan ve RAM taşmasına (OOM) yol 
 
 | Risk | Etki | Önlem |
 |---|---|---|
-| Küçük modelin Türkçe ve analiz kalitesi düşük | Yanlış çıkarım, yüzeysel rapor | Değerlendirme seti ile model seçimi; kısıtlı gramer; model değiştirilebilir mimari |
+| Küçük modelin Türkçe ve analiz kalitesi düşük | Yanlış çıkarım, yüzeysel rapor | Değerlendirme seti ile model seçimi; kısıtlı gramer; tarih hesabı Rust'ta; model değiştirilebilir mimari; MVP sonrası fine-tuning (§8.2) |
 | Küçük modelde araç çağırma güvenilir değil | Soru-cevap komutları hatalı | Gramerle kısıtlı araç çağrısı, sınırlı araç seti, geri alma |
 | Otomatik eklemenin gürültü üretmesi | Görev panelinde çöp öğeler | Tür ayrımı, İnceleme kutusu, geri alma; gerekirse ayardan onay moduna geçiş (V2) |
 | WebView2 RAM tüketimi | Boşta hedefin aşılması | Erken ölçüm; hedefin gerçek değere göre güncellenmesi |
@@ -268,6 +295,7 @@ Amaç: Dil modelinin bağlam sınırını aşmadan ve RAM taşmasına (OOM) yol 
 - [ ] Metrik setinin kesinleşmesi.
 - [ ] Soru-cevap geçmişi saklanacak mı, hafızaya (RAG) dahil edilecek mi?
 - [ ] Bağlam penceresi boyutu ve token bütçesi.
+- [x] Fine-tuning: MVP sonrası, yalnız taban ölçümü gerekli gösterirse; biçim değil anlamsal doğruluk için (§8.2). *(2026-09-26)*
 
 ---
 
@@ -281,3 +309,4 @@ Amaç: Dil modelinin bağlam sınırını aşmadan ve RAM taşmasına (OOM) yol 
 | M3 | Embedding + `sqlite-vec`; soru-cevap paneli ve araç çağırma |
 | M4 | Zamanlayıcı, tepsi modu, telafi; gece bakımı ve haftalık rapor |
 | M5 | i18n (TR/EN), performans ölçümleri, kabul testleri |
+| M6 *(MVP sonrası, koşullu)* | Çıkarım için fine-tuning: veri seti, QLoRA eğitimi, taban çizgisiyle karşılaştırma (§8.2) |
