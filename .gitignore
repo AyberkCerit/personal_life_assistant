@@ -11,6 +11,7 @@ src-tauri/binaries/
 node_modules/
 dist/
 build/
+!docs/srs/build/
 .vite/
 .svelte-kit/
 npm-debug.log*
