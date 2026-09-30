@@ -10,7 +10,6 @@ Bu faz, projenin "Neyi, neden çözüyoruz?" sorusunu yanıtlar ve teknik iskele
 - [x] **Hedef Kitle ve Kapsam:** Birincil personaların belirlenmesi ve MVP (Minimum Viable Product) modüllerinin kilitlenmesi.
 [Review PRD](./docs/PRD.md)
 - [x] **UML Use Case Analizi:** Sistem sınırlarının ve aktör (User, AI Services) etkileşimlerinin şematize edilmesi.
-[Personal Life Assistant Use Case Diyagramı](./docs/images/use-case.svg)
 - [ ] **Gereksinim Çıkarımı (Requirement Elicitation):** 7 adımlı standart analiz süreci ile veri toplanması.
 - [ ] **EARS Şablonu Entegrasyonu:** Gereksinimlerin kafa karışıklığını önleyecek EARS (Easy Approach to Requirements Syntax) standartlarında yazılması.
 - [ ] **Risk Yönetimi Analizi:** Teknik (AI API limitleri) ve operasyonel (veri gizliliği) risklerin belirlenmesi.
