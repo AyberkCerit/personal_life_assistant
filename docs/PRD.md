@@ -4,11 +4,18 @@
 |---|---|
 | **Proje** | PLA — Edge AI Destekli Yerel Kişisel Asistan *(çalışma adı)* |
 | **Yazar** | Ayberk Cerit |
-| **Sürüm / Durum** | v0.3 — Taslak |
-| **Tarih** | 2026-09-26 |
+| **Sürüm / Durum** | v0.4 — Taslak |
+| **Tarih** | 2026-10-01 |
 | **Platform (MVP)** | Masaüstü, Windows öncelikli (Tauri sayesinde macOS/Linux sonradan) |
 
 ### Sürüm geçmişi
+
+**v0.4 (F1 model denemesi sonrası)**
+- Dil modeli seçildi: **Gemma 4 E2B-it, Q3_K_M** (Apache-2.0). F1'de TR %96 / EN %95 alan doğruluğu, p95 4,9 sn (4 iş parçacığı, GPU kapalı), çalışma belleği 1,85 GB (§8.3).
+- Yedek plan değişti: modeller yetersiz kalırsa **fine-tuning yerine kendi eğittiğimiz model** entegre edilir (§8.2). F1 sonucu nedeniyle şimdilik gerekmiyor.
+- Yeni tarih kuralları: görevde yalnız saat varsa gün = referans gün; gün adı verilip `which` yoksa `this` (§5.2).
+- Çıkarım şemasında alan sırası kuralı: gramer özellikleri tanım sırasıyla ürettirdiği için `value` antrenman alanlarından sonra gelir (§5.2).
+- Model sunucusu düşük bellek ayarlarıyla çalışır: çıkarımda bağlam 2048, flash attention, 8 bit KV önbelleği (§4, §8.3).
 
 **v0.3 (gözden geçirme sonrası)**
 - Veritabanı ikiye bölündü: `pla.db` (kullanıcı verisi, vault'a yedeklenir) ve `cache.db` (yeniden üretilebilir) (§3, §5.1).
@@ -128,7 +135,7 @@ Uygulama **isteğe bağlı yükleme** (on-demand load) stratejisiyle çalışır
 | Metrik | Hedef | Not |
 |---|---|---|
 | Boşta RAM | ≤ 150 MB | Tauri + Rust + WebView2 süreçlerinin toplamı; ölçümle doğrulanacak. |
-| Aktif çıkarım RAM | LLM ≤ 2 GB; embedding modeli ≤ 300 MB | Soru-cevap sırasında ikisi birlikte yüklüdür: toplam ≤ 2.3 GB. |
+| Aktif çıkarım RAM | LLM ≤ 2 GB; embedding modeli ≤ 300 MB | Soru-cevap sırasında ikisi birlikte yüklüdür: toplam ≤ 2.3 GB. Ölçüt: süreç çalışma belleği (working set) tepe değeri. F1: Gemma 4 E2B Q3_K_M 1,85 GB (özel 0,77 GB), bağlam 2048. |
 | LLM soğuk yükleme | ≤ 5 sn (SSD) | |
 | Çıkarım (bir not, toplu) | ≤ 10 sn (yalnız CPU) | Arka planda; kullanıcıyı bloklamaz. |
 | Soru-cevap ilk token | ≤ 5 sn soğuk, ≤ 2 sn sıcak | Soru embedding'i süreç içinde, yüklemesiz. |
@@ -205,11 +212,13 @@ Kullanıcının serbest metin olarak yazdığı notlardan görev, hatırlatıcı
 - Aynı dakika içinde birden fazla not değişirse tek bir model yüklemesiyle sırayla işlenir.
 
 **Zaman ve tarih**
-- **Tarih hesabı modelde değil, Rust'ta.** Model zamanı yalnız göreli ve yapılandırılmış biçimde verir: `{"day_offset": 1}`, `{"day_offset": -1}` (geçmiş, metrikler için), `{"weekday": "friday", "which": "next"}`, `{"date": "2026-10-03"}` (yalnız metinde açık tarih varsa).
+- **Tarih hesabı modelde değil, Rust'ta.** Model zamanı yalnız göreli ve yapılandırılmış biçimde verir: `{"day_offset": 1}`, `{"day_offset": -1}` (geçmiş, metrikler için), `{"weekday": "fri", "which": "next"}`, `{"date": "2026-10-03"}` (yalnız metinde açık tarih varsa).
 - **Referans tarih "bugün" değildir:** Günlük notlarda notun tarihi, diğer notlarda bloğun ilk yazıldığı an (`pla.db`'de tutulur) referans alınır. Böylece dünkü nota bugün yazılan "yarın" ya da ertesi gün telafi olarak işlenen bir blok doğru güne düşer. Modele bağlam olarak bu referans tarih ve haftanın günü verilir.
+- **Varsayılanlar (Rust):** Görevde yalnız saat varsa ("akşam 8'de") gün = referans gün. Gün adı verilip `which` boşsa `this` kabul edilir. Metrikte gün belirtilmemişse gün = referans gün.
 
 **Çıktı güvenceleri**
 - **Kısıtlı çıktı:** JSON şeması / GBNF grameri kullanılır; sözdizimsel olarak geçersiz JSON üretilemez. Rust'ın anlamsal doğrulamasını (zorunlu alanlar, geçerli saat/tarih, metrik birimleri) geçemeyen çıktı eklenmez, **İnceleme** kutusuna düşer (§5.3).
+- **Şema alan sırası:** llama.cpp grameri özellikleri şemadaki tanım sırasıyla ürettirir; atlanan isteğe bağlı alana geri dönülemez. Bu yüzden metrikte sıra `kind, exercise, sets, reps, value, unit` olmalıdır (F1'de `value` önde iken antrenman ağırlığı kayboluyordu).
 - **Tür ayrımı:** Model gelecekteki niyetleri (`task` / `reminder`) geçmiş kayıtlardan (`metric`, örn. "dün 7 saat uyudum") ayırır.
 - **Gerekirse iki adım:** Doğruluk yetersiz kalırsa çıkarım ikiye bölünür: önce sınıflandırma (görev / hatırlatıcı / metrik / hiçbiri), sonra yalnız ilgili türün alanları.
 
@@ -307,7 +316,7 @@ Amaç: Dil modelinin bağlam sınırını aşmadan ve RAM taşmasına (OOM) yol 
   | Soru-cevap | 30 soru | Doğruluk, kaynak gösterme, bilgi yokken "bulamadım" deme |
   | Araç çağırma | 30 senaryo | Doğru aracın doğru parametrelerle seçilmesi |
 
-- **Model seçimi (M1):** Aday modeller (1.5–4B aralığı, Q4 kuantizasyon) arayüz olmadan basit bir test düzeneğiyle üç sette birden ölçülür; hız ve RAM de kaydedilir. Araç çağırma arayüzü M4'te gelse de model M1'de bu yetenek açısından da seçilir.
+- **Model seçimi (M1, F1'de yapıldı — §8.3):** Aday modeller (1.5–4B aralığı, Q3–Q4 kuantizasyon) arayüz olmadan basit bir test düzeneğiyle üç sette birden ölçülür; hız ve RAM de kaydedilir. Araç çağırma arayüzü M4'te gelse de model M1'de bu yetenek açısından da seçilir.
 - Tarih ve sayı biçimleri arayüz diline göre gösterilir; veri her zaman ISO biçiminde saklanır.
 
 ---
@@ -321,13 +330,15 @@ Amaç: Dil modelinin bağlam sınırını aşmadan ve RAM taşmasına (OOM) yol 
 - İndirme tamamlandıktan sonra uygulama ağ erişimi olmadan tam işlevseldir.
 
 ### 8.2. Model Uyarlama Stratejisi
-İlke: JSON'un **biçimini** gramer garanti eder; fine-tuning biçim için değil, küçük modelin **anlamsal doğruluğunu** (tür ayrımı, alanlar, Türkçe ifadeler) artırmak ve gerekirse daha küçük bir modelle yetinmek için yapılır. Fine-tuning **MVP kapsamı dışındadır.**
+İlke: JSON'un **biçimini** gramer garanti eder; uyarlama biçim için değil, **anlamsal doğruluğu** (tür ayrımı, alanlar, Türkçe ifadeler) artırmak ve gerekirse daha küçük bir modelle yetinmek için yapılır. Uyarlama **MVP kapsamı dışındadır.**
+
+**Karar (2026-09-30):** Hazır modeller yetersiz kalırsa **fine-tuning yerine kendi eğittiğimiz model** entegre edilir. Gerçekçi biçimi, yalnız çıkarım görevi için küçük bir modelin, seçilen büyük modelin (öğretmen) doğru çıktılarıyla eğitilmesidir (damıtma); tarih ve sayı çözümü Rust'taki kurallarda kalır. Soru-cevap ve özet için genel amaçlı hazır model kullanılmaya devam eder; sıfırdan genel bir dil modeli eğitmek kapsam dışıdır. F1 sonucu (§8.3) nedeniyle bu adım şimdilik gerekmiyor. Aşağıdaki fine-tuning ayrıntıları referans olarak korunmuştur.
 
 | Aşama | Ne yapılır | Ne zaman |
 |---|---|---|
 | 1. Taban çizgisi | Kısıtlı gramer + sistem talimatı + 3–5 örnek (few-shot) + tarih hesabının Rust'ta yapılması; 2–3 aday model değerlendirme setlerinde ölçülür (§7) | MVP (M1–M2) |
 | 2. Karar noktası | §10'daki çıkarım hedefleri tutuyorsa fine-tuning yapılmaz. Tutmuyorsa önce daha büyük model (RAM bütçesi içinde) ve iki adımlı çıkarım denenir. | MVP sonu |
-| 3. Fine-tuning | LoRA/QLoRA ile yalnız çıkarım görevine özel uyarlama | MVP sonrası (M7) |
+| 3. Kendi model (yedek) | Çıkarıma özel küçük modelin damıtmayla eğitilmesi (ya da LoRA/QLoRA ile uyarlama) | MVP sonrası (M7), yalnız gerekirse |
 
 **Aşama 3 ayrıntıları (MVP sonrası)**
 - **Veri:** 1–3 bin etiketli TR + EN örnek. Büyük bir modelle sentetik not + doğru JSON üretimi (distillation), bir kısmının elle kontrolü ve geliştiricinin kendi notlarından örnekler. Değerlendirme seti eğitim verisinden tamamen ayrı tutulur.
@@ -336,6 +347,21 @@ Amaç: Dil modelinin bağlam sınırını aşmadan ve RAM taşmasına (OOM) yol 
 - **Ön koşul:** Çıkarım JSON şeması donmuş olmalıdır; şema değişikliği yeniden eğitim gerektirir.
 - **Başarı ölçütü:** Aynı değerlendirme setinde taban çizgisine göre alan doğruluğunda ölçülebilir artış, ya da daha küçük bir modelle aynı doğruluk (daha az RAM, daha hızlı yanıt). Soru-cevap ve araç çağırma setlerinde gerileme olmamalı.
 - **Bakım maliyeti:** Ana model değiştirildiğinde adaptör taşınamaz; eğitim yeniden yapılır.
+
+### 8.3. F1 Model Denemesi Sonuçları (2026-09-30)
+Ayrıntı: `research/f1-model-eval/RESULTS.md`. 200 notluk TR/EN çıkarım seti, `llama-server` + JSON şeması, 4 iş parçacığı, GPU kapalı.
+
+| Model | TR | EN | Çalışma belleği | p95 |
+|---|---|---|---|---|
+| Qwen2.5-1.5B (Q4_K_M) | %46 | %61 | 1,91 GB | 2,7 sn |
+| Qwen3-1.7B (Q4_K_M) | %64 | %76 | 2,42 GB | 3,6 sn |
+| Qwen3-4B-2507 (Q4_K_M) | %84 | %86 | 5,04 GB | 8,4 sn |
+| Gemma 4 E2B (Q4_0 QAT) | %97 | %95 | 2,75 GB | 4,1 sn |
+| **Gemma 4 E2B (Q3_K_M) — seçilen** | **%96** | **%95** | **1,85 GB** | **4,9 sn** |
+
+- **Seçim:** Gemma 4 E2B-it Q3_K_M (Apache-2.0, ~2,5 GB dosya). Yedek aday: Qwen3-4B-Instruct-2507.
+- **Sunucu ayarları:** çıkarımda bağlam 2048 (en uzun istem ~1 500 token), `-fa on -ctk q8_0 -ctv q8_0 -ub 256 -b 512`.
+- **Uyarılar:** (1) Talimat aynı setteki hatalara bakılarak düzeltildi; ayrık bir test setiyle doğrulanmalı. (2) Ölçüm güçlü bir CPU'nun 4 iş parçacığıyla yapıldı; gerçek minimum donanımda gecikme 1,5–2 kat olabilir. (3) Soru-cevap için 8k bağlamdaki bellek ve araç çağırma doğruluğu henüz ölçülmedi.
 
 ---
 
@@ -372,7 +398,7 @@ Amaç: Dil modelinin bağlam sınırını aşmadan ve RAM taşmasına (OOM) yol 
 
 | Risk | Etki | Önlem |
 |---|---|---|
-| Küçük modelin Türkçe ve analiz kalitesi düşük | Yanlış çıkarım, yüzeysel rapor | Değerlendirme setleriyle model seçimi; kısıtlı gramer; hesap ve tarih Rust'ta; model değiştirilebilir mimari; MVP sonrası fine-tuning (§8.2) |
+| Küçük modelin Türkçe ve analiz kalitesi düşük | Yanlış çıkarım, yüzeysel rapor | Değerlendirme setleriyle model seçimi; kısıtlı gramer; hesap ve tarih Rust'ta; model değiştirilebilir mimari; F1'de Gemma 4 E2B ile %95+ doğrulandı (§8.3); yedek plan kendi eğittiğimiz model (§8.2) |
 | Küçük modelde araç çağırma güvenilir değil | Soru-cevap komutları hatalı | M1'de araç çağırmanın ölçülmesi; gramerle kısıtlı araç çağrısı, sınırlı araç seti, geri alma |
 | Otomatik eklemenin gürültü üretmesi | Görev panelinde çöp öğeler | Tür ayrımı, İnceleme kutusu, geri alma, reddedilenlerin hatırlanması; gerekirse ayardan onay moduna geçiş (V2) |
 | Bulanık blok eşleştirmenin hatalı eşleşmesi | Yinelenen ya da yanlış güncellenen öğe | Ayarlanabilir benzerlik eşiği, eşleştirme testleri, "kullanıcı kazanır" kuralı |
@@ -388,7 +414,9 @@ Amaç: Dil modelinin bağlam sınırını aşmadan ve RAM taşmasına (OOM) yol 
 - [ ] Ürün adı ("İşletim Sistemi" ifadesi başlıktan çıkarıldı).
 - [x] Frontend: **Svelte 5 + TypeScript** (Vite). *(2026-09-26)*
 - [ ] llama.cpp entegrasyonu: sidecar (önerilen) mi, `llama-cpp-2` crate'i mi?
-- [ ] LLM ve embedding modeli (değerlendirme setlerinden sonra); embedding modeli kurulumla mı gelsin?
+- [x] Dil modeli: **Gemma 4 E2B-it Q3_K_M** (F1, §8.3). *(2026-09-30)*
+- [ ] Embedding modeli ve kurulumla gelip gelmeyeceği.
+- [ ] Ayrık test setiyle doğrulama; soru-cevap (8k bağlam) bellek ölçümü ve araç çağırma değerlendirmesi.
 - [ ] MVP'de GPU hızlandırması olacak mı?
 - [x] Vault konumu ve klasör yapısı: `Belgeler/PLA Vault`, sistem klasörleri + serbest alan, diskte İngilizce adlar (§5.1). *(2026-09-26)*
 - [x] `- [ ]` onay kutuları: MVP'de görev sayılmaz, iki yönlü eşitleme V2. *(2026-09-26)*
@@ -399,7 +427,7 @@ Amaç: Dil modelinin bağlam sınırını aşmadan ve RAM taşmasına (OOM) yol 
 - [ ] Metrik setinin, birimlerin ve birleştirme kurallarının kesinleşmesi (§5.4 taslak).
 - [ ] Bulanık blok eşleştirme algoritması ve benzerlik eşiği.
 - [ ] Soru-cevap geçmişi saklanacak mı, hafızaya (RAG) dahil edilecek mi?
-- [x] Fine-tuning: MVP sonrası, yalnız taban ölçümü gerekli gösterirse; biçim değil anlamsal doğruluk için (§8.2). *(2026-09-26)*
+- [x] Uyarlama: MVP sonrası ve koşullu; yedek plan fine-tuning değil **kendi eğittiğimiz model** (§8.2). *(2026-09-30)*
 
 ---
 
@@ -410,10 +438,10 @@ Amaç: Dil modelinin bağlam sınırını aşmadan ve RAM taşmasına (OOM) yol 
 | # | Çıktı |
 |---|---|
 | M0 | İskelet: Tauri + Svelte + Rust; `pla.db` / `cache.db` şemaları ve migrasyon altyapısı; **i18n altyapısı**; vault (klasör ağacı, temel CodeMirror editörü, kaydetme + dış değişiklik kontrolü) |
-| M1 | Model indirme; `llama-server` yaşam döngüsü; süreç içi embedding; üç değerlendirme seti ve test düzeneğiyle model seçimi |
+| M1 | Model indirme; `llama-server` yaşam döngüsü; süreç içi embedding; soru-cevap ve araç çağırma setleri *(çıkarım seti ve model seçimi F1'de yapıldı, §8.3)* |
 | M2 | Otonom çıkarım (blok eşleştirme, referans tarih, kullanıcı kazanır, İnceleme kutusu); görev paneli; hatırlatıcı bildirimleri ve temel tepsi modu; metrikler ve hızlı giriş |
 | M3 | Not sistemi derinleşir: wikilink, geri bağlantılar, etiketler, FTS arama |
 | M4 | RAG (`sqlite-vec`, hibrit arama, bağlam bütçesi); soru-cevap paneli ve araç çağırma |
 | M5 | Günlük bakım (özetler, indeks, `pla.db` yedeği); haftalık rapor; telafi (açılış + uykudan uyanma); tepsi modunun tamamlanması |
 | M6 | TR/EN çevirilerin tamamlanması, performans ölçümleri, kabul testleri |
-| M7 *(MVP sonrası, koşullu)* | Çıkarım için fine-tuning: veri seti, QLoRA eğitimi, taban çizgisiyle karşılaştırma (§8.2) |
+| M7 *(MVP sonrası, koşullu)* | Gerekirse çıkarım için kendi modelimiz: damıtma veri seti, eğitim, taban çizgisiyle karşılaştırma (§8.2) |

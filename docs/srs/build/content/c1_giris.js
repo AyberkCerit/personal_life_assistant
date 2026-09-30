@@ -2,7 +2,7 @@ module.exports = [
   { t: "h1", x: "1. Giriş (Introduction)", pb: true },
 
   { t: "h2", x: "1.1 Amaç" },
-  { t: "p", x: "Bu belge, **PLA (Personal Life Assistant)** masaüstü uygulamasının ilk sürümü (MVP, sürüm 1.0) için yazılım gereksinimlerini tanımlar. Ürün Gereksinimleri Dokümanı'nda (PRD v0.3) alınan ürün kararlarını tek anlamlı, doğrulanabilir ve izlenebilir gereksinimlere dönüştürür. Tasarım, kodlama ve test çalışmalarının ortak dayanağıdır; bir gereksinim bu belgede yoksa MVP kapsamında değildir." },
+  { t: "p", x: "Bu belge, **PLA (Personal Life Assistant)** masaüstü uygulamasının ilk sürümü (MVP, sürüm 1.0) için yazılım gereksinimlerini tanımlar. Ürün Gereksinimleri Dokümanı'nda (PRD v0.4) alınan ürün kararlarını tek anlamlı, doğrulanabilir ve izlenebilir gereksinimlere dönüştürür. Tasarım, kodlama ve test çalışmalarının ortak dayanağıdır; bir gereksinim bu belgede yoksa MVP kapsamında değildir." },
   { t: "p", x: "Belgenin hedef okuyucuları:" },
   { t: "bul", items: [
     "**Ürün sahibi ve geliştirici (Ayberk Cerit):** kapsamı onaylar, gereksinimleri uygular ve kabul testlerini yürütür.",
@@ -127,7 +127,7 @@ module.exports = [
 
   { t: "h2", x: "1.4 Referanslar" },
   { t: "tbl", cap: "Referans belgeler ve standartlar", head: ["Kod", "Belge / standart", "Konum / not"], w: [10, 50, 40], mono: [0], rows: [
-    ["[R1]", "PLA Ürün Gereksinimleri Dokümanı (PRD) v0.3", "`docs/PRD.md` — bu SRS'in tek dayanağı"],
+    ["[R1]", "PLA Ürün Gereksinimleri Dokümanı (PRD) v0.4", "`docs/PRD.md` — bu SRS'in tek dayanağı"],
     ["[R2]", "PLA SRS Hazırlık Planı", "`docs/SRS_PLAN.md`"],
     ["[R3]", "SRS İnisiyatif Kararları Günlüğü", "`docs/srs/INISIYATIF_KARARLARI.md` (Ek E'nin kaynağı)"],
     ["[R4]", "ISO/IEC/IEEE 29148:2018 — Systems and software engineering — Life cycle processes — Requirements engineering", "Belge yapısı ve iyi gereksinim özellikleri"],
@@ -142,6 +142,7 @@ module.exports = [
     ["[R13]", "Tauri 2 belgeleri (v2.tauri.app)", "Uygulama çatısı, IPC, yetenek (capability) sistemi, eklentiler"],
     ["[R14]", "SQLite belgeleri: WAL, FTS5, Online Backup API; sqlite-vec", "Veri deposu"],
     ["[R15]", "ISO 8601 — Tarih ve saat gösterimi", "Tarih/saat saklama ve hafta numarası (YYYY-Www)"],
+    ["[R16]", "F1 Model Fizibilite Denemesi Sonuçları", "`research/f1-model-eval/RESULTS.md` — model seçimi ve ölçümler"],
   ] },
 
   { t: "h2", x: "1.5 Genel Bakış" },

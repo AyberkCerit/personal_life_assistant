@@ -10,7 +10,7 @@ const PRD_TITLES = {
   P1: "§1 Ürün vizyonu ve kapsam", P3: "§3 Teknoloji yığını ve mimari", P4: "§4 Donanım ve performans",
   "P5.1": "§5.1 Vault ve not sistemi", "P5.2": "§5.2 Otonom veri çıkarımı", "P5.3": "§5.3 Görevler ve hatırlatıcılar",
   "P5.4": "§5.4 Sağlık ve verimlilik metrikleri", "P5.5": "§5.5 Soru-cevap ve komut paneli", "P5.6": "§5.6 Zamanlanmış işler",
-  P6: "§6 Hiyerarşik hafıza", P7: "§7 Çoklu dil", "P8.1": "§8.1 Model dağıtımı", P9: "§9 Güvenlik ve gizlilik", P10: "§10 Başarı kriterleri",
+  P6: "§6 Hiyerarşik hafıza", P7: "§7 Çoklu dil", "P8.1": "§8.1 Model dağıtımı", "P8.3": "§8.3 F1 model denemesi", P9: "§9 Güvenlik ve gizlilik", P10: "§10 Başarı kriterleri",
 };
 const bySrc = {};
 for (const r of allReqs) (bySrc[r.src] = bySrc[r.src] || []).push(r.id);
@@ -125,15 +125,15 @@ module.exports = [
     "          \"notify_before_min\": { \"type\": \"integer\", \"minimum\": 0 } } },",
     "        \"metric\": { \"type\": \"object\", \"properties\": {",
     "          \"kind\":  { \"enum\": [\"sleep\", \"weight\", \"steps\", \"water\", \"workout\"] },",
-    "          \"value\": { \"type\": \"number\" },",
-    "          \"unit\":  { \"enum\": [\"h\", \"kg\", \"lb\", \"count\", \"ml\", \"glass\"] },",
     "          \"exercise\": { \"type\": \"string\" },",
-    "          \"sets\": { \"type\": \"integer\" }, \"reps\": { \"type\": \"integer\" } } }",
+    "          \"sets\": { \"type\": \"integer\" }, \"reps\": { \"type\": \"integer\" },",
+    "          \"value\": { \"type\": \"number\" },",
+    "          \"unit\":  { \"enum\": [\"h\", \"min\", \"kg\", \"lb\", \"count\", \"ml\", \"l\", \"glass\"] } } }",
     "      } } }",
     "  }",
     "}",
   ].join("\n") },
-  { t: "p", x: "Anlamsal doğrulama kuralları: `task`/`reminder` için `title` zorunludur; `metric` için `metric.kind` ve `metric.value` zorunludur ve §3.8.1'deki makul aralıkta olmalıdır; `when` içinde `day_offset`, `weekday` + `which` ve `date`'ten en çok biri bulunabilir; `time` 00:00–23:59 aralığında olmalıdır." },
+  { t: "p", x: "Anlamsal doğrulama kuralları: `task`/`reminder` için `title` zorunludur; `metric` için `metric.kind` ve `metric.value` zorunludur ve §3.8.1'deki makul aralıkta olmalıdır; `when` içinde `day_offset`, `weekday` + `which` ve `date`'ten en çok biri bulunabilir; `time` 00:00–23:59 aralığında olmalıdır. **Alan sırası önemlidir:** gramer özellikleri tanım sırasıyla ürettirdiği için metrikte `value` antrenman alanlarından sonra gelir (FR-EXT-029; F1'de önde iken antrenman ağırlığı kayboluyordu)." },
   { t: "h2", x: "C.4 Asistan araç şemaları (özet)" },
   { t: "tbl", cap: "Araç parametreleri", head: ["Araç", "Parametreler", "Dönüş"], w: [20, 45, 35], mono: [0], size: 17, rows: [
     ["search_notes", "query (string), limit (1–10, varsayılan 5)", "[{note_path, snippet, score}]"],
@@ -175,7 +175,8 @@ module.exports = [
   { t: "p", x: "Aşağıdaki konuların hiçbiri gereksinimleri engellemez; tasarım veya ölçüm aşamasında kapatılacaktır." },
   { t: "tbl", cap: "Açık konular", head: ["Kod", "Konu", "Etkilediği", "Kapanış"], w: [10, 44, 24, 22], mono: [0], size: 17, rows: [
     ["TBD-01", "Kesin ürün adı", "Belge başlıkları, kurulum paketi", "M6 öncesi"],
-    ["TBD-02", "Dil modeli ve embedding modeli seçimi", "NFR-AIQ-*, NFR-PERF-007…010", "M1 değerlendirmesi"],
+    ["TBD-02", "Embedding modeli seçimi (dil modeli F1'de kapandı: Gemma 4 E2B Q3_K_M)", "NFR-PERF-007, FR-MEM-*", "M1"],
+    ["TBD-10", "Ayrık test setiyle çıkarım doğrulaması; 8k bağlamda soru-cevap belleği; araç çağırma değerlendirmesi", "NFR-AIQ-*, NFR-PERF-007", "M1"],
     ["TBD-03", "GPU hızlandırmasının kapsamı (Vulkan/CUDA)", "FR-MDL-018", "M1 sonrası"],
     ["TBD-04", "Bulanık blok eşleştirme algoritması ve benzerlik eşiği", "FR-EXT-006, FR-EXT-016", "M2 tasarım belgesi"],
     ["TBD-05", "Günlük not ve haftalık rapor şablonlarının içeriği", "FR-VLT-010, FR-SCH-009", "M2 / M5"],
@@ -212,9 +213,9 @@ module.exports = [
     ["Arayüz yazı tipi (ör. Inter)", "Yerel olarak paketlenen font", "SIL Open Font License 1.1"],
   ] },
   { t: "tbl", cap: "İndirilen modeller (uygulamayla dağıtılmaz)", head: ["Aday model", "Kullanım", "Lisans (doğrulanacak)", "Not"], w: [26, 18, 26, 30], size: 17, rows: [
-    ["Qwen2.5 1.5B Instruct (GGUF)", "Dil modeli adayı", "Apache-2.0", "Qwen2.5 3B farklı (Qwen Research) lisanslıdır; ticari kullanım kısıtlıdır."],
-    ["Qwen3 küçük modeller (GGUF)", "Dil modeli adayı", "Apache-2.0", "Değerlendirme setiyle karşılaştırılacak."],
-    ["Gemma 3 küçük modeller", "Dil modeli adayı", "Gemma Kullanım Şartları", "Kullanım politikası var; indirmeden önce gösterilmeli."],
+    ["Qwen2.5 1.5B Instruct (GGUF)", "Dil modeli adayı", "Apache-2.0", "F1: TR %46 / EN %61 (elendi). Qwen2.5 3B farklı (Qwen Research) lisanslıdır."],
+    ["Qwen3 1.7B / 4B-Instruct-2507 (GGUF)", "Denendi; 4B yedek aday", "Apache-2.0", "F1: 1.7B TR %64 / EN %76; 4B TR %84 / EN %86, 5 GB bellek."],
+    ["**Gemma 4 E2B-it (GGUF, Q3_K_M)**", "**Seçilen dil modeli (F1)**", "Apache-2.0", "TR %96 / EN %95; 1,85 GB çalışma belleği."],
     ["Llama 3.2 1B / 3B", "Dil modeli adayı", "Llama 3.2 Community License", "Kullanım politikası ve atıf şartı var."],
     ["multilingual-e5-small (ONNX)", "Embedding modeli", "MIT", "Çok dilli, küçük."],
   ] },

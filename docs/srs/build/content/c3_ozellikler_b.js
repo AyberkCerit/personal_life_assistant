@@ -36,6 +36,8 @@ module.exports = [
     ["FR-MDL-018", "O", "WHERE a supported GPU is detected and GPU acceleration is enabled in settings, the system shall offload model layers to the GPU.", "D", "G", "E-B5"],
     ["FR-MDL-019", "U", "The AI settings section shall show the active model's name, size, licence and location, and allow the user to remove it.", "O", "G", "P8.1"],
     ["FR-MDL-020", "U", "The system shall pass the model's context size as 8192 tokens.", "Y", "İ", "P6"],
+    ["FR-MDL-021", "U", "The system shall start the model process with flash attention enabled and an 8-bit (q8_0) KV cache.", "Y", "A", "P8.3"],
+    ["FR-MDL-022", "U", "The model catalogue shall recommend Gemma 4 E2B-it in Q3_K_M quantization as the default language model.", "Y", "İ", "P8.3"],
   ] },
 
   // ------------------------------------------------------------------ EXT
@@ -83,6 +85,9 @@ module.exports = [
     ["FR-EXT-024", "U", "The model shall classify future intentions as `task` or `reminder` and statements about the past as `metric`.", "Y", "DS", "P5.2"],
     ["FR-EXT-025", "O", "WHERE two-step extraction is enabled, the system shall first classify each block as task, reminder, metric or none, and extract fields only for blocks not classified as none.", "O", "DS", "P5.2"],
     ["FR-EXT-026", "S", "WHILE background AI is paused, the system shall keep queuing changed blocks without processing them.", "O", "T", "E-C1"],
+    ["FR-EXT-027", "W", "IF an extracted task or reminder contains a time but no day information, THEN the system shall use the reference date as its date.", "Y", "T", "P5.2"],
+    ["FR-EXT-028", "W", "IF an extracted item contains a weekday without `which`, THEN the system shall resolve it as `which = this`.", "Y", "T", "P5.2"],
+    ["FR-EXT-029", "U", "In the extraction JSON schema, the metric properties shall be declared in the order kind, exercise, sets, reps, value, unit.", "Y", "İ", "P5.2"],
   ] },
 
   // ------------------------------------------------------------------ TSK

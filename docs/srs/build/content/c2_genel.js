@@ -2,7 +2,7 @@ module.exports = [
   { t: "h1", x: "2. Genel Açıklama (Overall Description)" },
 
   { t: "h2", x: "2.1 Ürün Perspektifi" },
-  { t: "p", x: "PLA, daha büyük bir sistemin parçası olmayan, **bağımsız bir masaüstü ürünüdür**. Aynı adla 2026 başında başlatılan önceki sürümün (C++/Qt, bulut yapay zekâ API'si, Gym/Health modülleri) yerini alır; eski sürümden kod veya veri devralmaz. Eski belgeler `docs/archive/` altında yalnız tarihçe olarak tutulur." },
+  { t: "p", x: "PLA, daha büyük bir sistemin parçası olmayan, **bağımsız bir masaüstü ürünüdür**. Aynı adla 2026 başında başlatılan önceki sürümün (C++/Qt, bulut yapay zekâ API'si, Gym/Health modülleri) yerini alır; eski sürümden kod veya veri devralmaz. Eski sürümün belgeleri depodan kaldırılmıştır." },
   { t: "p", x: "Sistem sınırı kullanıcının bilgisayarıdır. PLA bu sınır içinde şu dış öğelerle etkileşir (Şekil 1):" },
   { t: "bul", items: [
     "**Kullanıcı:** tek ve birincil aktör.",
