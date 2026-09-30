@@ -58,3 +58,8 @@ desktop.ini
 
 # code-review-graph
 .code-review-graph/
+
+# Private planning documents (kept locally, not versioned)
+docs/PLA_Degerlendirme_Risk_Yol_Haritasi.docx
+docs/SRS_PLAN.md
+docs/srs/INISIYATIF_KARARLARI.md
