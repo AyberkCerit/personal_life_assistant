@@ -1,6 +1,6 @@
 # F1 — Model Fizibilite Denemesi Sonuçları (2026-09-30)
 
-**Karar: GEÇTİ.** Gemma 4 E2B-it (Q4_0 QAT), talimat v2 ve şema sırası düzeltmesiyle (v3), karar kapısını (alan doğruluğu ≥ %80, not başına ≤ 10 sn) iki dilde de aştı. Kendi model eğitimine (yedek plan) şimdilik gerek yok.
+**Karar: GEÇTİ.** Önerilen yapılandırma: Gemma 4 E2B-it **Q3_K_M**, düşük bellek ayarlarıyla (1,85 GB, TR %96 / EN %95 — aşağıdaki bellek bölümü). İlk ölçüm Gemma 4 E2B-it (Q4_0 QAT), talimat v2 ve şema sırası düzeltmesiyle (v3), karar kapısını (alan doğruluğu ≥ %80, not başına ≤ 10 sn) iki dilde de aştı. Kendi model eğitimine (yedek plan) şimdilik gerek yok.
 
 ## Kurulum
 - llama.cpp `llama-server` b11280 (CPU x64), 4 iş parçacığı, GPU kapalı, 4096 bağlam, sıcaklık 0.
@@ -23,11 +23,24 @@
 
 Gemma v3 ayrıntı: JSON geçerliliği %100, anlamsal doğrulamayı geçme %99,5, tarih %97, saat %99, metrik değeri %100, "çıkarılacak bir şey yok" notları %100.
 
+## Bellek düşürme denemesi (aynı model, Gemma 4 E2B)
+Amaç: doğruluğu koruyarak belleği ~2 GB'a indirmek. Talimat v3; düşük bellek ayarları = bağlam 2048, `-fa on -ctk q8_0 -ctv q8_0 -ub 256 -b 512` (en uzun istem 1 522 token).
+
+| Nicemleme | Ayar | Dosya | Çalışma / özel bellek | TR | EN | p50 / p95 |
+|---|---|---|---|---|---|---|
+| Q4_0 QAT | varsayılan | 3.35 GB | 2.85 / 1.54 GB | %96 | %93 | 2.2 / 3.9 sn |
+| Q4_0 QAT | düşük bellek | 3.35 GB | 2.75 / 1.44 GB | %97 | %95 | 2.3 / 4.1 sn |
+| **Q3_K_M** | **düşük bellek** | **2.54 GB** | **1.85 / 0.77 GB** | **%94 (%96\*)** | **%91 (%95\*)** | **2.2 / 4.9 sn** |
+
+\* Rust'ta "gün adı var, `which` yok → `this`" varsayılanıyla yeniden puanlandığında. Q3_K_M'nin kaybettiği notların çoğu bu eksik alandan kaynaklanıyordu.
+
+**Sonuç:** Q3_K_M + düşük bellek ayarları, doğruluğu koruyarak çalışma belleğini 1,85 GB'a (özel 0,77 GB) indiriyor; NFR-PERF-007'deki ≤ 2 GB bütçesine sığıyor. **Önerilen yapılandırma budur.**
+
 ## Öğrenilenler
 1. **Gramer kısıtı işe yarıyor:** Tüm modellerde sözdizimsel JSON geçerliliği %100.
 2. **Şema sırası önemli (SRS C.3 düzeltmesi gerekli):** Gramer, özellikleri şemadaki sırayla ürettirir. `value` alanı `exercise/sets/reps`'ten önce olduğunda antrenman ağırlığı kayboluyordu. Sıra `kind, exercise, sets, reps, value, unit` yapılınca metrik doğruluğu %85 → %100.
 3. **Talimat iyileştirmesi büyük fark yaratıyor:** Türkçe gün adı tablosu, "yalnız saat varsa bugün" kuralı ve iki ek örnek; küçük modellerde +12 puan.
-4. **Rust kuralı:** Görevde yalnız saat varsa tarih = referans gün. SRS FR-EXT-012'ye eklenmeli.
+4. **Rust kuralları:** Görevde yalnız saat varsa tarih = referans gün; gün adı var ama `which` yoksa `this`. SRS FR-EXT-012'ye eklenmeli.
 5. **Kalan hatalar:** "ayın 5'i / the 5th" (ay çözümlemesi), geçmiş gün adı ("Pazartesi 79 kiloydum" → yanlış gün farkı), İngilizce notlarda başlığın Türkçe yazılması, ağırlıksız antrenmanda `value: 0`.
    - Öneri: şemaya `which: "last"` ve `day_of_month` alanları; başlık dili için talimat düzeltmesi; `value: 0` → boş kabul.
 

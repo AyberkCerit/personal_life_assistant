@@ -24,8 +24,13 @@ MODELS = {
     "qwen3-1.7b": "Qwen3-1.7B-Q4_K_M.gguf",
     "gemma4-e2b": "gemma-4-E2B_q4_0-it.gguf",
     "qwen3-4b-2507": "Qwen3-4B-Instruct-2507-Q4_K_M.gguf",
+    "gemma4-e2b-q3km": "gemma-4-E2B-it-Q3_K_M.gguf",
+    "gemma4-e2b-iq4xs": "gemma-4-E2B-it-IQ4_XS.gguf",
 }
-THREADS, CTX, PORT = 4, 4096, 8765
+THREADS, PORT = 4, 8765
+CTX = int(os.environ.get("CTX", "4096"))
+EXTRA = os.environ.get("EXTRA", "").split()
+TAG = os.environ.get("TAG", "")
 PROMPT = os.environ.get("PROMPT", "v1")
 WEEKDAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
 DAY_NAMES = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
@@ -249,7 +254,7 @@ def score(example, pred_items):
 class Server:
     def __init__(self, model_file):
         args = [str(BIN), "-m", str(HERE / "models" / model_file), "-t", str(THREADS), "-c", str(CTX),
-                "-ngl", "0", "-np", "1", "--host", "127.0.0.1", "--port", str(PORT), "--no-webui", "--reasoning", "off"]
+                "-ngl", "0", "-np", "1", "--host", "127.0.0.1", "--port", str(PORT), "--no-webui", "--reasoning", "off", *EXTRA]
         self.t0 = time.perf_counter()
         self.proc = subprocess.Popen(args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         self.ps = psutil.Process(self.proc.pid)
@@ -294,7 +299,9 @@ def ask(ref, text):
     r = requests.post(f"http://127.0.0.1:{PORT}/v1/chat/completions", json=body, timeout=300)
     dt = time.perf_counter() - t
     r.raise_for_status()
-    return r.json()["choices"][0]["message"]["content"], dt
+    j = r.json()
+    ask.prompt_tokens = j.get("usage", {}).get("prompt_tokens")
+    return j["choices"][0]["message"]["content"], dt
 
 
 def pct(xs, q):
@@ -318,12 +325,12 @@ def run(key):
             kept = [i for i, v in zip(items, valid) if v]
             sc = score(ex, kept)
             rows.append({"id": ex["id"], "lang": ex["lang"], "text": ex["text"], "raw": raw, "latency": dt,
-                         "json_ok": json_ok, "all_valid": all(valid), "n_invalid": valid.count(False), "score": sc})
+                         "json_ok": json_ok, "prompt_tokens": ask.prompt_tokens, "all_valid": all(valid), "n_invalid": valid.count(False), "score": sc})
             print(f"{key} {ex['id']} {dt:5.2f}s exact={sc['exact']}", flush=True)
     finally:
         srv.close()
     (HERE / "results").mkdir(exist_ok=True)
-    with (HERE / "results" / f"{key}.{PROMPT}.jsonl").open("w", encoding="utf-8") as f:
+    with (HERE / "results" / f"{key}.{PROMPT}{TAG}.jsonl").open("w", encoding="utf-8") as f:
         for r in rows:
             f.write(json.dumps(r, ensure_ascii=False) + "\n")
 
@@ -357,7 +364,8 @@ def run(key):
     sp = HERE / "results" / "summary.json"
     allsum = json.loads(sp.read_text(encoding="utf-8")) if sp.exists() else {}
     summ["prompt"] = PROMPT
-    allsum[f"{key}.{PROMPT}"] = summ
+    summ["ctx"], summ["extra"], summ["max_prompt_tokens"] = CTX, " ".join(EXTRA), max(r.get("prompt_tokens") or 0 for r in rows)
+    allsum[f"{key}.{PROMPT}{TAG}"] = summ
     sp.write_text(json.dumps(allsum, indent=2, ensure_ascii=False), encoding="utf-8")
     print(json.dumps(summ, indent=2, ensure_ascii=False))
 
