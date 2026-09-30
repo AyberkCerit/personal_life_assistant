@@ -64,3 +64,8 @@ docs/PLA_Degerlendirme_Risk_Yol_Haritasi.docx
 docs/SRS_PLAN.md
 docs/srs/INISIYATIF_KARARLARI.md
 docs/srs/build/report.js
+
+# F1 model evaluation artifacts
+research/f1-model-eval/bin/
+research/f1-model-eval/models/
+research/f1-model-eval/.venv/
