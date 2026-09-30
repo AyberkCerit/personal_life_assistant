@@ -36,6 +36,29 @@ Amaç: doğruluğu koruyarak belleği ~2 GB'a indirmek. Talimat v3; düşük bel
 
 **Sonuç:** Q3_K_M + düşük bellek ayarları, doğruluğu koruyarak çalışma belleğini 1,85 GB'a (özel 0,77 GB) indiriyor; NFR-PERF-007'deki ≤ 2 GB bütçesine sığıyor. **Önerilen yapılandırma budur.**
 
+## Ayrık test seti doğrulaması (TBD-10, 2026-10-01)
+Talimat v3 dondurulduktan sonra yazılan, dev setle hiç ortak notu olmayan 100 TR + 100 EN'lik set (`testset.py`): farklı içerik, farklı referans günleri (Salı, Pazar, Cuma), gündelik/özensiz yazımlar ("yarin 8de", "gym tmrw"). Yapılandırma: Gemma 4 E2B Q3_K_M, talimat v3, düşük bellek ayarları, `which` yoksa `this` kuralı. Talimatta hiçbir değişiklik yapılmadı.
+
+| | TR | EN |
+|---|---|---|
+| Alan doğruluğu | **%91** | **%91** |
+| Kesinlik | %93 | %96 |
+| Tam doğru not | %92 | %91 |
+| Tarih / saat | %94 / %98 | %97 / %100 |
+| Metrik değeri | %97 | %100 |
+| Boş notlar | %100 | %100 |
+| p50 / p95 | 2.1 / 4.7 sn | 2.0 / 4.4 sn |
+
+Bellek: çalışma 1,85 GB, özel 0,77 GB. Dev sete göre ~5 puanlık düşüş, talimatın dev sete uyarlanmasından beklenen farkla uyumlu. **Sonuç SRS NFR-AIQ-001 hedefini (≥ %85) ve F1 kapısını (≥ %80) karşılıyor.**
+
+**Kalan hata örüntüleri (17 not):**
+1. Geçmiş gün adı metriklerde ("Cuma günü 80 kiloydum", "I was 80 kg on Friday") → şemaya `which: "last"` eklenmeli (2 not).
+2. İngilizce olay/son tarih cümleleri ("registration opens on…", "leave starts on…", "results come out…") görev sayılmadı → talimatta "olay ve son tarihler de görevdir" (3 not).
+3. Çoklu notlarda öğe atlama (kilo, uyku) (4 not).
+4. Gün adı veya "haftaya/next" karışıklığı; "yarından sonra" → 1 (4 not).
+5. `day_offset` ile `date`'in birlikte verilmesi → doğrulamada reddedildi (1 not); Rust'ta `day_offset` öncelikli sayılabilir.
+6. İngilizce notlarda başlığın Türkçe yazılması (başlık anahtar sözcük oranı EN %49) → talimat düzeltmesi.
+
 ## Öğrenilenler
 1. **Gramer kısıtı işe yarıyor:** Tüm modellerde sözdizimsel JSON geçerliliği %100.
 2. **Şema sırası önemli (SRS C.3 düzeltmesi gerekli):** Gramer, özellikleri şemadaki sırayla ürettirir. `value` alanı `exercise/sets/reps`'ten önce olduğunda antrenman ağırlığı kayboluyordu. Sıra `kind, exercise, sets, reps, value, unit` yapılınca metrik doğruluğu %85 → %100.

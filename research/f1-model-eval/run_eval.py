@@ -31,6 +31,8 @@ THREADS, PORT = 4, 8765
 CTX = int(os.environ.get("CTX", "4096"))
 EXTRA = os.environ.get("EXTRA", "").split()
 TAG = os.environ.get("TAG", "")
+DATA = os.environ.get("DATA", "eval")
+WHICH_DEFAULT = os.environ.get("WHICH_DEFAULT") == "1"  # SRS FR-EXT-028
 PROMPT = os.environ.get("PROMPT", "v1")
 WEEKDAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
 DAY_NAMES = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
@@ -171,7 +173,7 @@ def validate(item):
             return False
     if sum(k in w for k in ("day_offset", "date", "weekday")) > 1:
         return False
-    if "weekday" in w and "which" not in w:
+    if "weekday" in w and "which" not in w and not WHICH_DEFAULT:
         return False
     if "date" in w:
         try:
@@ -310,7 +312,7 @@ def pct(xs, q):
 
 
 def run(key):
-    data = [json.loads(l) for l in (HERE / "data" / "eval.jsonl").read_text(encoding="utf-8").splitlines()]
+    data = [json.loads(l) for l in (HERE / "data" / f"{DATA}.jsonl").read_text(encoding="utf-8").splitlines()]
     srv = Server(MODELS[key])
     rows = []
     try:

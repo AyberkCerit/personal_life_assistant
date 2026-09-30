@@ -361,7 +361,8 @@ Ayrıntı: `research/f1-model-eval/RESULTS.md`. 200 notluk TR/EN çıkarım seti
 
 - **Seçim:** Gemma 4 E2B-it Q3_K_M (Apache-2.0, ~2,5 GB dosya). Yedek aday: Qwen3-4B-Instruct-2507.
 - **Sunucu ayarları:** çıkarımda bağlam 2048 (en uzun istem ~1 500 token), `-fa on -ctk q8_0 -ctv q8_0 -ub 256 -b 512`.
-- **Uyarılar:** (1) Talimat aynı setteki hatalara bakılarak düzeltildi; ayrık bir test setiyle doğrulanmalı. (2) Ölçüm güçlü bir CPU'nun 4 iş parçacığıyla yapıldı; gerçek minimum donanımda gecikme 1,5–2 kat olabilir. (3) Soru-cevap için 8k bağlamdaki bellek ve araç çağırma doğruluğu henüz ölçülmedi.
+- **Ayrık test seti (2026-10-01):** talimat dondurulduktan sonra yazılan 200 notta TR %91 / EN %91, kesinlik %94 — hedef (≥ %85) karşılandı. Kalan hata örüntüleri: geçmiş gün adı (`which: "last"` gerekli), İngilizce olay cümleleri, çoklu notlarda öğe atlama, İngilizce notlarda Türkçe başlık.
+- **Uyarılar:** (1) ~~Ayrık test setiyle doğrulama~~ yapıldı. (2) Ölçüm güçlü bir CPU'nun 4 iş parçacığıyla yapıldı; gerçek minimum donanımda gecikme 1,5–2 kat olabilir. (3) Soru-cevap için 8k bağlamdaki bellek ve araç çağırma doğruluğu henüz ölçülmedi.
 
 ---
 

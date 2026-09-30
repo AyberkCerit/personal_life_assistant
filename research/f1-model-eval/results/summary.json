@@ -490,5 +490,62 @@
     "ctx": 2048,
     "extra": "-fa on -ctk q8_0 -ctv q8_0 -ub 256 -b 512",
     "max_prompt_tokens": 1522
+  },
+  "gemma4-e2b-q3km.v3.lowmem.test": {
+    "model": "gemma4-e2b-q3km",
+    "file": "gemma-4-E2B-it-Q3_K_M.gguf",
+    "size_gb": 2.54,
+    "load_s": 2.48,
+    "peak_ws_gb": 1.85,
+    "peak_private_gb": 0.77,
+    "tr": {
+      "json_valid": 1.0,
+      "semantic_valid": 0.99,
+      "field_accuracy": 0.91,
+      "precision": 0.929,
+      "exact_note": 0.92,
+      "type_match": 0.97,
+      "date_acc": 0.939,
+      "time_acc": 0.983,
+      "metric_value_acc": 0.974,
+      "none_acc": 1.0,
+      "title_kw": 0.932,
+      "lat_p50": 2.05,
+      "lat_p95": 4.69
+    },
+    "en": {
+      "json_valid": 1.0,
+      "semantic_valid": 1.0,
+      "field_accuracy": 0.91,
+      "precision": 0.958,
+      "exact_note": 0.91,
+      "type_match": 0.94,
+      "date_acc": 0.968,
+      "time_acc": 1.0,
+      "metric_value_acc": 1.0,
+      "none_acc": 1.0,
+      "title_kw": 0.491,
+      "lat_p50": 2.01,
+      "lat_p95": 4.42
+    },
+    "all": {
+      "json_valid": 1.0,
+      "semantic_valid": 0.995,
+      "field_accuracy": 0.91,
+      "precision": 0.943,
+      "exact_note": 0.915,
+      "type_match": 0.955,
+      "date_acc": 0.953,
+      "time_acc": 0.991,
+      "metric_value_acc": 0.987,
+      "none_acc": 1.0,
+      "title_kw": 0.719,
+      "lat_p50": 2.02,
+      "lat_p95": 4.47
+    },
+    "prompt": "v3",
+    "ctx": 2048,
+    "extra": "-fa on -ctk q8_0 -ctv q8_0 -ub 256 -b 512",
+    "max_prompt_tokens": 1521
   }
 }
