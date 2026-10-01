@@ -186,8 +186,8 @@ module.exports = [
     ["TBD-09", "Parça boyutu, arama sonuç sayısı (k) ve bağlam paylarının ince ayarı", "FR-MEM-001, FR-MEM-009", "M4 ölçümü"],
   ] },
 
-  { t: "h1", x: "Ek E — İnisiyatifle Alınan Kararlar (Onay Bekleyen)" },
-  { t: "p", x: "Bu SRS yazılırken PRD'de açık kalan veya hiç ele alınmamış konularda aşağıdaki kararlar ürün sahibine sorulmadan, önerilen varsayılan olarak alınmıştır. Her karar onay bekler; reddedilen karar SRS'te ve gerekirse PRD'de düzeltilir. Kararların güncel durumu `docs/srs/INISIYATIF_KARARLARI.md` dosyasında tutulur ve bu ek oradan üretilir. Gereksinim tablolarındaki `E-<kod>` kaynakları bu kararlara işaret eder." },
+  { t: "h1", x: "Ek E — İnisiyatifle Alınan Kararlar" },
+  { t: "p", x: "Bu SRS yazılırken PRD'de açık kalan veya hiç ele alınmamış konularda aşağıdaki kararlar ürün sahibine sorulmadan, önerilen varsayılan olarak alınmıştır. Kararların tamamı 02.10.2026'da onaylanmıştır; D22'nin önceliği onay sırasında Orta düzeyinden Düşük düzeyine çekilmiştir. Kararların güncel durumu `docs/srs/INISIYATIF_KARARLARI.md` dosyasında tutulur ve bu ek oradan üretilir. Gereksinim tablolarındaki `E-<kod>` kaynakları bu kararlara işaret eder." },
   ...decisionContent,
 
   { t: "h1", x: "Ek F — Üçüncü Parti Bileşenler ve Lisanslar" },

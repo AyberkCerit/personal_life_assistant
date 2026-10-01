@@ -41,7 +41,7 @@ module.exports = [
     ["NFR-SEC-006", "U", "The web view shall render note Markdown without executing embedded scripts or loading remote resources.", "Y", "T", "P9"],
     ["NFR-SEC-007", "U", "The About section shall contain a privacy statement describing what data is stored, where, and that no data is transmitted.", "O", "İ", "R8"],
     ["NFR-SEC-008", "U", "The user shall be able to delete all Q&A history, and to export tasks and metrics, from Privacy & Data settings.", "Y", "T", "R9"],
-    ["NFR-SEC-009", "O", "WHERE code signing is available, the installer and executables shall be signed.", "O", "İ", "E-D22"],
+    ["NFR-SEC-009", "O", "WHERE code signing is available, the installer and executables shall be signed.", "D", "İ", "E-D22"],
     ["NFR-SEC-010", "U", "The uninstaller shall never delete the vault folder and shall ask whether to delete `%APPDATA%/PLA`.", "Y", "T", "E-C4"],
   ] },
 

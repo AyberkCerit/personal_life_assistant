@@ -104,8 +104,10 @@ Birincil kullanıcı geliştiricinin kendisi; ürün kişisel kullanım üzerind
   | Depo | İçerik | Yeniden üretilebilir mi? | Nerede |
   |---|---|---|---|
   | Vault (`.md`) | Notlar, haftalık raporlar | Hayır (kullanıcı içeriği) | `Belgeler/PLA Vault` |
-  | `pla.db` | Görevler, metrikler, reddedilen öğe kayıtları, blok eşleştirme kayıtları, iş kayıtları, ayarlar | **Hayır** | `%APPDATA%/PLA`; günlük yedeği vault'ta `.pla/backup/` |
-  | `cache.db` | Not indeksi (FTS5), vektörler (`sqlite-vec`), günlük özetler | Evet (silinirse baştan oluşturulur) | `%APPDATA%/PLA` |
+  | `pla.db` | Görevler, metrikler, reddedilen öğe kayıtları, blok eşleştirme kayıtları, iş kayıtları, ayarlar | **Hayır** | `%APPDATA%/PLA/vaults/<vault_id>/`; günlük yedeği vault'ta `.pla/backup/` |
+  | `cache.db` | Not indeksi (FTS5), vektörler (`sqlite-vec`), günlük özetler | Evet (silinirse baştan oluşturulur) | `%APPDATA%/PLA/vaults/<vault_id>/` |
+
+  Veritabanları **vault başınadır**: `vault_id` vault içindeki `.pla/config`'te tutulur, böylece vault değiştirilince görevler karışmaz. Uygulama ayarları ayrıdır (`%APPDATA%/PLA/settings.json`).
 
   Not içeriğinin kopyası hiçbir veritabanında asıl kaynak olarak tutulmaz.
 - **Hesabı Rust yapar, model yalnız dil üretir.** Tarih aritmetiği, toplam, ortalama, trend ve karşılaştırmalar SQL/Rust'ta hesaplanır. Model bu değerleri yalnız yorumlar ve anlatır. Küçük modeller aritmetikte güvenilmezdir.
@@ -174,8 +176,10 @@ Obsidian benzeri, ancak uygulamanın kendi içinde inşa edilen bir not sistemi.
   └── templates/
 
   %APPDATA%/PLA/
-  ├── pla.db                     kullanıcı verisi (görevler, metrikler, kayıtlar)
-  ├── cache.db                   indeks, vektörler, günlük özetler (yeniden üretilebilir)
+  ├── settings.json              uygulama ayarları
+  ├── vaults/<vault_id>/
+  │   ├── pla.db                 kullanıcı verisi (görevler, metrikler, kayıtlar)
+  │   └── cache.db               indeks, vektörler, günlük özetler (yeniden üretilebilir)
   ├── models/                    *.gguf, embedding modeli
   └── logs/
   ```
