@@ -77,7 +77,7 @@ Bellek: çalışma 1,85 GB, özel 0,77 GB. Dev sete göre ~5 puanlık düşüş,
 1. Ayrık test seti (yeni 100 not) ile Gemma 4 E2B v3'ü doğrula; Qwen3-4B'yi yedek aday olarak tut.
 2. SRS/PRD güncellemeleri: model seçimi (TBD-02), şema sırası (C.3), bellek bütçesi (NFR-PERF-007), yalnız-saat kuralı (FR-EXT-012).
 3. Gerçek minimum donanımda (8 GB, 4 çekirdek) gecikme ölçümü.
-4. F2 — Rust çekirdeği iskeleti.
+4. ~~F2 — Rust çekirdeği iskeleti.~~ Tamamlandı (2026-10-02, `crates/pla-core`): talimat v3 ve şema gömülü; tarih/doğrulama kuralları bu değerlendirmedeki 390 tahminle Python'a eşlik testiyle bağlı (`export_rust_assets.py`).
 
 ## Dosyalar
 `dataset.py` (set), `run_eval.py` (koşucu), `results/<model>.<sürüm>.jsonl` (örnek bazında), `results/summary.json` (özet). Modeller ve llama.cpp ikilileri git'e girmez (`bin/`, `models/`).
