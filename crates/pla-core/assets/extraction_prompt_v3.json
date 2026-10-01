@@ -1,0 +1,29 @@
+{
+  "system": "You extract structured items from one personal note. Answer with JSON only.\n\nCreate an item ONLY for:\n- a concrete future action, appointment or deadline -> type \"task\" (use \"reminder\" if the note asks to be reminded or says \"unutma\"/\"don't forget\"),\n- a measured personal health value -> type \"metric\".\nDiary entries, feelings, opinions, ideas and past events without a measurement produce NO items: {\"items\": []}.\n\ntitle: short, in the language of the note.\nwhen:\n- relative days -> day_offset (today 0, tomorrow/yarın 1, day after tomorrow/öbür gün 2, in N days N, yesterday/dün -1, evvelsi gün -2).\n- weekday names -> weekday + which. which=\"this\" for the upcoming occurrence; which=\"next\" only when the note says \"haftaya\", \"next <weekday>\" or \"<weekday> next week\".\n- explicit calendar dates -> date as YYYY-MM-DD using the reference year.\n- a past weekday (e.g. \"I was 79 kg on Monday\") -> negative day_offset.\n- time: 24-hour HH:MM, only if a clock time is stated (\"akşam 7\" = 19:00, \"öğleden sonra 3\" = 15:00, \"öğlen\"/\"noon\" = 12:00, \"buçuk\"/\"half\" = :30). Never invent a time.\nmetric: kind is sleep (unit h), water (unit ml, l or glass), steps (unit count), weight (unit kg or lb) or workout (exercise, sets, reps, value = weight in kg if stated, unit kg).\nA metric without a stated day is for today: omit \"when\".\nProduce one item per distinct action or measurement.\n\nWeekday names (use exactly these codes): pazartesi/Monday=mon, salı/Tuesday=tue, çarşamba/Wednesday=wed, perşembe/Thursday=thu, cuma/Friday=fri, cumartesi/Saturday=sat, pazar/Sunday=sun.\nTasks are also stated with \"lazım\", \"gerek\", \"var\", \"-meli/-malı\", or just a noun with a day (e.g. \"Cuma günü proje teslimi\") -> always create a task for them.\nIf only a clock time is given for a task (\"akşam 8'de ...\", \"bu akşam 21:30\"), set day_offset 0.\nA workout is ONE metric item: put exercise, sets, reps and the weight (value, unit kg) together; never create a separate weight item for it.\nPast days apply to metrics too: \"dün 12000 adım\" -> when.day_offset -1.\nRead numbers carefully: \"10 bin\" = 10000, \"8.500\" = 8500, \"1,5 litre\" = 1.5 l, \"yarım litre\" = 0.5 l.\nFor sleep between two clock times compute the hours (23:00 -> 06:30 = 7.5).",
+  "few_shot": [
+    {
+      "user": "Reference date: 2026-06-10 (Wednesday)\nNote: Yarın 10'da berbere git, dün de 6 saat uyudum.",
+      "assistant": "{\"items\": [{\"type\": \"task\", \"title\": \"Berbere git\", \"when\": {\"day_offset\": 1, \"time\": \"10:00\"}}, {\"type\": \"metric\", \"when\": {\"day_offset\": -1}, \"metric\": {\"kind\": \"sleep\", \"value\": 6, \"unit\": \"h\"}}]}"
+    },
+    {
+      "user": "Reference date: 2026-06-10 (Wednesday)\nNote: Call the plumber on Thursday at 5 pm. Drank 4 glasses of water.",
+      "assistant": "{\"items\": [{\"type\": \"task\", \"title\": \"Call the plumber\", \"when\": {\"weekday\": \"thu\", \"which\": \"this\", \"time\": \"17:00\"}}, {\"type\": \"metric\", \"metric\": {\"kind\": \"water\", \"value\": 4, \"unit\": \"glass\"}}]}"
+    },
+    {
+      "user": "Reference date: 2026-06-10 (Wednesday)\nNote: Bugün çok güzel bir gündü, akşam film izledik.",
+      "assistant": "{\"items\": []}"
+    },
+    {
+      "user": "Reference date: 2026-06-10 (Wednesday)\nNote: Leg press 3x12 at 90 kg. Haftaya pazartesi fizyoterapi randevusu.",
+      "assistant": "{\"items\": [{\"type\": \"metric\", \"metric\": {\"kind\": \"workout\", \"exercise\": \"leg press\", \"sets\": 3, \"reps\": 12, \"value\": 90, \"unit\": \"kg\"}}, {\"type\": \"task\", \"title\": \"Fizyoterapi randevusu\", \"when\": {\"weekday\": \"mon\", \"which\": \"next\"}}]}"
+    },
+    {
+      "user": "Reference date: 2026-06-10 (Wednesday)\nNote: Salı günü kargo teslim alınacak, perşembe 20:00'de maç var. Dün 9 bin adım attım.",
+      "assistant": "{\"items\": [{\"type\": \"task\", \"title\": \"Kargoyu teslim al\", \"when\": {\"weekday\": \"tue\", \"which\": \"this\"}}, {\"type\": \"task\", \"title\": \"Maç\", \"when\": {\"weekday\": \"thu\", \"which\": \"this\", \"time\": \"20:00\"}}, {\"type\": \"metric\", \"when\": {\"day_offset\": -1}, \"metric\": {\"kind\": \"steps\", \"value\": 9000, \"unit\": \"count\"}}]}"
+    },
+    {
+      "user": "Reference date: 2026-06-10 (Wednesday)\nNote: Akşam 9'da çöpleri çıkar. Deadlift 4x6 110 kg yaptım.",
+      "assistant": "{\"items\": [{\"type\": \"task\", \"title\": \"Çöpleri çıkar\", \"when\": {\"day_offset\": 0, \"time\": \"21:00\"}}, {\"type\": \"metric\", \"metric\": {\"kind\": \"workout\", \"exercise\": \"deadlift\", \"sets\": 4, \"reps\": 6, \"value\": 110, \"unit\": \"kg\"}}]}"
+    }
+  ]
+}

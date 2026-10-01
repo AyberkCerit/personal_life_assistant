@@ -1,0 +1,113 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "items"
+  ],
+  "properties": {
+    "items": {
+      "type": "array",
+      "maxItems": 5,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "type"
+        ],
+        "properties": {
+          "type": {
+            "enum": [
+              "task",
+              "reminder",
+              "metric"
+            ]
+          },
+          "title": {
+            "type": "string",
+            "maxLength": 120
+          },
+          "when": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "day_offset": {
+                "type": "integer",
+                "minimum": -30,
+                "maximum": 365
+              },
+              "weekday": {
+                "enum": [
+                  "mon",
+                  "tue",
+                  "wed",
+                  "thu",
+                  "fri",
+                  "sat",
+                  "sun"
+                ]
+              },
+              "which": {
+                "enum": [
+                  "this",
+                  "next"
+                ]
+              },
+              "date": {
+                "type": "string",
+                "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+              },
+              "time": {
+                "type": "string",
+                "pattern": "^[0-9]{2}:[0-9]{2}$"
+              }
+            }
+          },
+          "metric": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "kind": {
+                "enum": [
+                  "sleep",
+                  "water",
+                  "steps",
+                  "weight",
+                  "workout"
+                ]
+              },
+              "exercise": {
+                "type": "string",
+                "maxLength": 60
+              },
+              "sets": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 50
+              },
+              "reps": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 500
+              },
+              "value": {
+                "type": "number"
+              },
+              "unit": {
+                "enum": [
+                  "h",
+                  "min",
+                  "ml",
+                  "l",
+                  "glass",
+                  "count",
+                  "kg",
+                  "lb"
+                ]
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

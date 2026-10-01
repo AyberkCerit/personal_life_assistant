@@ -1,0 +1,6087 @@
+[
+  {
+    "id": "eval/tr-001",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "task",
+      "title": "Omuz çalışması",
+      "when": {
+        "day_offset": 1,
+        "time": "08:00"
+      }
+    },
+    "date": "2026-10-01",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "eval/tr-002",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "task",
+      "title": "Diş hekimi randevusu",
+      "when": {
+        "weekday": "fri",
+        "which": "this",
+        "time": "14:00"
+      }
+    },
+    "date": "2026-10-02",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "eval/tr-003",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "task",
+      "title": "Annemi aramak",
+      "when": {
+        "day_offset": 0,
+        "time": "19:00"
+      }
+    },
+    "date": "2026-09-30",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "eval/tr-004",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "task",
+      "title": "Fatura ödemesi",
+      "when": {
+        "weekday": "mon",
+        "which": "this"
+      }
+    },
+    "date": "2026-10-05",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "eval/tr-005",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "task",
+      "title": "Proje raporunu teslim et",
+      "when": {
+        "weekday": "fri",
+        "which": "next"
+      }
+    },
+    "date": "2026-10-09",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "eval/tr-006",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "task",
+      "title": "Market alışverişi",
+      "when": {
+        "day_offset": 2
+      }
+    },
+    "date": "2026-10-02",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "eval/tr-007",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "task",
+      "title": "Mehmet'le öğle yemeği",
+      "when": {
+        "day_offset": 1,
+        "time": "12:00"
+      }
+    },
+    "date": "2026-10-01",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "eval/tr-008",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "task",
+      "title": "Vize başvurusu",
+      "when": {
+        "date": "2026-10-15"
+      }
+    },
+    "date": "2026-10-15",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "eval/tr-009",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "task",
+      "title": "İlaçları almak",
+      "when": {
+        "day_offset": 0,
+        "time": "21:30"
+      }
+    },
+    "date": "2026-09-30",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "eval/tr-010",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "task",
+      "title": "Takım toplantısı",
+      "when": {
+        "weekday": "tue",
+        "which": "this",
+        "time": "09:00"
+      }
+    },
+    "date": "2026-10-06",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "eval/tr-011",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "task",
+      "title": "Kitapları iade et",
+      "when": {
+        "day_offset": 3
+      }
+    },
+    "date": "2026-10-03",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "eval/tr-012",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "task",
+      "title": "Spor salonuna git",
+      "when": {
+        "day_offset": 1,
+        "time": "18:30"
+      }
+    },
+    "date": "2026-10-01",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "eval/tr-013",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "task",
+      "title": "Bisikleti tamire götür",
+      "when": {
+        "weekday": "sun",
+        "which": "this"
+      }
+    },
+    "date": "2026-10-04",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "eval/tr-014",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "task",
+      "title": "Kuaför randevusu",
+      "when": {
+        "weekday": "sat",
+        "which": "this",
+        "time": "10:00"
+      }
+    },
+    "date": "2026-10-03",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "eval/tr-015",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "task",
+      "title": "Hediye almayı unutma",
+      "when": {
+        "weekday": "thu",
+        "which": "this"
+      }
+    },
+    "date": "2026-10-01",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "eval/tr-016",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "task",
+      "title": "Uyandırma",
+      "when": {
+        "day_offset": 1,
+        "time": "07:00"
+      }
+    },
+    "date": "2026-10-01",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "eval/tr-017",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "task",
+      "title": "Kira ödemesi",
+      "when": {
+        "day_offset": 5
+      }
+    },
+    "date": "2026-10-05",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "eval/tr-018",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "task",
+      "title": "Kediyi veterinere götürmek",
+      "when": {
+        "day_offset": 0,
+        "time": "15:00"
+      }
+    },
+    "date": "2026-09-30",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "eval/tr-019",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "task",
+      "title": "Çalışmaya başla",
+      "when": {
+        "weekday": "wed",
+        "which": "next"
+      }
+    },
+    "date": "2026-10-07",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "eval/tr-020",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "task",
+      "title": "Kardeşi almak",
+      "when": {
+        "day_offset": 1,
+        "time": "16:45"
+      }
+    },
+    "date": "2026-10-01",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "eval/tr-021",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "task",
+      "title": "Staj mülakatı",
+      "when": {
+        "date": "2026-10-20",
+        "time": "11:00"
+      }
+    },
+    "date": "2026-10-20",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "eval/tr-022",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "task",
+      "title": "Arkadaşlarla sinema",
+      "when": {
+        "weekday": "fri",
+        "which": "this"
+      }
+    },
+    "date": "2026-10-02",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "eval/tr-023",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "task",
+      "title": "Çamaşır makinesini boşalt",
+      "when": {
+        "day_offset": 0,
+        "time": "20:00"
+      }
+    },
+    "date": "2026-09-30",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "eval/tr-024",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "task",
+      "title": "Bankayla görüşme",
+      "when": {
+        "weekday": "mon",
+        "which": "this",
+        "time": "10:00"
+      }
+    },
+    "date": "2026-10-05",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "eval/tr-025",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "task",
+      "title": "Sunum slaytlarını bitir",
+      "when": {
+        "day_offset": 1
+      }
+    },
+    "date": "2026-10-01",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "eval/tr-026",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "task",
+      "title": "Koşuya çık",
+      "when": {
+        "day_offset": 2,
+        "time": "06:00"
+      }
+    },
+    "date": "2026-10-02",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "eval/tr-027",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "task",
+      "title": "Annemlerde yemek",
+      "when": {
+        "weekday": "sat",
+        "which": "this",
+        "time": "13:00"
+      }
+    },
+    "date": "2026-10-03",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "eval/tr-028",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "task",
+      "title": "Araç muayenesi",
+      "when": {
+        "weekday": "tue",
+        "which": "this"
+      }
+    },
+    "date": "2026-10-06",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "eval/tr-029",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "task",
+      "title": "Haftalık raporu gönder",
+      "when": {
+        "weekday": "fri",
+        "which": "this",
+        "time": "17:00"
+      }
+    },
+    "date": "2026-10-02",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "eval/tr-030",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "task",
+      "title": "Ders çalışma grubuyla buluş",
+      "when": {
+        "day_offset": 1,
+        "time": "14:00"
+      }
+    },
+    "date": "2026-10-01",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "eval/tr-031",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "task",
+      "title": "Pasaport yenileme randevusu",
+      "when": {
+        "date": "2026-11-01"
+      }
+    },
+    "date": "2026-11-01",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "eval/tr-032",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "task",
+      "title": "Basketbol maçı",
+      "when": {
+        "weekday": "thu",
+        "which": "this",
+        "time": "19:00"
+      }
+    },
+    "date": "2026-10-01",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "eval/tr-033",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "task",
+      "title": "Elektrik faturasını öde",
+      "when": {
+        "day_offset": 1
+      }
+    },
+    "date": "2026-10-01",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "eval/tr-034",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "task",
+      "title": "Uzun koşu",
+      "when": {
+        "weekday": "sun",
+        "which": "this",
+        "time": "09:00"
+      }
+    },
+    "date": "2026-10-04",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "eval/tr-035",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "task",
+      "title": "Online derse katıl",
+      "when": {
+        "day_offset": 0,
+        "time": "18:00"
+      }
+    },
+    "date": "2026-09-30",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "eval/tr-036",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "task",
+      "title": "Kan tahlili sonuçlarını doktora götür",
+      "when": {
+        "day_offset": 2
+      }
+    },
+    "date": "2026-10-02",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "eval/tr-037",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "task",
+      "title": "Dişçi kontrolü",
+      "when": {
+        "weekday": "tue",
+        "which": "next"
+      }
+    },
+    "date": "2026-10-13",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "eval/tr-038",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "task",
+      "title": "Otobüse yetiş",
+      "when": {
+        "weekday": "fri",
+        "which": "this",
+        "time": "08:15"
+      }
+    },
+    "date": "2026-10-02",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "eval/tr-039",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "task",
+      "title": "Pasta sipariş et",
+      "when": {
+        "day_offset": 1
+      }
+    },
+    "date": "2026-10-01",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "eval/tr-040",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "task",
+      "title": "Yüzme dersi",
+      "when": {
+        "weekday": "sat",
+        "which": "this",
+        "time": "11:30"
+      }
+    },
+    "date": "2026-10-03",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "eval/tr-041",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "metric",
+      "when": {
+        "day_offset": -1
+      },
+      "metric": {
+        "kind": "sleep",
+        "value": 7,
+        "unit": "h"
+      }
+    },
+    "date": "2026-09-29",
+    "valid": true,
+    "value": 7
+  },
+  {
+    "id": "eval/tr-042",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "metric",
+      "metric": {
+        "kind": "sleep",
+        "value": 5.5,
+        "unit": "h"
+      }
+    },
+    "date": "2026-09-30",
+    "valid": true,
+    "value": 5.5
+  },
+  {
+    "id": "eval/tr-043",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "metric",
+      "metric": {
+        "kind": "water",
+        "value": 3,
+        "unit": "glass"
+      }
+    },
+    "date": "2026-09-30",
+    "valid": true,
+    "value": 750
+  },
+  {
+    "id": "eval/tr-044",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "metric",
+      "metric": {
+        "kind": "water",
+        "value": 1.5,
+        "unit": "l"
+      }
+    },
+    "date": "2026-09-30",
+    "valid": true,
+    "value": 1500.0
+  },
+  {
+    "id": "eval/tr-045",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "metric",
+      "metric": {
+        "kind": "steps",
+        "value": 8500,
+        "unit": "count"
+      }
+    },
+    "date": "2026-09-30",
+    "valid": true,
+    "value": 8500
+  },
+  {
+    "id": "eval/tr-046",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "metric",
+      "when": {
+        "day_offset": -1
+      },
+      "metric": {
+        "kind": "steps",
+        "value": 12000,
+        "unit": "count"
+      }
+    },
+    "date": "2026-09-29",
+    "valid": true,
+    "value": 12000
+  },
+  {
+    "id": "eval/tr-047",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "metric",
+      "metric": {
+        "kind": "weight",
+        "value": 78.4,
+        "unit": "kg"
+      }
+    },
+    "date": "2026-09-30",
+    "valid": true,
+    "value": 78.4
+  },
+  {
+    "id": "eval/tr-048",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "metric",
+      "metric": {
+        "kind": "weight",
+        "value": 81,
+        "unit": "kg"
+      }
+    },
+    "date": "2026-09-30",
+    "valid": true,
+    "value": 81
+  },
+  {
+    "id": "eval/tr-049",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "metric",
+      "metric": {
+        "kind": "workout",
+        "exercise": "bench press",
+        "sets": 4,
+        "reps": 10,
+        "value": 60,
+        "unit": "kg"
+      }
+    },
+    "date": "2026-09-30",
+    "valid": true,
+    "value": 60
+  },
+  {
+    "id": "eval/tr-050",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "metric",
+      "metric": {
+        "kind": "workout",
+        "exercise": "squat",
+        "sets": 5,
+        "reps": 5,
+        "value": 100,
+        "unit": "kg"
+      }
+    },
+    "date": "2026-09-30",
+    "valid": true,
+    "value": 100
+  },
+  {
+    "id": "eval/tr-051",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "metric",
+      "when": {
+        "day_offset": -1
+      },
+      "metric": {
+        "kind": "workout",
+        "exercise": "deadlift",
+        "sets": 3,
+        "reps": 8,
+        "value": 120,
+        "unit": "kg"
+      }
+    },
+    "date": "2026-09-29",
+    "valid": true,
+    "value": 120
+  },
+  {
+    "id": "eval/tr-052",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "metric",
+      "when": {
+        "day_offset": -1
+      },
+      "metric": {
+        "kind": "sleep",
+        "value": 6,
+        "unit": "h"
+      }
+    },
+    "date": "2026-09-29",
+    "valid": true,
+    "value": 6
+  },
+  {
+    "id": "eval/tr-053",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "metric",
+      "metric": {
+        "kind": "water",
+        "value": 2,
+        "unit": "l"
+      }
+    },
+    "date": "2026-09-30",
+    "valid": true,
+    "value": 2000
+  },
+  {
+    "id": "eval/tr-054",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "metric",
+      "when": {
+        "day_offset": 0
+      },
+      "metric": {
+        "kind": "steps",
+        "value": 10000,
+        "unit": "count"
+      }
+    },
+    "date": "2026-09-30",
+    "valid": true,
+    "value": 10000
+  },
+  {
+    "id": "eval/tr-055",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "metric",
+      "when": {
+        "weekday": "mon",
+        "which": "this"
+      },
+      "metric": {
+        "kind": "weight",
+        "value": 79.2,
+        "unit": "kg"
+      }
+    },
+    "date": "2026-10-05",
+    "valid": true,
+    "value": 79.2
+  },
+  {
+    "id": "eval/tr-056",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "metric",
+      "metric": {
+        "kind": "water",
+        "value": 4,
+        "unit": "glass"
+      }
+    },
+    "date": "2026-09-30",
+    "valid": true,
+    "value": 1000
+  },
+  {
+    "id": "eval/tr-057",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "metric",
+      "when": {
+        "day_offset": -1
+      },
+      "metric": {
+        "kind": "sleep",
+        "value": 8,
+        "unit": "h"
+      }
+    },
+    "date": "2026-09-29",
+    "valid": true,
+    "value": 8
+  },
+  {
+    "id": "eval/tr-058",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "metric",
+      "metric": {
+        "kind": "workout",
+        "exercise": "barfiks",
+        "sets": 3,
+        "reps": 12,
+        "value": 0,
+        "unit": "kg"
+      }
+    },
+    "date": "2026-09-30",
+    "valid": true,
+    "value": 0
+  },
+  {
+    "id": "eval/tr-059",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "metric",
+      "metric": {
+        "kind": "steps",
+        "value": 6200,
+        "unit": "count"
+      }
+    },
+    "date": "2026-09-30",
+    "valid": true,
+    "value": 6200
+  },
+  {
+    "id": "eval/tr-060",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "metric",
+      "metric": {
+        "kind": "weight",
+        "value": 74,
+        "unit": "kg"
+      }
+    },
+    "date": "2026-09-30",
+    "valid": true,
+    "value": 74
+  },
+  {
+    "id": "eval/tr-061",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "metric",
+      "metric": {
+        "kind": "sleep",
+        "value": 7.5,
+        "unit": "h"
+      }
+    },
+    "date": "2026-09-30",
+    "valid": true,
+    "value": 7.5
+  },
+  {
+    "id": "eval/tr-062",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "metric",
+      "metric": {
+        "kind": "water",
+        "value": 0.5,
+        "unit": "l"
+      }
+    },
+    "date": "2026-09-30",
+    "valid": true,
+    "value": 500.0
+  },
+  {
+    "id": "eval/tr-063",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "metric",
+      "when": {
+        "day_offset": -1
+      },
+      "metric": {
+        "kind": "workout",
+        "exercise": "şınav",
+        "sets": 3,
+        "reps": 15,
+        "value": 0,
+        "unit": "kg"
+      }
+    },
+    "date": "2026-09-29",
+    "valid": true,
+    "value": 0
+  },
+  {
+    "id": "eval/tr-064",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "metric",
+      "metric": {
+        "kind": "workout",
+        "exercise": "overhead press",
+        "sets": 4,
+        "reps": 8,
+        "value": 40,
+        "unit": "kg"
+      }
+    },
+    "date": "2026-09-30",
+    "valid": true,
+    "value": 40
+  },
+  {
+    "id": "eval/tr-065",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "metric",
+      "metric": {
+        "kind": "steps",
+        "value": 15000,
+        "unit": "count"
+      }
+    },
+    "date": "2026-09-30",
+    "valid": true,
+    "value": 15000
+  },
+  {
+    "id": "eval/tr-066",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "metric",
+      "when": {
+        "day_offset": -1
+      },
+      "metric": {
+        "kind": "sleep",
+        "value": 6,
+        "unit": "h"
+      }
+    },
+    "date": "2026-09-29",
+    "valid": true,
+    "value": 6
+  },
+  {
+    "id": "eval/tr-066",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "task",
+      "title": "Yoga",
+      "when": {
+        "day_offset": 1,
+        "time": "07:00"
+      }
+    },
+    "date": "2026-10-01",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "eval/tr-067",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "metric",
+      "metric": {
+        "kind": "water",
+        "value": 2,
+        "unit": "l"
+      }
+    },
+    "date": "2026-09-30",
+    "valid": true,
+    "value": 2000
+  },
+  {
+    "id": "eval/tr-067",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "task",
+      "title": "Vitamin almak",
+      "when": {
+        "day_offset": 0,
+        "time": "21:00"
+      }
+    },
+    "date": "2026-09-30",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "eval/tr-068",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "task",
+      "title": "E-postaları yanıtla ve sunumu hazırla",
+      "when": {
+        "day_offset": 1
+      }
+    },
+    "date": "2026-10-01",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "eval/tr-069",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "metric",
+      "metric": {
+        "kind": "weight",
+        "value": 80.5,
+        "unit": "kg"
+      }
+    },
+    "date": "2026-09-30",
+    "valid": true,
+    "value": 80.5
+  },
+  {
+    "id": "eval/tr-069",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "task",
+      "title": "Spor salonuna yazıl",
+      "when": {
+        "weekday": "sat",
+        "which": "this"
+      }
+    },
+    "date": "2026-10-03",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "eval/tr-070",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "metric",
+      "metric": {
+        "kind": "workout",
+        "exercise": "bench",
+        "sets": 3,
+        "reps": 10,
+        "value": 50,
+        "unit": "kg"
+      }
+    },
+    "date": "2026-09-30",
+    "valid": true,
+    "value": 50
+  },
+  {
+    "id": "eval/tr-071",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "task",
+      "title": "Toplantı",
+      "when": {
+        "weekday": "mon",
+        "time": "10:00"
+      }
+    },
+    "date": "2026-10-05",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "eval/tr-071",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "task",
+      "title": "Sunum",
+      "when": {
+        "weekday": "tue",
+        "time": "14:00"
+      }
+    },
+    "date": "2026-10-06",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "eval/tr-072",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "metric",
+      "when": {
+        "day_offset": -1
+      },
+      "metric": {
+        "kind": "steps",
+        "value": 9000,
+        "unit": "count"
+      }
+    },
+    "date": "2026-09-29",
+    "valid": true,
+    "value": 9000
+  },
+  {
+    "id": "eval/tr-072",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "metric",
+      "metric": {
+        "kind": "water",
+        "value": 5,
+        "unit": "glass"
+      }
+    },
+    "date": "2026-09-30",
+    "valid": true,
+    "value": 1250
+  },
+  {
+    "id": "eval/tr-073",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "task",
+      "title": "Market alışverişi",
+      "when": {
+        "day_offset": 1
+      }
+    },
+    "date": "2026-10-01",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "eval/tr-073",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "task",
+      "title": "Faturaları öde",
+      "when": {
+        "weekday": "thu",
+        "which": "this"
+      }
+    },
+    "date": "2026-10-01",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "eval/tr-074",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "metric",
+      "metric": {
+        "kind": "sleep",
+        "value": 7,
+        "unit": "h"
+      }
+    },
+    "date": "2026-09-30",
+    "valid": true,
+    "value": 7
+  },
+  {
+    "id": "eval/tr-074",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "metric",
+      "metric": {
+        "kind": "steps",
+        "value": 8000,
+        "unit": "count"
+      }
+    },
+    "date": "2026-09-30",
+    "valid": true,
+    "value": 8000
+  },
+  {
+    "id": "eval/tr-075",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "task",
+      "title": "Veli toplantısı",
+      "when": {
+        "day_offset": 2,
+        "time": "15:00"
+      }
+    },
+    "date": "2026-10-02",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "eval/tr-075",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "task",
+      "title": "Saçını kestir",
+      "when": {
+        "day_offset": 1
+      }
+    },
+    "date": "2026-10-01",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "eval/tr-076",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "metric",
+      "metric": {
+        "kind": "workout",
+        "exercise": "squat",
+        "sets": 4,
+        "reps": 8,
+        "value": 80,
+        "unit": "kg"
+      }
+    },
+    "date": "2026-09-30",
+    "valid": true,
+    "value": 80
+  },
+  {
+    "id": "eval/tr-076",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "metric",
+      "metric": {
+        "kind": "water",
+        "value": 2,
+        "unit": "l"
+      }
+    },
+    "date": "2026-09-30",
+    "valid": true,
+    "value": 2000
+  },
+  {
+    "id": "eval/tr-077",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "task",
+      "title": "Sinema",
+      "when": {
+        "weekday": "fri",
+        "which": "this",
+        "time": "18:00"
+      }
+    },
+    "date": "2026-10-02",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "eval/tr-077",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "task",
+      "title": "Kahvaltı",
+      "when": {
+        "weekday": "sat",
+        "which": "this",
+        "time": "10:00"
+      }
+    },
+    "date": "2026-10-03",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "eval/tr-078",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "metric",
+      "when": {
+        "day_offset": -1
+      },
+      "metric": {
+        "kind": "sleep",
+        "value": 5,
+        "unit": "h"
+      }
+    },
+    "date": "2026-09-29",
+    "valid": true,
+    "value": 5
+  },
+  {
+    "id": "eval/tr-078",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "task",
+      "title": "Erken yat",
+      "when": {
+        "day_offset": 0,
+        "time": "22:30"
+      }
+    },
+    "date": "2026-09-30",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "eval/tr-079",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "task",
+      "title": "Kira ödemesi",
+      "when": {
+        "weekday": "fri",
+        "which": "next"
+      }
+    },
+    "date": "2026-10-09",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "eval/tr-079",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "task",
+      "title": "Aidat ödemesi",
+      "when": {
+        "date": "2026-10-15"
+      }
+    },
+    "date": "2026-10-15",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "eval/tr-080",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "metric",
+      "metric": {
+        "kind": "steps",
+        "value": 11000,
+        "unit": "count"
+      }
+    },
+    "date": "2026-09-30",
+    "valid": true,
+    "value": 11000
+  },
+  {
+    "id": "eval/tr-080",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "metric",
+      "metric": {
+        "kind": "weight",
+        "value": 78,
+        "unit": "kg"
+      }
+    },
+    "date": "2026-09-30",
+    "valid": true,
+    "value": 78
+  },
+  {
+    "id": "eval/tr-096",
+    "ref": "2026-10-03",
+    "item": {
+      "type": "task",
+      "title": "Ders kaydı",
+      "when": {
+        "weekday": "mon",
+        "which": "this",
+        "time": "09:00"
+      }
+    },
+    "date": "2026-10-05",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "eval/tr-097",
+    "ref": "2026-10-03",
+    "item": {
+      "type": "task",
+      "title": "Annemle yemek",
+      "when": {
+        "day_offset": 1
+      }
+    },
+    "date": "2026-10-04",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "eval/tr-098",
+    "ref": "2026-10-03",
+    "item": {
+      "type": "metric",
+      "when": {
+        "day_offset": -1
+      },
+      "metric": {
+        "kind": "sleep",
+        "value": 7.5,
+        "unit": "h"
+      }
+    },
+    "date": "2026-10-02",
+    "valid": true,
+    "value": 7.5
+  },
+  {
+    "id": "eval/tr-099",
+    "ref": "2026-10-03",
+    "item": {
+      "type": "task",
+      "title": "Proje teslimi",
+      "when": {
+        "weekday": "fri",
+        "which": "this"
+      }
+    },
+    "date": "2026-10-09",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "eval/tr-100",
+    "ref": "2026-10-03",
+    "item": {
+      "type": "task",
+      "title": "Dişçi randevusu",
+      "when": {
+        "weekday": "mon",
+        "which": "next",
+        "time": "11:00"
+      }
+    },
+    "date": "2026-10-12",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "eval/en-001",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "task",
+      "title": "Dişçi randevusu",
+      "when": {
+        "weekday": "fri",
+        "which": "this",
+        "time": "14:00"
+      }
+    },
+    "date": "2026-10-02",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "eval/en-002",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "task",
+      "title": "Koşu",
+      "when": {
+        "day_offset": 1,
+        "time": "07:00"
+      }
+    },
+    "date": "2026-10-01",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "eval/en-003",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "task",
+      "title": "Anneye ara",
+      "when": {
+        "day_offset": 0,
+        "time": "20:00"
+      }
+    },
+    "date": "2026-09-30",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "eval/en-004",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "task",
+      "title": "Elektrik faturasını öde",
+      "when": {
+        "weekday": "mon",
+        "which": "this"
+      }
+    },
+    "date": "2026-10-05",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "eval/en-005",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "task",
+      "title": "Proje raporunu teslim et",
+      "when": {
+        "weekday": "fri",
+        "which": "next"
+      }
+    },
+    "date": "2026-10-09",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "eval/en-006",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "task",
+      "title": "Market alışverişi",
+      "when": {
+        "day_offset": 2
+      }
+    },
+    "date": "2026-10-02",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "eval/en-007",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "task",
+      "title": "Sarah ile öğle yemeği",
+      "when": {
+        "day_offset": 1,
+        "time": "12:00"
+      }
+    },
+    "date": "2026-10-01",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "eval/en-008",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "task",
+      "title": "Vize başvurusu son teslim tarihi",
+      "when": {
+        "date": "2026-10-15"
+      }
+    },
+    "date": "2026-10-15",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "eval/en-009",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "task",
+      "title": "İlaçları al",
+      "when": {
+        "day_offset": 0,
+        "time": "21:30"
+      }
+    },
+    "date": "2026-09-30",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "eval/en-010",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "task",
+      "title": "Team standup",
+      "when": {
+        "weekday": "tue",
+        "which": "this",
+        "time": "09:00"
+      }
+    },
+    "date": "2026-10-06",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "eval/en-011",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "task",
+      "title": "Kitapları iade et",
+      "when": {
+        "day_offset": 3
+      }
+    },
+    "date": "2026-10-03",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "eval/en-012",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "metric",
+      "metric": {
+        "kind": "workout",
+        "exercise": "gym",
+        "sets": 1,
+        "reps": 1,
+        "value": 1,
+        "unit": "h"
+      }
+    },
+    "date": "2026-09-30",
+    "valid": true,
+    "value": 1
+  },
+  {
+    "id": "eval/en-013",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "task",
+      "title": "Bisikleti tamirciye götür",
+      "when": {
+        "weekday": "sun",
+        "which": "this"
+      }
+    },
+    "date": "2026-10-04",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "eval/en-014",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "task",
+      "title": "Saç kesimi",
+      "when": {
+        "weekday": "sat",
+        "which": "this",
+        "time": "10:00"
+      }
+    },
+    "date": "2026-10-03",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "eval/en-015",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "task",
+      "title": "Ali'nin doğum günü için hediye al",
+      "when": {
+        "weekday": "thu",
+        "which": "this"
+      }
+    },
+    "date": "2026-10-01",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "eval/en-016",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "task",
+      "title": "Uyandırma",
+      "when": {
+        "day_offset": 1,
+        "time": "06:00"
+      }
+    },
+    "date": "2026-10-01",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "eval/en-017",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "task",
+      "title": "Rent ödeme",
+      "when": {
+        "date": "2026-09-05"
+      }
+    },
+    "date": "2026-09-05",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "eval/en-018",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "task",
+      "title": "Kedi için veteriner",
+      "when": {
+        "day_offset": 0,
+        "time": "15:00"
+      }
+    },
+    "date": "2026-09-30",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "eval/en-019",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "task",
+      "title": "Çalışmaya başla",
+      "when": {
+        "weekday": "wed",
+        "which": "next"
+      }
+    },
+    "date": "2026-10-07",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "eval/en-020",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "task",
+      "title": "Kardeşimi okuldan almak",
+      "when": {
+        "day_offset": 1,
+        "time": "16:45"
+      }
+    },
+    "date": "2026-10-01",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "eval/en-021",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "task",
+      "title": "Internship interview",
+      "when": {
+        "date": "2026-10-20",
+        "time": "11:00"
+      }
+    },
+    "date": "2026-10-20",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "eval/en-022",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "task",
+      "title": "Film gecesi",
+      "when": {
+        "weekday": "fri",
+        "which": "this"
+      }
+    },
+    "date": "2026-10-02",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "eval/en-023",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "task",
+      "title": "Çamaşır makinesini boşalt",
+      "when": {
+        "day_offset": 0,
+        "time": "20:00"
+      }
+    },
+    "date": "2026-09-30",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "eval/en-024",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "task",
+      "title": "Bank toplantısı",
+      "when": {
+        "weekday": "mon",
+        "which": "this",
+        "time": "10:00"
+      }
+    },
+    "date": "2026-10-05",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "eval/en-025",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "task",
+      "title": "Sunum slaytlarını bitir",
+      "when": {
+        "day_offset": 1
+      }
+    },
+    "date": "2026-10-01",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "eval/en-026",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "task",
+      "title": "Koşma",
+      "when": {
+        "day_offset": 2,
+        "time": "06:00"
+      }
+    },
+    "date": "2026-10-02",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "eval/en-027",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "task",
+      "title": "Aile yemeği",
+      "when": {
+        "weekday": "sat",
+        "which": "this",
+        "time": "13:00"
+      }
+    },
+    "date": "2026-10-03",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "eval/en-028",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "task",
+      "title": "Araç kontrolü",
+      "when": {
+        "weekday": "tue",
+        "which": "this"
+      }
+    },
+    "date": "2026-10-06",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "eval/en-029",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "task",
+      "title": "Haftalık raporu göndermek",
+      "when": {
+        "weekday": "fri",
+        "which": "this",
+        "time": "17:00"
+      }
+    },
+    "date": "2026-10-02",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "eval/en-030",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "task",
+      "title": "Study group",
+      "when": {
+        "day_offset": 1,
+        "time": "14:00"
+      }
+    },
+    "date": "2026-10-01",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "eval/en-031",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "task",
+      "title": "Pasaport yenileme randevusu",
+      "when": {
+        "date": "2026-11-01"
+      }
+    },
+    "date": "2026-11-01",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "eval/en-032",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "task",
+      "title": "Basketball game",
+      "when": {
+        "weekday": "thu",
+        "which": "this",
+        "time": "19:00"
+      }
+    },
+    "date": "2026-10-01",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "eval/en-033",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "task",
+      "title": "Su faturasını öde",
+      "when": {
+        "day_offset": 1
+      }
+    },
+    "date": "2026-10-01",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "eval/en-034",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "task",
+      "title": "Long run",
+      "when": {
+        "weekday": "sun",
+        "which": "this",
+        "time": "09:00"
+      }
+    },
+    "date": "2026-10-04",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "eval/en-035",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "task",
+      "title": "Online derse katıl",
+      "when": {
+        "day_offset": 0,
+        "time": "18:00"
+      }
+    },
+    "date": "2026-09-30",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "eval/en-036",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "task",
+      "title": "Kan test sonuçlarını doktora götür",
+      "when": {
+        "day_offset": 2
+      }
+    },
+    "date": "2026-10-02",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "eval/en-037",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "task",
+      "title": "Dentist checkup",
+      "when": {
+        "weekday": "tue",
+        "which": "next"
+      }
+    },
+    "date": "2026-10-13",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "eval/en-038",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "task",
+      "title": "Otobüse yetiş",
+      "when": {
+        "weekday": "fri",
+        "which": "this",
+        "time": "08:15"
+      }
+    },
+    "date": "2026-10-02",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "eval/en-039",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "task",
+      "title": "Kek siparişini ver",
+      "when": {
+        "day_offset": 1
+      }
+    },
+    "date": "2026-10-01",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "eval/en-040",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "task",
+      "title": "Yüzme dersi",
+      "when": {
+        "weekday": "sat",
+        "which": "this",
+        "time": "11:30"
+      }
+    },
+    "date": "2026-10-03",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "eval/en-041",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "metric",
+      "metric": {
+        "kind": "sleep",
+        "value": 7,
+        "unit": "h"
+      }
+    },
+    "date": "2026-09-30",
+    "valid": true,
+    "value": 7
+  },
+  {
+    "id": "eval/en-042",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "metric",
+      "metric": {
+        "kind": "sleep",
+        "value": 5.5,
+        "unit": "h"
+      }
+    },
+    "date": "2026-09-30",
+    "valid": true,
+    "value": 5.5
+  },
+  {
+    "id": "eval/en-043",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "metric",
+      "metric": {
+        "kind": "water",
+        "value": 3,
+        "unit": "glass"
+      }
+    },
+    "date": "2026-09-30",
+    "valid": true,
+    "value": 750
+  },
+  {
+    "id": "eval/en-044",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "metric",
+      "metric": {
+        "kind": "water",
+        "value": 1.5,
+        "unit": "l"
+      }
+    },
+    "date": "2026-09-30",
+    "valid": true,
+    "value": 1500.0
+  },
+  {
+    "id": "eval/en-045",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "metric",
+      "metric": {
+        "kind": "steps",
+        "value": 8500,
+        "unit": "count"
+      }
+    },
+    "date": "2026-09-30",
+    "valid": true,
+    "value": 8500
+  },
+  {
+    "id": "eval/en-046",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "metric",
+      "when": {
+        "day_offset": -1
+      },
+      "metric": {
+        "kind": "steps",
+        "value": 12000,
+        "unit": "count"
+      }
+    },
+    "date": "2026-09-29",
+    "valid": true,
+    "value": 12000
+  },
+  {
+    "id": "eval/en-047",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "metric",
+      "metric": {
+        "kind": "weight",
+        "value": 78.4,
+        "unit": "kg"
+      }
+    },
+    "date": "2026-09-30",
+    "valid": true,
+    "value": 78.4
+  },
+  {
+    "id": "eval/en-048",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "metric",
+      "metric": {
+        "kind": "weight",
+        "value": 180,
+        "unit": "lb"
+      }
+    },
+    "date": "2026-09-30",
+    "valid": true,
+    "value": 81.6466266
+  },
+  {
+    "id": "eval/en-049",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "metric",
+      "metric": {
+        "kind": "workout",
+        "exercise": "bench press",
+        "sets": 4,
+        "reps": 10,
+        "value": 60,
+        "unit": "kg"
+      }
+    },
+    "date": "2026-09-30",
+    "valid": true,
+    "value": 60
+  },
+  {
+    "id": "eval/en-050",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "metric",
+      "metric": {
+        "kind": "workout",
+        "exercise": "squats",
+        "sets": 5,
+        "reps": 5,
+        "value": 100,
+        "unit": "kg"
+      }
+    },
+    "date": "2026-09-30",
+    "valid": true,
+    "value": 100
+  },
+  {
+    "id": "eval/en-051",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "metric",
+      "when": {
+        "day_offset": -1
+      },
+      "metric": {
+        "kind": "workout",
+        "exercise": "deadlift",
+        "sets": 3,
+        "reps": 8,
+        "value": 120,
+        "unit": "kg"
+      }
+    },
+    "date": "2026-09-29",
+    "valid": true,
+    "value": 120
+  },
+  {
+    "id": "eval/en-052",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "metric",
+      "when": {
+        "day_offset": -2
+      },
+      "metric": {
+        "kind": "sleep",
+        "value": 6,
+        "unit": "h"
+      }
+    },
+    "date": "2026-09-28",
+    "valid": true,
+    "value": 6
+  },
+  {
+    "id": "eval/en-053",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "metric",
+      "metric": {
+        "kind": "water",
+        "value": 2,
+        "unit": "l"
+      }
+    },
+    "date": "2026-09-30",
+    "valid": true,
+    "value": 2000
+  },
+  {
+    "id": "eval/en-054",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "metric",
+      "metric": {
+        "kind": "steps",
+        "value": 10000,
+        "unit": "count"
+      }
+    },
+    "date": "2026-09-30",
+    "valid": true,
+    "value": 10000
+  },
+  {
+    "id": "eval/en-055",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "metric",
+      "when": {
+        "day_offset": -1
+      },
+      "metric": {
+        "kind": "weight",
+        "value": 79.2,
+        "unit": "kg"
+      }
+    },
+    "date": "2026-09-29",
+    "valid": true,
+    "value": 79.2
+  },
+  {
+    "id": "eval/en-056",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "metric",
+      "metric": {
+        "kind": "water",
+        "value": 4,
+        "unit": "glass"
+      }
+    },
+    "date": "2026-09-30",
+    "valid": true,
+    "value": 1000
+  },
+  {
+    "id": "eval/en-057",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "metric",
+      "metric": {
+        "kind": "sleep",
+        "value": 8,
+        "unit": "h"
+      }
+    },
+    "date": "2026-09-30",
+    "valid": true,
+    "value": 8
+  },
+  {
+    "id": "eval/en-058",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "metric",
+      "metric": {
+        "kind": "workout",
+        "exercise": "pull-ups",
+        "sets": 3,
+        "reps": 12,
+        "value": 0,
+        "unit": "kg"
+      }
+    },
+    "date": "2026-09-30",
+    "valid": true,
+    "value": 0
+  },
+  {
+    "id": "eval/en-059",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "metric",
+      "metric": {
+        "kind": "steps",
+        "value": 6200,
+        "unit": "count"
+      }
+    },
+    "date": "2026-09-30",
+    "valid": true,
+    "value": 6200
+  },
+  {
+    "id": "eval/en-060",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "metric",
+      "metric": {
+        "kind": "weight",
+        "value": 74,
+        "unit": "kg"
+      }
+    },
+    "date": "2026-09-30",
+    "valid": true,
+    "value": 74
+  },
+  {
+    "id": "eval/en-061",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "metric",
+      "metric": {
+        "kind": "sleep",
+        "value": 7.5,
+        "unit": "h"
+      }
+    },
+    "date": "2026-09-30",
+    "valid": true,
+    "value": 7.5
+  },
+  {
+    "id": "eval/en-062",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "metric",
+      "metric": {
+        "kind": "water",
+        "value": 0.5,
+        "unit": "l"
+      }
+    },
+    "date": "2026-09-30",
+    "valid": true,
+    "value": 500.0
+  },
+  {
+    "id": "eval/en-063",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "metric",
+      "when": {
+        "day_offset": -1
+      },
+      "metric": {
+        "kind": "workout",
+        "exercise": "push-ups",
+        "sets": 3,
+        "reps": 15,
+        "value": 0,
+        "unit": "count"
+      }
+    },
+    "date": "2026-09-29",
+    "valid": true,
+    "value": 0
+  },
+  {
+    "id": "eval/en-064",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "metric",
+      "metric": {
+        "kind": "workout",
+        "exercise": "overhead press",
+        "sets": 4,
+        "reps": 8,
+        "value": 40,
+        "unit": "kg"
+      }
+    },
+    "date": "2026-09-30",
+    "valid": true,
+    "value": 40
+  },
+  {
+    "id": "eval/en-065",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "metric",
+      "metric": {
+        "kind": "steps",
+        "value": 15000,
+        "unit": "count"
+      }
+    },
+    "date": "2026-09-30",
+    "valid": true,
+    "value": 15000
+  },
+  {
+    "id": "eval/en-066",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "metric",
+      "when": {
+        "day_offset": -1
+      },
+      "metric": {
+        "kind": "sleep",
+        "value": 6,
+        "unit": "h"
+      }
+    },
+    "date": "2026-09-29",
+    "valid": true,
+    "value": 6
+  },
+  {
+    "id": "eval/en-066",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "task",
+      "title": "Yoga",
+      "when": {
+        "weekday": "thu",
+        "which": "this",
+        "time": "07:00"
+      }
+    },
+    "date": "2026-10-01",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "eval/en-067",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "metric",
+      "metric": {
+        "kind": "water",
+        "value": 2,
+        "unit": "l"
+      }
+    },
+    "date": "2026-09-30",
+    "valid": true,
+    "value": 2000
+  },
+  {
+    "id": "eval/en-067",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "task",
+      "title": "Vitamins almak",
+      "when": {
+        "time": "21:00"
+      }
+    },
+    "date": "2026-09-30",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "eval/en-068",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "task",
+      "title": "E-postalara cevap ver ve sunumu hazırla",
+      "when": {
+        "day_offset": 1
+      }
+    },
+    "date": "2026-10-01",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "eval/en-069",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "task",
+      "title": "Spor salonuna kaydol",
+      "when": {
+        "weekday": "sat",
+        "which": "this"
+      }
+    },
+    "date": "2026-10-03",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "eval/en-070",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "metric",
+      "metric": {
+        "kind": "workout",
+        "exercise": "bench",
+        "sets": 3,
+        "reps": 10,
+        "value": 50,
+        "unit": "kg"
+      }
+    },
+    "date": "2026-09-30",
+    "valid": true,
+    "value": 50
+  },
+  {
+    "id": "eval/en-070",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "task",
+      "title": "Leg day",
+      "when": {
+        "weekday": "fri",
+        "which": "this"
+      }
+    },
+    "date": "2026-10-02",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "eval/en-071",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "task",
+      "title": "Meeting",
+      "when": {
+        "weekday": "mon",
+        "time": "10:00"
+      }
+    },
+    "date": "2026-10-05",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "eval/en-071",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "task",
+      "title": "Presentation",
+      "when": {
+        "weekday": "tue",
+        "time": "14:00"
+      }
+    },
+    "date": "2026-10-06",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "eval/en-072",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "metric",
+      "when": {
+        "day_offset": -1
+      },
+      "metric": {
+        "kind": "steps",
+        "value": 9000,
+        "unit": "count"
+      }
+    },
+    "date": "2026-09-29",
+    "valid": true,
+    "value": 9000
+  },
+  {
+    "id": "eval/en-072",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "metric",
+      "metric": {
+        "kind": "water",
+        "value": 5,
+        "unit": "glass"
+      }
+    },
+    "date": "2026-09-30",
+    "valid": true,
+    "value": 1250
+  },
+  {
+    "id": "eval/en-073",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "task",
+      "title": "Grocery shopping",
+      "when": {
+        "day_offset": 1
+      }
+    },
+    "date": "2026-10-01",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "eval/en-073",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "task",
+      "title": "Pay the bills",
+      "when": {
+        "weekday": "thu",
+        "which": "this"
+      }
+    },
+    "date": "2026-10-01",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "eval/en-074",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "metric",
+      "metric": {
+        "kind": "sleep",
+        "value": 7,
+        "unit": "h"
+      }
+    },
+    "date": "2026-09-30",
+    "valid": true,
+    "value": 7
+  },
+  {
+    "id": "eval/en-074",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "metric",
+      "metric": {
+        "kind": "steps",
+        "value": 8000,
+        "unit": "count"
+      }
+    },
+    "date": "2026-09-30",
+    "valid": true,
+    "value": 8000
+  },
+  {
+    "id": "eval/en-075",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "task",
+      "title": "Parent-teacher meeting",
+      "when": {
+        "day_offset": 2,
+        "time": "15:00"
+      }
+    },
+    "date": "2026-10-02",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "eval/en-075",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "task",
+      "title": "Get a haircut",
+      "when": {
+        "day_offset": 1
+      }
+    },
+    "date": "2026-10-01",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "eval/en-076",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "metric",
+      "metric": {
+        "kind": "workout",
+        "exercise": "squats",
+        "sets": 4,
+        "reps": 8,
+        "value": 80,
+        "unit": "kg"
+      }
+    },
+    "date": "2026-09-30",
+    "valid": true,
+    "value": 80
+  },
+  {
+    "id": "eval/en-076",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "metric",
+      "metric": {
+        "kind": "water",
+        "value": 2,
+        "unit": "l"
+      }
+    },
+    "date": "2026-09-30",
+    "valid": true,
+    "value": 2000
+  },
+  {
+    "id": "eval/en-077",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "task",
+      "title": "Film",
+      "when": {
+        "weekday": "fri",
+        "time": "18:00"
+      }
+    },
+    "date": "2026-10-02",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "eval/en-077",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "task",
+      "title": "Brunch",
+      "when": {
+        "weekday": "sat",
+        "time": "10:00"
+      }
+    },
+    "date": "2026-10-03",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "eval/en-078",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "task",
+      "title": "Yatmak",
+      "when": {
+        "day_offset": 0,
+        "time": "22:30"
+      }
+    },
+    "date": "2026-09-30",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "eval/en-078",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "metric",
+      "metric": {
+        "kind": "sleep",
+        "value": 5,
+        "unit": "h"
+      }
+    },
+    "date": "2026-09-30",
+    "valid": true,
+    "value": 5
+  },
+  {
+    "id": "eval/en-079",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "task",
+      "title": "Rent ödeme",
+      "when": {
+        "weekday": "fri",
+        "which": "next"
+      }
+    },
+    "date": "2026-10-09",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "eval/en-079",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "task",
+      "title": "HOA ücreti ödeme",
+      "when": {
+        "date": "2026-10-15"
+      }
+    },
+    "date": "2026-10-15",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "eval/en-080",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "metric",
+      "metric": {
+        "kind": "steps",
+        "value": 11000,
+        "unit": "count"
+      }
+    },
+    "date": "2026-09-30",
+    "valid": true,
+    "value": 11000
+  },
+  {
+    "id": "eval/en-080",
+    "ref": "2026-09-30",
+    "item": {
+      "type": "metric",
+      "metric": {
+        "kind": "weight",
+        "value": 78,
+        "unit": "kg"
+      }
+    },
+    "date": "2026-09-30",
+    "valid": true,
+    "value": 78
+  },
+  {
+    "id": "eval/en-096",
+    "ref": "2026-10-03",
+    "item": {
+      "type": "task",
+      "title": "Course registration",
+      "when": {
+        "weekday": "mon",
+        "which": "this",
+        "time": "09:00"
+      }
+    },
+    "date": "2026-10-05",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "eval/en-097",
+    "ref": "2026-10-03",
+    "item": {
+      "type": "task",
+      "title": "Annemle öğle yemeği",
+      "when": {
+        "day_offset": 1,
+        "time": "12:00"
+      }
+    },
+    "date": "2026-10-04",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "eval/en-098",
+    "ref": "2026-10-03",
+    "item": {
+      "type": "metric",
+      "metric": {
+        "kind": "sleep",
+        "value": 7.5,
+        "unit": "h"
+      }
+    },
+    "date": "2026-10-03",
+    "valid": true,
+    "value": 7.5
+  },
+  {
+    "id": "eval/en-099",
+    "ref": "2026-10-03",
+    "item": {
+      "type": "task",
+      "title": "Proje teslimi",
+      "when": {
+        "weekday": "fri",
+        "which": "this"
+      }
+    },
+    "date": "2026-10-09",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "eval/en-100",
+    "ref": "2026-10-03",
+    "item": {
+      "type": "task",
+      "title": "Dentist",
+      "when": {
+        "weekday": "mon",
+        "which": "next",
+        "time": "11:00"
+      }
+    },
+    "date": "2026-10-12",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "test/tr-001",
+    "ref": "2026-10-06",
+    "item": {
+      "type": "task",
+      "title": "Dişçi",
+      "when": {
+        "day_offset": 1,
+        "time": "09:00"
+      }
+    },
+    "date": "2026-10-07",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "test/tr-002",
+    "ref": "2026-10-06",
+    "item": {
+      "type": "task",
+      "title": "Tez danışmanıyla görüşme",
+      "when": {
+        "weekday": "thu",
+        "which": "this",
+        "time": "16:00"
+      }
+    },
+    "date": "2026-10-08",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "test/tr-003",
+    "ref": "2026-10-06",
+    "item": {
+      "type": "task",
+      "title": "Zeynep'in düğünü",
+      "when": {
+        "weekday": "fri",
+        "time": "20:00"
+      }
+    },
+    "date": "2026-10-09",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "test/tr-004",
+    "ref": "2026-10-06",
+    "item": {
+      "type": "task",
+      "title": "Sunum",
+      "when": {
+        "weekday": "thu",
+        "which": "next"
+      }
+    },
+    "date": "2026-10-15",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "test/tr-005",
+    "ref": "2026-10-06",
+    "item": {
+      "type": "task",
+      "title": "Kargo teslim alma",
+      "when": {
+        "day_offset": 2,
+        "time": "10:30"
+      }
+    },
+    "date": "2026-10-08",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "test/tr-006",
+    "ref": "2026-10-06",
+    "item": {
+      "type": "task",
+      "title": "Halı saha maçı",
+      "when": {
+        "day_offset": 0,
+        "time": "19:30"
+      }
+    },
+    "date": "2026-10-06",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "test/tr-007",
+    "ref": "2026-10-06",
+    "item": {
+      "type": "task",
+      "title": "Anneyi havalimanından al",
+      "when": {
+        "weekday": "sun",
+        "which": "this",
+        "time": "08:00"
+      }
+    },
+    "date": "2026-10-11",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "test/tr-008",
+    "ref": "2026-10-06",
+    "item": {
+      "type": "task",
+      "title": "Ehliyet sınavı",
+      "when": {
+        "date": "2026-10-12"
+      }
+    },
+    "date": "2026-10-12",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "test/tr-009",
+    "ref": "2026-10-06",
+    "item": {
+      "type": "task",
+      "title": "Kitabı kütüphaneden al",
+      "when": {
+        "day_offset": 1
+      }
+    },
+    "date": "2026-10-07",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "test/tr-010",
+    "ref": "2026-10-06",
+    "item": {
+      "type": "task",
+      "title": "Kuzenimin doğum günü partisi",
+      "when": {
+        "weekday": "sat",
+        "which": "this",
+        "time": "14:00"
+      }
+    },
+    "date": "2026-10-10",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "test/tr-011",
+    "ref": "2026-10-06",
+    "item": {
+      "type": "task",
+      "title": "Su faturası son ödeme tarihi",
+      "when": {
+        "weekday": "wed"
+      }
+    },
+    "date": "2026-10-07",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "test/tr-012",
+    "ref": "2026-10-06",
+    "item": {
+      "type": "task",
+      "title": "Vize görüşmesi ve evrakları hazırla",
+      "when": {
+        "day_offset": 4
+      }
+    },
+    "date": "2026-10-10",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "test/tr-013",
+    "ref": "2026-10-06",
+    "item": {
+      "type": "task",
+      "title": "Ahmet'i ara",
+      "when": {
+        "time": "17:15"
+      }
+    },
+    "date": "2026-10-06",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "test/tr-014",
+    "ref": "2026-10-06",
+    "item": {
+      "type": "task",
+      "title": "Laboratuvar dersi",
+      "when": {
+        "weekday": "mon",
+        "which": "this",
+        "time": "08:30"
+      }
+    },
+    "date": "2026-10-12",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "test/tr-015",
+    "ref": "2026-10-06",
+    "item": {
+      "type": "task",
+      "title": "Proje sunumu",
+      "when": {
+        "weekday": "tue",
+        "which": "next",
+        "time": "13:00"
+      }
+    },
+    "date": "2026-10-13",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "test/tr-016",
+    "ref": "2026-10-06",
+    "item": {
+      "type": "task",
+      "title": "Kan verme randevusu",
+      "when": {
+        "day_offset": 1,
+        "time": "12:30"
+      }
+    },
+    "date": "2026-10-07",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "test/tr-017",
+    "ref": "2026-10-06",
+    "item": {
+      "type": "task",
+      "title": "Kütüphane kartını yenile",
+      "when": {
+        "weekday": "fri",
+        "which": "this"
+      }
+    },
+    "date": "2026-10-09",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "test/tr-018",
+    "ref": "2026-10-06",
+    "item": {
+      "type": "task",
+      "title": "Konser",
+      "when": {
+        "date": "2026-10-25",
+        "time": "19:00"
+      }
+    },
+    "date": "2026-10-25",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "test/tr-019",
+    "ref": "2026-10-06",
+    "item": {
+      "type": "task",
+      "title": "İlaç iç",
+      "when": {
+        "day_offset": 0,
+        "time": "22:00"
+      }
+    },
+    "date": "2026-10-06",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "test/tr-020",
+    "ref": "2026-10-06",
+    "item": {
+      "type": "task",
+      "title": "Köpek için veterinerde aşı randevusu",
+      "when": {
+        "weekday": "thu",
+        "which": "this"
+      }
+    },
+    "date": "2026-10-08",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "test/tr-021",
+    "ref": "2026-10-11",
+    "item": {
+      "type": "task",
+      "title": "Erken çık",
+      "when": {
+        "day_offset": 1,
+        "time": "09:00"
+      }
+    },
+    "date": "2026-10-12",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "test/tr-022",
+    "ref": "2026-10-11",
+    "item": {
+      "type": "task",
+      "title": "Ev sahibiyle görüşme",
+      "when": {
+        "weekday": "tue",
+        "which": "this",
+        "time": "11:00"
+      }
+    },
+    "date": "2026-10-13",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "test/tr-023",
+    "ref": "2026-10-11",
+    "item": {
+      "type": "task",
+      "title": "Yoga dersi",
+      "when": {
+        "weekday": "wed",
+        "which": "this",
+        "time": "18:00"
+      }
+    },
+    "date": "2026-10-14",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "test/tr-024",
+    "ref": "2026-10-11",
+    "item": {
+      "type": "task",
+      "title": "Bilet al",
+      "when": {
+        "weekday": "fri",
+        "which": "this"
+      }
+    },
+    "date": "2026-10-16",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "test/tr-025",
+    "ref": "2026-10-11",
+    "item": {
+      "type": "task",
+      "title": "Kira artışı konuşulacak",
+      "when": {
+        "weekday": "mon",
+        "which": "next"
+      }
+    },
+    "date": "2026-10-19",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "test/tr-026",
+    "ref": "2026-10-11",
+    "item": {
+      "type": "task",
+      "title": "Çamaşırları topla",
+      "when": {
+        "day_offset": 0,
+        "time": "16:00"
+      }
+    },
+    "date": "2026-10-11",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "test/tr-027",
+    "ref": "2026-10-11",
+    "item": {
+      "type": "task",
+      "title": "Servis",
+      "when": {
+        "day_offset": 2,
+        "time": "07:45"
+      }
+    },
+    "date": "2026-10-13",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "test/tr-028",
+    "ref": "2026-10-11",
+    "item": {
+      "type": "task",
+      "title": "Toplantı",
+      "when": {
+        "weekday": "thu",
+        "which": "this",
+        "time": "15:00"
+      }
+    },
+    "date": "2026-10-15",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "test/tr-029",
+    "ref": "2026-10-11",
+    "item": {
+      "type": "task",
+      "title": "Kurs kaydı",
+      "when": {
+        "date": "2026-11-01"
+      }
+    },
+    "date": "2026-11-01",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "test/tr-030",
+    "ref": "2026-10-11",
+    "item": {
+      "type": "task",
+      "title": "Pazara git",
+      "when": {
+        "weekday": "sun",
+        "which": "this",
+        "time": "10:00"
+      }
+    },
+    "date": "2026-10-11",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "test/tr-031",
+    "ref": "2026-11-20",
+    "item": {
+      "type": "task",
+      "title": "Berbere git",
+      "when": {
+        "day_offset": 1,
+        "time": "11:00"
+      }
+    },
+    "date": "2026-11-21",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "test/tr-032",
+    "ref": "2026-11-20",
+    "item": {
+      "type": "task",
+      "title": "Bankaya uğra",
+      "when": {
+        "weekday": "mon",
+        "which": "this"
+      }
+    },
+    "date": "2026-11-23",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "test/tr-033",
+    "ref": "2026-11-20",
+    "item": {
+      "type": "task",
+      "title": "Yıllık izin başlangıcı",
+      "when": {
+        "date": "2026-12-03"
+      }
+    },
+    "date": "2026-12-03",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "test/tr-034",
+    "ref": "2026-11-20",
+    "item": {
+      "type": "task",
+      "title": "Online seminer",
+      "when": {
+        "weekday": "tue",
+        "which": "this",
+        "time": "20:00"
+      }
+    },
+    "date": "2026-11-24",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "test/tr-035",
+    "ref": "2026-11-20",
+    "item": {
+      "type": "task",
+      "title": "Ailece yemek",
+      "when": {
+        "weekday": "sun",
+        "time": "19:00"
+      }
+    },
+    "date": "2026-11-22",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "test/tr-036",
+    "ref": "2026-11-20",
+    "item": {
+      "type": "task",
+      "title": "Sınav sonuçları",
+      "when": {
+        "weekday": "fri",
+        "which": "next"
+      }
+    },
+    "date": "2026-11-27",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "test/tr-037",
+    "ref": "2026-11-20",
+    "item": {
+      "type": "task",
+      "title": "Doktor kontrolü",
+      "when": {
+        "weekday": "wed",
+        "which": "this",
+        "time": "09:00"
+      }
+    },
+    "date": "2026-11-25",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "test/tr-038",
+    "ref": "2026-11-20",
+    "item": {
+      "type": "task",
+      "title": "Çöpleri çıkar",
+      "when": {
+        "day_offset": 0,
+        "time": "21:00"
+      }
+    },
+    "date": "2026-11-20",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "test/tr-039",
+    "ref": "2026-11-20",
+    "item": {
+      "type": "task",
+      "title": "İngilizce kursu",
+      "when": {
+        "weekday": "thu",
+        "which": "this",
+        "time": "12:00"
+      }
+    },
+    "date": "2026-11-26",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "test/tr-040",
+    "ref": "2026-11-20",
+    "item": {
+      "type": "task",
+      "title": "Pasaportu teslim al",
+      "when": {
+        "day_offset": 10
+      }
+    },
+    "date": "2026-11-30",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "test/tr-041",
+    "ref": "2026-10-06",
+    "item": {
+      "type": "metric",
+      "when": {
+        "day_offset": -1
+      },
+      "metric": {
+        "kind": "sleep",
+        "value": 6.75,
+        "unit": "h"
+      }
+    },
+    "date": "2026-10-05",
+    "valid": true,
+    "value": 6.75
+  },
+  {
+    "id": "test/tr-042",
+    "ref": "2026-10-06",
+    "item": {
+      "type": "metric",
+      "metric": {
+        "kind": "sleep",
+        "value": 8,
+        "unit": "h"
+      }
+    },
+    "date": "2026-10-06",
+    "valid": true,
+    "value": 8
+  },
+  {
+    "id": "test/tr-043",
+    "ref": "2026-10-06",
+    "item": {
+      "type": "metric",
+      "metric": {
+        "kind": "water",
+        "value": 2.5,
+        "unit": "l"
+      }
+    },
+    "date": "2026-10-06",
+    "valid": true,
+    "value": 2500.0
+  },
+  {
+    "id": "test/tr-044",
+    "ref": "2026-10-06",
+    "item": {
+      "type": "metric",
+      "metric": {
+        "kind": "water",
+        "value": 6,
+        "unit": "glass"
+      }
+    },
+    "date": "2026-10-06",
+    "valid": true,
+    "value": 1500
+  },
+  {
+    "id": "test/tr-045",
+    "ref": "2026-10-06",
+    "item": {
+      "type": "metric",
+      "metric": {
+        "kind": "steps",
+        "value": 7200,
+        "unit": "count"
+      }
+    },
+    "date": "2026-10-06",
+    "valid": true,
+    "value": 7200
+  },
+  {
+    "id": "test/tr-046",
+    "ref": "2026-10-06",
+    "item": {
+      "type": "metric",
+      "when": {
+        "day_offset": -1
+      },
+      "metric": {
+        "kind": "steps",
+        "value": 13500,
+        "unit": "count"
+      }
+    },
+    "date": "2026-10-05",
+    "valid": true,
+    "value": 13500
+  },
+  {
+    "id": "test/tr-047",
+    "ref": "2026-10-06",
+    "item": {
+      "type": "metric",
+      "metric": {
+        "kind": "weight",
+        "value": 82.3,
+        "unit": "kg"
+      }
+    },
+    "date": "2026-10-06",
+    "valid": true,
+    "value": 82.3
+  },
+  {
+    "id": "test/tr-048",
+    "ref": "2026-10-06",
+    "item": {
+      "type": "metric",
+      "metric": {
+        "kind": "weight",
+        "value": 76,
+        "unit": "kg"
+      }
+    },
+    "date": "2026-10-06",
+    "valid": true,
+    "value": 76
+  },
+  {
+    "id": "test/tr-049",
+    "ref": "2026-10-06",
+    "item": {
+      "type": "metric",
+      "metric": {
+        "kind": "workout",
+        "exercise": "leg press",
+        "sets": 4,
+        "reps": 12,
+        "value": 120,
+        "unit": "kg"
+      }
+    },
+    "date": "2026-10-06",
+    "valid": true,
+    "value": 120
+  },
+  {
+    "id": "test/tr-050",
+    "ref": "2026-10-06",
+    "item": {
+      "type": "metric",
+      "metric": {
+        "kind": "workout",
+        "exercise": "squat",
+        "sets": 5,
+        "reps": 5,
+        "value": 90,
+        "unit": "kg"
+      }
+    },
+    "date": "2026-10-06",
+    "valid": true,
+    "value": 90
+  },
+  {
+    "id": "test/tr-051",
+    "ref": "2026-10-06",
+    "item": {
+      "type": "metric",
+      "when": {
+        "day_offset": -1
+      },
+      "metric": {
+        "kind": "workout",
+        "exercise": "biceps curl",
+        "sets": 3,
+        "reps": 10,
+        "value": 15,
+        "unit": "kg"
+      }
+    },
+    "date": "2026-10-05",
+    "valid": true,
+    "value": 15
+  },
+  {
+    "id": "test/tr-052",
+    "ref": "2026-10-06",
+    "item": {
+      "type": "metric",
+      "metric": {
+        "kind": "sleep",
+        "value": 5,
+        "unit": "h"
+      }
+    },
+    "date": "2026-10-06",
+    "valid": true,
+    "value": 5
+  },
+  {
+    "id": "test/tr-053",
+    "ref": "2026-10-11",
+    "item": {
+      "type": "metric",
+      "metric": {
+        "kind": "water",
+        "value": 4,
+        "unit": "glass"
+      }
+    },
+    "date": "2026-10-11",
+    "valid": true,
+    "value": 1000
+  },
+  {
+    "id": "test/tr-054",
+    "ref": "2026-10-11",
+    "item": {
+      "type": "metric",
+      "metric": {
+        "kind": "steps",
+        "value": 20000,
+        "unit": "count"
+      }
+    },
+    "date": "2026-10-11",
+    "valid": true,
+    "value": 20000
+  },
+  {
+    "id": "test/tr-055",
+    "ref": "2026-10-11",
+    "item": {
+      "type": "metric",
+      "when": {
+        "day_offset": -1
+      },
+      "metric": {
+        "kind": "sleep",
+        "value": 7,
+        "unit": "h"
+      }
+    },
+    "date": "2026-10-10",
+    "valid": true,
+    "value": 7
+  },
+  {
+    "id": "test/tr-056",
+    "ref": "2026-10-11",
+    "item": {
+      "type": "metric",
+      "when": {
+        "weekday": "fri"
+      },
+      "metric": {
+        "kind": "weight",
+        "value": 80,
+        "unit": "kg"
+      }
+    },
+    "date": "2026-10-16",
+    "valid": true,
+    "value": 80
+  },
+  {
+    "id": "test/tr-057",
+    "ref": "2026-10-11",
+    "item": {
+      "type": "metric",
+      "metric": {
+        "kind": "workout",
+        "exercise": "mekik",
+        "sets": 4,
+        "reps": 20,
+        "value": 0,
+        "unit": "kg"
+      }
+    },
+    "date": "2026-10-11",
+    "valid": true,
+    "value": 0
+  },
+  {
+    "id": "test/tr-058",
+    "ref": "2026-10-11",
+    "item": {
+      "type": "metric",
+      "metric": {
+        "kind": "water",
+        "value": 750,
+        "unit": "ml"
+      }
+    },
+    "date": "2026-10-11",
+    "valid": true,
+    "value": 750
+  },
+  {
+    "id": "test/tr-059",
+    "ref": "2026-11-20",
+    "item": {
+      "type": "metric",
+      "metric": {
+        "kind": "steps",
+        "value": 3000,
+        "unit": "count"
+      }
+    },
+    "date": "2026-11-20",
+    "valid": true,
+    "value": 3000
+  },
+  {
+    "id": "test/tr-060",
+    "ref": "2026-11-20",
+    "item": {
+      "type": "metric",
+      "metric": {
+        "kind": "sleep",
+        "value": 7.5,
+        "unit": "h"
+      }
+    },
+    "date": "2026-11-20",
+    "valid": true,
+    "value": 7.5
+  },
+  {
+    "id": "test/tr-061",
+    "ref": "2026-11-20",
+    "item": {
+      "type": "metric",
+      "metric": {
+        "kind": "weight",
+        "value": 90.1,
+        "unit": "kg"
+      }
+    },
+    "date": "2026-11-20",
+    "valid": true,
+    "value": 90.1
+  },
+  {
+    "id": "test/tr-062",
+    "ref": "2026-11-20",
+    "item": {
+      "type": "metric",
+      "when": {
+        "day_offset": -1
+      },
+      "metric": {
+        "kind": "water",
+        "value": 2,
+        "unit": "l"
+      }
+    },
+    "date": "2026-11-19",
+    "valid": true,
+    "value": 2000
+  },
+  {
+    "id": "test/tr-063",
+    "ref": "2026-11-20",
+    "item": {
+      "type": "metric",
+      "metric": {
+        "kind": "workout",
+        "exercise": "deadlift",
+        "sets": 5,
+        "reps": 3,
+        "value": 140,
+        "unit": "kg"
+      }
+    },
+    "date": "2026-11-20",
+    "valid": true,
+    "value": 140
+  },
+  {
+    "id": "test/tr-064",
+    "ref": "2026-11-20",
+    "item": {
+      "type": "metric",
+      "metric": {
+        "kind": "workout",
+        "exercise": "şınav",
+        "sets": 4,
+        "reps": 25,
+        "value": 0,
+        "unit": "count"
+      }
+    },
+    "date": "2026-11-20",
+    "valid": true,
+    "value": 0
+  },
+  {
+    "id": "test/tr-065",
+    "ref": "2026-11-20",
+    "item": {
+      "type": "metric",
+      "metric": {
+        "kind": "sleep",
+        "value": 9,
+        "unit": "h"
+      }
+    },
+    "date": "2026-11-20",
+    "valid": true,
+    "value": 9
+  },
+  {
+    "id": "test/tr-066",
+    "ref": "2026-10-06",
+    "item": {
+      "type": "metric",
+      "when": {
+        "day_offset": -1
+      },
+      "metric": {
+        "kind": "sleep",
+        "value": 6,
+        "unit": "h"
+      }
+    },
+    "date": "2026-10-05",
+    "valid": true,
+    "value": 6
+  },
+  {
+    "id": "test/tr-066",
+    "ref": "2026-10-06",
+    "item": {
+      "type": "task",
+      "title": "Kahvaltı toplantısı",
+      "when": {
+        "day_offset": 1,
+        "time": "08:00"
+      }
+    },
+    "date": "2026-10-07",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "test/tr-067",
+    "ref": "2026-10-06",
+    "item": {
+      "type": "metric",
+      "metric": {
+        "kind": "water",
+        "value": 5,
+        "unit": "glass"
+      }
+    },
+    "date": "2026-10-06",
+    "valid": true,
+    "value": 1250
+  },
+  {
+    "id": "test/tr-067",
+    "ref": "2026-10-06",
+    "item": {
+      "type": "metric",
+      "metric": {
+        "kind": "steps",
+        "value": 9000,
+        "unit": "count"
+      }
+    },
+    "date": "2026-10-06",
+    "valid": true,
+    "value": 9000
+  },
+  {
+    "id": "test/tr-068",
+    "ref": "2026-10-06",
+    "item": {
+      "type": "task",
+      "title": "Dişçi",
+      "when": {
+        "weekday": "thu",
+        "which": "this",
+        "time": "10:00"
+      }
+    },
+    "date": "2026-10-08",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "test/tr-068",
+    "ref": "2026-10-06",
+    "item": {
+      "type": "task",
+      "title": "Kuaför",
+      "when": {
+        "weekday": "fri",
+        "which": "this",
+        "time": "15:00"
+      }
+    },
+    "date": "2026-10-09",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "test/tr-069",
+    "ref": "2026-10-06",
+    "item": {
+      "type": "task",
+      "title": "Koşuya başla",
+      "when": {
+        "day_offset": 1
+      }
+    },
+    "date": "2026-10-07",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "test/tr-070",
+    "ref": "2026-10-06",
+    "item": {
+      "type": "metric",
+      "metric": {
+        "kind": "workout",
+        "exercise": "bench",
+        "sets": 4,
+        "reps": 8,
+        "value": 70,
+        "unit": "kg"
+      }
+    },
+    "date": "2026-10-06",
+    "valid": true,
+    "value": 70
+  },
+  {
+    "id": "test/tr-070",
+    "ref": "2026-10-06",
+    "item": {
+      "type": "metric",
+      "metric": {
+        "kind": "water",
+        "value": 1,
+        "unit": "l"
+      }
+    },
+    "date": "2026-10-06",
+    "valid": true,
+    "value": 1000
+  },
+  {
+    "id": "test/tr-071",
+    "ref": "2026-10-11",
+    "item": {
+      "type": "task",
+      "title": "Faturaları öde",
+      "when": {
+        "day_offset": 1
+      }
+    },
+    "date": "2026-10-12",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "test/tr-071",
+    "ref": "2026-10-11",
+    "item": {
+      "type": "task",
+      "title": "Arabayı yıkat",
+      "when": {
+        "weekday": "tue",
+        "which": "this"
+      }
+    },
+    "date": "2026-10-13",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "test/tr-072",
+    "ref": "2026-10-11",
+    "item": {
+      "type": "metric",
+      "when": {
+        "day_offset": -1,
+        "date": "2026-10-10"
+      },
+      "metric": {
+        "kind": "steps",
+        "value": 11000,
+        "unit": "count"
+      }
+    },
+    "date": "2026-10-10",
+    "valid": false,
+    "value": 11000
+  },
+  {
+    "id": "test/tr-072",
+    "ref": "2026-10-11",
+    "item": {
+      "type": "metric",
+      "when": {
+        "day_offset": 0
+      },
+      "metric": {
+        "kind": "sleep",
+        "value": 7,
+        "unit": "h"
+      }
+    },
+    "date": "2026-10-11",
+    "valid": true,
+    "value": 7
+  },
+  {
+    "id": "test/tr-073",
+    "ref": "2026-10-11",
+    "item": {
+      "type": "task",
+      "title": "Sinema",
+      "when": {
+        "weekday": "wed",
+        "which": "this",
+        "time": "19:00"
+      }
+    },
+    "date": "2026-10-14",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "test/tr-073",
+    "ref": "2026-10-11",
+    "item": {
+      "type": "task",
+      "title": "Toplantı",
+      "when": {
+        "weekday": "thu",
+        "which": "this",
+        "time": "09:00"
+      }
+    },
+    "date": "2026-10-15",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "test/tr-074",
+    "ref": "2026-10-11",
+    "item": {
+      "type": "metric",
+      "metric": {
+        "kind": "water",
+        "value": 3,
+        "unit": "glass"
+      }
+    },
+    "date": "2026-10-11",
+    "valid": true,
+    "value": 750
+  },
+  {
+    "id": "test/tr-074",
+    "ref": "2026-10-11",
+    "item": {
+      "type": "task",
+      "title": "İlacı iç",
+      "when": {
+        "day_offset": 0,
+        "time": "21:00"
+      }
+    },
+    "date": "2026-10-11",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "test/tr-075",
+    "ref": "2026-11-20",
+    "item": {
+      "type": "metric",
+      "metric": {
+        "kind": "workout",
+        "exercise": "squat",
+        "sets": 3,
+        "reps": 10,
+        "value": 60,
+        "unit": "kg"
+      }
+    },
+    "date": "2026-11-20",
+    "valid": true,
+    "value": 60
+  },
+  {
+    "id": "test/tr-075",
+    "ref": "2026-11-20",
+    "item": {
+      "type": "task",
+      "title": "Bacak günü",
+      "when": {
+        "weekday": "mon",
+        "which": "next"
+      }
+    },
+    "date": "2026-11-30",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "test/tr-076",
+    "ref": "2026-11-20",
+    "item": {
+      "type": "task",
+      "title": "Market",
+      "when": {
+        "day_offset": 1,
+        "time": "10:00"
+      }
+    },
+    "date": "2026-11-21",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "test/tr-076",
+    "ref": "2026-11-20",
+    "item": {
+      "type": "task",
+      "title": "Brunch",
+      "when": {
+        "weekday": "sun",
+        "time": "12:00"
+      }
+    },
+    "date": "2026-11-22",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "test/tr-077",
+    "ref": "2026-11-20",
+    "item": {
+      "type": "metric",
+      "metric": {
+        "kind": "steps",
+        "value": 8000,
+        "unit": "count"
+      }
+    },
+    "date": "2026-11-20",
+    "valid": true,
+    "value": 8000
+  },
+  {
+    "id": "test/tr-077",
+    "ref": "2026-11-20",
+    "item": {
+      "type": "metric",
+      "metric": {
+        "kind": "weight",
+        "value": 78.5,
+        "unit": "kg"
+      }
+    },
+    "date": "2026-11-20",
+    "valid": true,
+    "value": 78.5
+  },
+  {
+    "id": "test/tr-078",
+    "ref": "2026-11-20",
+    "item": {
+      "type": "metric",
+      "when": {
+        "day_offset": -1
+      },
+      "metric": {
+        "kind": "sleep",
+        "value": 5,
+        "unit": "h"
+      }
+    },
+    "date": "2026-11-19",
+    "valid": true,
+    "value": 5
+  },
+  {
+    "id": "test/tr-078",
+    "ref": "2026-11-20",
+    "item": {
+      "type": "task",
+      "title": "Yat",
+      "when": {
+        "day_offset": 0,
+        "time": "22:00"
+      }
+    },
+    "date": "2026-11-20",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "test/tr-079",
+    "ref": "2026-11-20",
+    "item": {
+      "type": "task",
+      "title": "Proje teslimi",
+      "when": {
+        "weekday": "tue",
+        "which": "this"
+      }
+    },
+    "date": "2026-11-24",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "test/tr-079",
+    "ref": "2026-11-20",
+    "item": {
+      "type": "task",
+      "title": "Final",
+      "when": {
+        "date": "2026-12-03"
+      }
+    },
+    "date": "2026-12-03",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "test/tr-080",
+    "ref": "2026-11-20",
+    "item": {
+      "type": "metric",
+      "metric": {
+        "kind": "water",
+        "value": 2,
+        "unit": "l"
+      }
+    },
+    "date": "2026-11-20",
+    "valid": true,
+    "value": 2000
+  },
+  {
+    "id": "test/tr-080",
+    "ref": "2026-11-20",
+    "item": {
+      "type": "task",
+      "title": "Spor",
+      "when": {
+        "day_offset": 1,
+        "time": "07:00"
+      }
+    },
+    "date": "2026-11-21",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "test/tr-096",
+    "ref": "2026-10-06",
+    "item": {
+      "type": "task",
+      "title": "Spor salonu",
+      "when": {
+        "day_offset": 1
+      }
+    },
+    "date": "2026-10-07",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "test/tr-097",
+    "ref": "2026-10-06",
+    "item": {
+      "type": "task",
+      "title": "Sinema",
+      "when": {
+        "weekday": "fri",
+        "which": "this",
+        "time": "18:30"
+      }
+    },
+    "date": "2026-10-09",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "test/tr-098",
+    "ref": "2026-10-06",
+    "item": {
+      "type": "metric",
+      "when": {
+        "day_offset": -1
+      },
+      "metric": {
+        "kind": "sleep",
+        "value": 6,
+        "unit": "h"
+      }
+    },
+    "date": "2026-10-05",
+    "valid": true,
+    "value": 6
+  },
+  {
+    "id": "test/tr-099",
+    "ref": "2026-10-06",
+    "item": {
+      "type": "metric",
+      "metric": {
+        "kind": "water",
+        "value": 3,
+        "unit": "glass"
+      }
+    },
+    "date": "2026-10-06",
+    "valid": true,
+    "value": 750
+  },
+  {
+    "id": "test/tr-100",
+    "ref": "2026-10-06",
+    "item": {
+      "type": "task",
+      "title": "Diş hekimi",
+      "when": {
+        "weekday": "thu",
+        "which": "this"
+      }
+    },
+    "date": "2026-10-08",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "test/en-001",
+    "ref": "2026-10-06",
+    "item": {
+      "type": "task",
+      "title": "Dentiste git",
+      "when": {
+        "day_offset": 1,
+        "time": "09:00"
+      }
+    },
+    "date": "2026-10-07",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "test/en-002",
+    "ref": "2026-10-06",
+    "item": {
+      "type": "task",
+      "title": "Thesis meeting with my advisor",
+      "when": {
+        "weekday": "thu",
+        "which": "this",
+        "time": "16:00"
+      }
+    },
+    "date": "2026-10-08",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "test/en-003",
+    "ref": "2026-10-06",
+    "item": {
+      "type": "task",
+      "title": "Zoe's wedding",
+      "when": {
+        "weekday": "fri",
+        "which": "this",
+        "time": "20:00"
+      }
+    },
+    "date": "2026-10-09",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "test/en-004",
+    "ref": "2026-10-06",
+    "item": {
+      "type": "task",
+      "title": "Presentation",
+      "when": {
+        "weekday": "thu",
+        "which": "next"
+      }
+    },
+    "date": "2026-10-15",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "test/en-005",
+    "ref": "2026-10-06",
+    "item": {
+      "type": "task",
+      "title": "Evde ol",
+      "when": {
+        "day_offset": 2,
+        "time": "10:30"
+      }
+    },
+    "date": "2026-10-08",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "test/en-006",
+    "ref": "2026-10-06",
+    "item": {
+      "type": "task",
+      "title": "Five-a-side football",
+      "when": {
+        "day_offset": 0,
+        "time": "19:30"
+      }
+    },
+    "date": "2026-10-06",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "test/en-007",
+    "ref": "2026-10-06",
+    "item": {
+      "type": "task",
+      "title": "Anneyi havalimanından al",
+      "when": {
+        "weekday": "sun",
+        "which": "this",
+        "time": "08:00"
+      }
+    },
+    "date": "2026-10-11",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "test/en-008",
+    "ref": "2026-10-06",
+    "item": {
+      "type": "task",
+      "title": "Sürüş testi",
+      "when": {
+        "date": "2026-10-12"
+      }
+    },
+    "date": "2026-10-12",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "test/en-009",
+    "ref": "2026-10-06",
+    "item": {
+      "type": "task",
+      "title": "Kütüphaneden kitabı al",
+      "when": {
+        "day_offset": 2
+      }
+    },
+    "date": "2026-10-08",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "test/en-010",
+    "ref": "2026-10-06",
+    "item": {
+      "type": "task",
+      "title": "Cousin's birthday party",
+      "when": {
+        "weekday": "sat",
+        "which": "this",
+        "time": "14:00"
+      }
+    },
+    "date": "2026-10-10",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "test/en-011",
+    "ref": "2026-10-06",
+    "item": {
+      "type": "task",
+      "title": "Su faturası ödemesi",
+      "when": {
+        "weekday": "wed",
+        "which": "this"
+      }
+    },
+    "date": "2026-10-07",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "test/en-012",
+    "ref": "2026-10-06",
+    "item": {
+      "type": "task",
+      "title": "Vize belgelerini hazırlamak",
+      "when": {
+        "day_offset": 4
+      }
+    },
+    "date": "2026-10-10",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "test/en-013",
+    "ref": "2026-10-06",
+    "item": {
+      "type": "task",
+      "title": "Ahmed'i ara",
+      "when": {
+        "time": "17:15"
+      }
+    },
+    "date": "2026-10-06",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "test/en-014",
+    "ref": "2026-10-06",
+    "item": {
+      "type": "task",
+      "title": "Lab class",
+      "when": {
+        "weekday": "mon",
+        "which": "this",
+        "time": "08:30"
+      }
+    },
+    "date": "2026-10-12",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "test/en-015",
+    "ref": "2026-10-06",
+    "item": {
+      "type": "task",
+      "title": "Project presentation",
+      "when": {
+        "weekday": "tue",
+        "which": "next",
+        "time": "13:00"
+      }
+    },
+    "date": "2026-10-13",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "test/en-016",
+    "ref": "2026-10-06",
+    "item": {
+      "type": "task",
+      "title": "Kan bağışı",
+      "when": {
+        "day_offset": 1,
+        "time": "12:30"
+      }
+    },
+    "date": "2026-10-07",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "test/en-017",
+    "ref": "2026-10-06",
+    "item": {
+      "type": "task",
+      "title": "Kütüphane kartını yenile",
+      "when": {
+        "weekday": "fri",
+        "which": "this"
+      }
+    },
+    "date": "2026-10-09",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "test/en-018",
+    "ref": "2026-10-06",
+    "item": {
+      "type": "task",
+      "title": "Konser",
+      "when": {
+        "date": "2026-10-25",
+        "time": "19:00"
+      }
+    },
+    "date": "2026-10-25",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "test/en-019",
+    "ref": "2026-10-06",
+    "item": {
+      "type": "task",
+      "title": "İlaçları al",
+      "when": {
+        "time": "22:00"
+      }
+    },
+    "date": "2026-10-06",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "test/en-020",
+    "ref": "2026-10-06",
+    "item": {
+      "type": "task",
+      "title": "Köpeğin aşı randevusu",
+      "when": {
+        "weekday": "thu",
+        "which": "this"
+      }
+    },
+    "date": "2026-10-08",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "test/en-021",
+    "ref": "2026-10-11",
+    "item": {
+      "type": "task",
+      "title": "Yeni işe başlama",
+      "when": {
+        "day_offset": 1,
+        "time": "09:00"
+      }
+    },
+    "date": "2026-10-12",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "test/en-022",
+    "ref": "2026-10-11",
+    "item": {
+      "type": "task",
+      "title": "Landlord ile toplantı",
+      "when": {
+        "weekday": "tue",
+        "which": "this",
+        "time": "11:00"
+      }
+    },
+    "date": "2026-10-13",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "test/en-023",
+    "ref": "2026-10-11",
+    "item": {
+      "type": "task",
+      "title": "Yoga class",
+      "when": {
+        "weekday": "wed",
+        "which": "this",
+        "time": "18:00"
+      }
+    },
+    "date": "2026-10-14",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "test/en-024",
+    "ref": "2026-10-11",
+    "item": {
+      "type": "task",
+      "title": "Biletleri al",
+      "when": {
+        "weekday": "fri",
+        "which": "this"
+      }
+    },
+    "date": "2026-10-16",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "test/en-025",
+    "ref": "2026-10-11",
+    "item": {
+      "type": "task",
+      "title": "Kira artışı tartışması",
+      "when": {
+        "weekday": "mon",
+        "which": "next"
+      }
+    },
+    "date": "2026-10-19",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "test/en-026",
+    "ref": "2026-10-11",
+    "item": {
+      "type": "task",
+      "title": "Çamaşırları almak",
+      "when": {
+        "day_offset": 0,
+        "time": "16:00"
+      }
+    },
+    "date": "2026-10-11",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "test/en-027",
+    "ref": "2026-10-11",
+    "item": {
+      "type": "task",
+      "title": "Shuttle",
+      "when": {
+        "day_offset": 2,
+        "time": "07:45"
+      }
+    },
+    "date": "2026-10-13",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "test/en-028",
+    "ref": "2026-10-11",
+    "item": {
+      "type": "task",
+      "title": "Meeting",
+      "when": {
+        "weekday": "thu",
+        "which": "this",
+        "time": "15:00"
+      }
+    },
+    "date": "2026-10-15",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "test/en-030",
+    "ref": "2026-10-11",
+    "item": {
+      "type": "task",
+      "title": "Farmers market",
+      "when": {
+        "weekday": "sat",
+        "which": "this",
+        "time": "10:00"
+      }
+    },
+    "date": "2026-10-17",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "test/en-031",
+    "ref": "2026-11-20",
+    "item": {
+      "type": "task",
+      "title": "Berbere git",
+      "when": {
+        "day_offset": 1,
+        "time": "11:00"
+      }
+    },
+    "date": "2026-11-21",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "test/en-032",
+    "ref": "2026-11-20",
+    "item": {
+      "type": "task",
+      "title": "Bankaya erken git",
+      "when": {
+        "weekday": "mon",
+        "which": "next"
+      }
+    },
+    "date": "2026-11-30",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "test/en-034",
+    "ref": "2026-11-20",
+    "item": {
+      "type": "task",
+      "title": "Online seminar",
+      "when": {
+        "weekday": "tue",
+        "which": "this",
+        "time": "20:00"
+      }
+    },
+    "date": "2026-11-24",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "test/en-035",
+    "ref": "2026-11-20",
+    "item": {
+      "type": "task",
+      "title": "Family dinner",
+      "when": {
+        "weekday": "sun",
+        "which": "this",
+        "time": "19:00"
+      }
+    },
+    "date": "2026-11-22",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "test/en-037",
+    "ref": "2026-11-20",
+    "item": {
+      "type": "task",
+      "title": "Doctor checkup",
+      "when": {
+        "weekday": "wed",
+        "which": "this",
+        "time": "09:00"
+      }
+    },
+    "date": "2026-11-25",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "test/en-038",
+    "ref": "2026-11-20",
+    "item": {
+      "type": "task",
+      "title": "Çöpleri çıkar",
+      "when": {
+        "day_offset": 0,
+        "time": "21:00"
+      }
+    },
+    "date": "2026-11-20",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "test/en-039",
+    "ref": "2026-11-20",
+    "item": {
+      "type": "task",
+      "title": "English course",
+      "when": {
+        "weekday": "thu",
+        "which": "this",
+        "time": "12:00"
+      }
+    },
+    "date": "2026-11-26",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "test/en-040",
+    "ref": "2026-11-20",
+    "item": {
+      "type": "task",
+      "title": "Pasaportu almak",
+      "when": {
+        "day_offset": 10
+      }
+    },
+    "date": "2026-11-30",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "test/en-041",
+    "ref": "2026-10-06",
+    "item": {
+      "type": "metric",
+      "metric": {
+        "kind": "sleep",
+        "value": 6.75,
+        "unit": "h"
+      }
+    },
+    "date": "2026-10-06",
+    "valid": true,
+    "value": 6.75
+  },
+  {
+    "id": "test/en-042",
+    "ref": "2026-10-06",
+    "item": {
+      "type": "metric",
+      "metric": {
+        "kind": "sleep",
+        "value": 8,
+        "unit": "h"
+      }
+    },
+    "date": "2026-10-06",
+    "valid": true,
+    "value": 8
+  },
+  {
+    "id": "test/en-043",
+    "ref": "2026-10-06",
+    "item": {
+      "type": "metric",
+      "metric": {
+        "kind": "water",
+        "value": 2.5,
+        "unit": "l"
+      }
+    },
+    "date": "2026-10-06",
+    "valid": true,
+    "value": 2500.0
+  },
+  {
+    "id": "test/en-044",
+    "ref": "2026-10-06",
+    "item": {
+      "type": "metric",
+      "metric": {
+        "kind": "water",
+        "value": 6,
+        "unit": "glass"
+      }
+    },
+    "date": "2026-10-06",
+    "valid": true,
+    "value": 1500
+  },
+  {
+    "id": "test/en-045",
+    "ref": "2026-10-06",
+    "item": {
+      "type": "metric",
+      "metric": {
+        "kind": "steps",
+        "value": 7200,
+        "unit": "count"
+      }
+    },
+    "date": "2026-10-06",
+    "valid": true,
+    "value": 7200
+  },
+  {
+    "id": "test/en-046",
+    "ref": "2026-10-06",
+    "item": {
+      "type": "metric",
+      "when": {
+        "day_offset": -1
+      },
+      "metric": {
+        "kind": "steps",
+        "value": 13500,
+        "unit": "count"
+      }
+    },
+    "date": "2026-10-05",
+    "valid": true,
+    "value": 13500
+  },
+  {
+    "id": "test/en-047",
+    "ref": "2026-10-06",
+    "item": {
+      "type": "metric",
+      "metric": {
+        "kind": "weight",
+        "value": 82.3,
+        "unit": "kg"
+      }
+    },
+    "date": "2026-10-06",
+    "valid": true,
+    "value": 82.3
+  },
+  {
+    "id": "test/en-048",
+    "ref": "2026-10-06",
+    "item": {
+      "type": "metric",
+      "metric": {
+        "kind": "weight",
+        "value": 76,
+        "unit": "kg"
+      }
+    },
+    "date": "2026-10-06",
+    "valid": true,
+    "value": 76
+  },
+  {
+    "id": "test/en-049",
+    "ref": "2026-10-06",
+    "item": {
+      "type": "metric",
+      "metric": {
+        "kind": "workout",
+        "exercise": "leg press",
+        "sets": 4,
+        "reps": 12,
+        "value": 120,
+        "unit": "kg"
+      }
+    },
+    "date": "2026-10-06",
+    "valid": true,
+    "value": 120
+  },
+  {
+    "id": "test/en-050",
+    "ref": "2026-10-06",
+    "item": {
+      "type": "metric",
+      "metric": {
+        "kind": "workout",
+        "exercise": "squats",
+        "sets": 5,
+        "reps": 5,
+        "value": 90,
+        "unit": "kg"
+      }
+    },
+    "date": "2026-10-06",
+    "valid": true,
+    "value": 90
+  },
+  {
+    "id": "test/en-051",
+    "ref": "2026-10-06",
+    "item": {
+      "type": "metric",
+      "when": {
+        "day_offset": -1
+      },
+      "metric": {
+        "kind": "workout",
+        "exercise": "biceps curls",
+        "sets": 3,
+        "reps": 10,
+        "value": 15,
+        "unit": "kg"
+      }
+    },
+    "date": "2026-10-05",
+    "valid": true,
+    "value": 15
+  },
+  {
+    "id": "test/en-052",
+    "ref": "2026-10-06",
+    "item": {
+      "type": "metric",
+      "when": {
+        "day_offset": -2
+      },
+      "metric": {
+        "kind": "sleep",
+        "value": 5,
+        "unit": "h"
+      }
+    },
+    "date": "2026-10-04",
+    "valid": true,
+    "value": 5
+  },
+  {
+    "id": "test/en-053",
+    "ref": "2026-10-11",
+    "item": {
+      "type": "metric",
+      "metric": {
+        "kind": "water",
+        "value": 4,
+        "unit": "glass"
+      }
+    },
+    "date": "2026-10-11",
+    "valid": true,
+    "value": 1000
+  },
+  {
+    "id": "test/en-054",
+    "ref": "2026-10-11",
+    "item": {
+      "type": "metric",
+      "metric": {
+        "kind": "steps",
+        "value": 20000,
+        "unit": "count"
+      }
+    },
+    "date": "2026-10-11",
+    "valid": true,
+    "value": 20000
+  },
+  {
+    "id": "test/en-055",
+    "ref": "2026-10-11",
+    "item": {
+      "type": "metric",
+      "when": {
+        "day_offset": -1
+      },
+      "metric": {
+        "kind": "sleep",
+        "value": 7,
+        "unit": "h"
+      }
+    },
+    "date": "2026-10-10",
+    "valid": true,
+    "value": 7
+  },
+  {
+    "id": "test/en-056",
+    "ref": "2026-10-11",
+    "item": {
+      "type": "metric",
+      "when": {
+        "weekday": "fri",
+        "which": "this"
+      },
+      "metric": {
+        "kind": "weight",
+        "value": 80,
+        "unit": "kg"
+      }
+    },
+    "date": "2026-10-16",
+    "valid": true,
+    "value": 80
+  },
+  {
+    "id": "test/en-057",
+    "ref": "2026-10-11",
+    "item": {
+      "type": "metric",
+      "metric": {
+        "kind": "workout",
+        "exercise": "sit-ups",
+        "sets": 4,
+        "reps": 20,
+        "value": 0,
+        "unit": "count"
+      }
+    },
+    "date": "2026-10-11",
+    "valid": true,
+    "value": 0
+  },
+  {
+    "id": "test/en-058",
+    "ref": "2026-10-11",
+    "item": {
+      "type": "metric",
+      "metric": {
+        "kind": "water",
+        "value": 750,
+        "unit": "ml"
+      }
+    },
+    "date": "2026-10-11",
+    "valid": true,
+    "value": 750
+  },
+  {
+    "id": "test/en-059",
+    "ref": "2026-11-20",
+    "item": {
+      "type": "metric",
+      "metric": {
+        "kind": "steps",
+        "value": 3000,
+        "unit": "count"
+      }
+    },
+    "date": "2026-11-20",
+    "valid": true,
+    "value": 3000
+  },
+  {
+    "id": "test/en-060",
+    "ref": "2026-11-20",
+    "item": {
+      "type": "metric",
+      "metric": {
+        "kind": "sleep",
+        "value": 7.5,
+        "unit": "h"
+      }
+    },
+    "date": "2026-11-20",
+    "valid": true,
+    "value": 7.5
+  },
+  {
+    "id": "test/en-061",
+    "ref": "2026-11-20",
+    "item": {
+      "type": "metric",
+      "metric": {
+        "kind": "weight",
+        "value": 198,
+        "unit": "lb"
+      }
+    },
+    "date": "2026-11-20",
+    "valid": true,
+    "value": 89.81128926000001
+  },
+  {
+    "id": "test/en-062",
+    "ref": "2026-11-20",
+    "item": {
+      "type": "metric",
+      "when": {
+        "day_offset": -1
+      },
+      "metric": {
+        "kind": "water",
+        "value": 2,
+        "unit": "l"
+      }
+    },
+    "date": "2026-11-19",
+    "valid": true,
+    "value": 2000
+  },
+  {
+    "id": "test/en-063",
+    "ref": "2026-11-20",
+    "item": {
+      "type": "metric",
+      "metric": {
+        "kind": "workout",
+        "exercise": "deadlift",
+        "sets": 5,
+        "reps": 3,
+        "value": 140,
+        "unit": "kg"
+      }
+    },
+    "date": "2026-11-20",
+    "valid": true,
+    "value": 140
+  },
+  {
+    "id": "test/en-064",
+    "ref": "2026-11-20",
+    "item": {
+      "type": "metric",
+      "metric": {
+        "kind": "workout",
+        "exercise": "push-ups",
+        "sets": 4,
+        "reps": 25,
+        "value": 0,
+        "unit": "count"
+      }
+    },
+    "date": "2026-11-20",
+    "valid": true,
+    "value": 0
+  },
+  {
+    "id": "test/en-065",
+    "ref": "2026-11-20",
+    "item": {
+      "type": "metric",
+      "metric": {
+        "kind": "sleep",
+        "value": 9,
+        "unit": "h"
+      }
+    },
+    "date": "2026-11-20",
+    "valid": true,
+    "value": 9
+  },
+  {
+    "id": "test/en-066",
+    "ref": "2026-10-06",
+    "item": {
+      "type": "metric",
+      "when": {
+        "day_offset": -1
+      },
+      "metric": {
+        "kind": "sleep",
+        "value": 6,
+        "unit": "h"
+      }
+    },
+    "date": "2026-10-05",
+    "valid": true,
+    "value": 6
+  },
+  {
+    "id": "test/en-066",
+    "ref": "2026-10-06",
+    "item": {
+      "type": "task",
+      "title": "Kahvaltı toplantısı",
+      "when": {
+        "day_offset": 1,
+        "time": "08:00"
+      }
+    },
+    "date": "2026-10-07",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "test/en-067",
+    "ref": "2026-10-06",
+    "item": {
+      "type": "metric",
+      "metric": {
+        "kind": "water",
+        "value": 5,
+        "unit": "glass"
+      }
+    },
+    "date": "2026-10-06",
+    "valid": true,
+    "value": 1250
+  },
+  {
+    "id": "test/en-067",
+    "ref": "2026-10-06",
+    "item": {
+      "type": "metric",
+      "metric": {
+        "kind": "steps",
+        "value": 9000,
+        "unit": "count"
+      }
+    },
+    "date": "2026-10-06",
+    "valid": true,
+    "value": 9000
+  },
+  {
+    "id": "test/en-068",
+    "ref": "2026-10-06",
+    "item": {
+      "type": "task",
+      "title": "Dentist",
+      "when": {
+        "weekday": "thu",
+        "which": "this",
+        "time": "10:00"
+      }
+    },
+    "date": "2026-10-08",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "test/en-068",
+    "ref": "2026-10-06",
+    "item": {
+      "type": "task",
+      "title": "Hairdresser",
+      "when": {
+        "weekday": "fri",
+        "which": "this",
+        "time": "15:00"
+      }
+    },
+    "date": "2026-10-09",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "test/en-069",
+    "ref": "2026-10-06",
+    "item": {
+      "type": "task",
+      "title": "Koşmaya başla",
+      "when": {
+        "day_offset": 1
+      }
+    },
+    "date": "2026-10-07",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "test/en-070",
+    "ref": "2026-10-06",
+    "item": {
+      "type": "metric",
+      "metric": {
+        "kind": "workout",
+        "exercise": "bench",
+        "sets": 4,
+        "reps": 8,
+        "value": 70,
+        "unit": "kg"
+      }
+    },
+    "date": "2026-10-06",
+    "valid": true,
+    "value": 70
+  },
+  {
+    "id": "test/en-070",
+    "ref": "2026-10-06",
+    "item": {
+      "type": "metric",
+      "metric": {
+        "kind": "water",
+        "value": 1,
+        "unit": "l"
+      }
+    },
+    "date": "2026-10-06",
+    "valid": true,
+    "value": 1000
+  },
+  {
+    "id": "test/en-071",
+    "ref": "2026-10-11",
+    "item": {
+      "type": "task",
+      "title": "Faturaları öde",
+      "when": {
+        "day_offset": 1
+      }
+    },
+    "date": "2026-10-12",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "test/en-071",
+    "ref": "2026-10-11",
+    "item": {
+      "type": "task",
+      "title": "Arabayı yıka",
+      "when": {
+        "weekday": "tue",
+        "which": "this"
+      }
+    },
+    "date": "2026-10-13",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "test/en-072",
+    "ref": "2026-10-11",
+    "item": {
+      "type": "metric",
+      "when": {
+        "day_offset": -1
+      },
+      "metric": {
+        "kind": "steps",
+        "value": 11000,
+        "unit": "count"
+      }
+    },
+    "date": "2026-10-10",
+    "valid": true,
+    "value": 11000
+  },
+  {
+    "id": "test/en-072",
+    "ref": "2026-10-11",
+    "item": {
+      "type": "metric",
+      "when": {
+        "day_offset": 0
+      },
+      "metric": {
+        "kind": "sleep",
+        "value": 7,
+        "unit": "h"
+      }
+    },
+    "date": "2026-10-11",
+    "valid": true,
+    "value": 7
+  },
+  {
+    "id": "test/en-073",
+    "ref": "2026-10-11",
+    "item": {
+      "type": "task",
+      "title": "Film",
+      "when": {
+        "weekday": "wed",
+        "which": "this",
+        "time": "19:00"
+      }
+    },
+    "date": "2026-10-14",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "test/en-073",
+    "ref": "2026-10-11",
+    "item": {
+      "type": "task",
+      "title": "Toplantı",
+      "when": {
+        "weekday": "thu",
+        "which": "this",
+        "time": "09:00"
+      }
+    },
+    "date": "2026-10-15",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "test/en-074",
+    "ref": "2026-10-11",
+    "item": {
+      "type": "metric",
+      "metric": {
+        "kind": "water",
+        "value": 3,
+        "unit": "glass"
+      }
+    },
+    "date": "2026-10-11",
+    "valid": true,
+    "value": 750
+  },
+  {
+    "id": "test/en-074",
+    "ref": "2026-10-11",
+    "item": {
+      "type": "task",
+      "title": "Meds almak",
+      "when": {
+        "time": "21:00"
+      }
+    },
+    "date": "2026-10-11",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "test/en-075",
+    "ref": "2026-11-20",
+    "item": {
+      "type": "metric",
+      "metric": {
+        "kind": "workout",
+        "exercise": "squats",
+        "sets": 3,
+        "reps": 10,
+        "value": 60,
+        "unit": "kg"
+      }
+    },
+    "date": "2026-11-20",
+    "valid": true,
+    "value": 60
+  },
+  {
+    "id": "test/en-075",
+    "ref": "2026-11-20",
+    "item": {
+      "type": "task",
+      "title": "Leg day",
+      "when": {
+        "weekday": "mon",
+        "which": "next"
+      }
+    },
+    "date": "2026-11-30",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "test/en-076",
+    "ref": "2026-11-20",
+    "item": {
+      "type": "task",
+      "title": "Groceries",
+      "when": {
+        "day_offset": 1,
+        "time": "10:00"
+      }
+    },
+    "date": "2026-11-21",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "test/en-076",
+    "ref": "2026-11-20",
+    "item": {
+      "type": "task",
+      "title": "Brunch",
+      "when": {
+        "weekday": "sun",
+        "time": "12:00"
+      }
+    },
+    "date": "2026-11-22",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "test/en-077",
+    "ref": "2026-11-20",
+    "item": {
+      "type": "metric",
+      "metric": {
+        "kind": "steps",
+        "value": 8000,
+        "unit": "count"
+      }
+    },
+    "date": "2026-11-20",
+    "valid": true,
+    "value": 8000
+  },
+  {
+    "id": "test/en-077",
+    "ref": "2026-11-20",
+    "item": {
+      "type": "metric",
+      "metric": {
+        "kind": "weight",
+        "value": 78.5,
+        "unit": "kg"
+      }
+    },
+    "date": "2026-11-20",
+    "valid": true,
+    "value": 78.5
+  },
+  {
+    "id": "test/en-078",
+    "ref": "2026-11-20",
+    "item": {
+      "type": "task",
+      "title": "Yatmak",
+      "when": {
+        "day_offset": 0,
+        "time": "22:00"
+      }
+    },
+    "date": "2026-11-20",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "test/en-079",
+    "ref": "2026-11-20",
+    "item": {
+      "type": "task",
+      "title": "Proje teslimi",
+      "when": {
+        "weekday": "tue",
+        "which": "this"
+      }
+    },
+    "date": "2026-11-24",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "test/en-079",
+    "ref": "2026-11-20",
+    "item": {
+      "type": "task",
+      "title": "Final sınav",
+      "when": {
+        "date": "2026-12-03"
+      }
+    },
+    "date": "2026-12-03",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "test/en-080",
+    "ref": "2026-11-20",
+    "item": {
+      "type": "metric",
+      "metric": {
+        "kind": "water",
+        "value": 2,
+        "unit": "l"
+      }
+    },
+    "date": "2026-11-20",
+    "valid": true,
+    "value": 2000
+  },
+  {
+    "id": "test/en-080",
+    "ref": "2026-11-20",
+    "item": {
+      "type": "metric",
+      "metric": {
+        "kind": "workout",
+        "exercise": "gym",
+        "sets": 1,
+        "reps": 1,
+        "value": 0,
+        "unit": "kg"
+      }
+    },
+    "date": "2026-11-20",
+    "valid": true,
+    "value": 0
+  },
+  {
+    "id": "test/en-096",
+    "ref": "2026-10-06",
+    "item": {
+      "type": "task",
+      "title": "Gym",
+      "when": {
+        "day_offset": 1,
+        "time": "08:00"
+      }
+    },
+    "date": "2026-10-07",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "test/en-097",
+    "ref": "2026-10-06",
+    "item": {
+      "type": "task",
+      "title": "Sinema",
+      "when": {
+        "weekday": "fri",
+        "which": "this",
+        "time": "18:30"
+      }
+    },
+    "date": "2026-10-09",
+    "valid": true,
+    "value": null
+  },
+  {
+    "id": "test/en-098",
+    "ref": "2026-10-06",
+    "item": {
+      "type": "metric",
+      "metric": {
+        "kind": "sleep",
+        "value": 6,
+        "unit": "h"
+      }
+    },
+    "date": "2026-10-06",
+    "valid": true,
+    "value": 6
+  },
+  {
+    "id": "test/en-099",
+    "ref": "2026-10-06",
+    "item": {
+      "type": "metric",
+      "metric": {
+        "kind": "water",
+        "value": 3,
+        "unit": "glass"
+      }
+    },
+    "date": "2026-10-06",
+    "valid": true,
+    "value": 750
+  },
+  {
+    "id": "test/en-100",
+    "ref": "2026-10-06",
+    "item": {
+      "type": "task",
+      "title": "Dişçi",
+      "when": {
+        "weekday": "thu",
+        "which": "this"
+      }
+    },
+    "date": "2026-10-08",
+    "valid": true,
+    "value": null
+  }
+]

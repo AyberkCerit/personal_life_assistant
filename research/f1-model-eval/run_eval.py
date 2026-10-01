@@ -156,7 +156,7 @@ def canonical_value(m):
     k = m.get("kind")
     if k == "water":
         return v * 250 if u == "glass" else v * 1000 if u == "l" or (u is None and v < 10) else v
-    if k == "weight":
+    if k in ("weight", "workout"):  # SRS E-D7: lb -> kg
         return v * 0.45359237 if u == "lb" else v
     if k == "sleep":
         return v / 60 if u == "min" else v
@@ -188,7 +188,7 @@ def validate(item):
     if m["kind"] == "workout":
         return m.get("sets") is not None or m.get("reps") is not None or m.get("value") is not None
     v = canonical_value(m)
-    ranges = {"sleep": (0, 24), "water": (1, 10000), "steps": (0, 100000), "weight": (20, 400)}
+    ranges = {"sleep": (0, 24), "water": (0, 10000), "steps": (0, 100000), "weight": (20, 400)}  # SRS E-D8
     return v is not None and ranges[m["kind"]][0] <= v <= ranges[m["kind"]][1]
 
 
