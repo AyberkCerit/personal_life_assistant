@@ -1,6 +1,6 @@
 //! Opening a vault: system folders, `.pla/config` and the per-vault data folder (FR-VLT-006, -008, E-D1, E-D17).
 
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
@@ -61,6 +61,8 @@ pub enum VaultError {
     NetworkPathUnsupported(PathBuf),
     #[error("cannot read .pla/config: {0}")]
     CorruptConfig(String),
+    #[error("folder must be a relative path inside the vault: {0:?}")]
+    InvalidFolder(String),
     #[error("invalid vault_id: {0:?}")]
     InvalidVaultId(String),
     #[error(transparent)]
@@ -93,6 +95,11 @@ pub fn open_vault(root: &Path) -> Result<Vault, VaultError> {
     }
 
     let f = &config.folders;
+    for dir in [&f.inbox, &f.daily, &f.notes, &f.reports, &f.attachments, &f.templates] {
+        if !is_valid_folder(dir) {
+            return Err(VaultError::InvalidFolder(dir.clone()));
+        }
+    }
     for dir in [&f.inbox, &f.daily, &f.notes, &f.attachments, &f.templates] {
         std::fs::create_dir_all(root.join(dir))?;
     }
@@ -116,6 +123,14 @@ pub fn default_app_root() -> Option<PathBuf> {
 
 fn is_valid_vault_id(id: &str) -> bool {
     id.len() == 32 && id.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+}
+
+/// A system folder is a non-empty relative path inside the vault that is not hidden,
+/// so it can never reach outside the vault, `.obsidian/` (FR-VLT-004) or `.pla/`.
+fn is_valid_folder(dir: &str) -> bool {
+    let mut parts = Path::new(dir).components().peekable();
+    let first_visible = matches!(parts.peek(), Some(Component::Normal(p)) if !p.to_string_lossy().starts_with('.'));
+    first_visible && parts.all(|c| matches!(c, Component::Normal(_)))
 }
 
 fn is_network_path(path: &Path) -> bool {
@@ -159,6 +174,27 @@ mod tests {
         let written = std::fs::read_to_string(tmp.path().join(".pla/config")).unwrap();
         assert!(written.contains("Günlük"));
         assert!(written.contains(&v.config.vault_id));
+    }
+
+    #[test]
+    fn folders_must_stay_inside_the_vault() {
+        for bad in ["../outside", "C:/Users/x/Desktop", "/abs", ".obsidian", ".pla", "", "notes/../../x"] {
+            let tmp = tempfile::tempdir().unwrap();
+            std::fs::create_dir(tmp.path().join(".pla")).unwrap();
+            let config = format!("vault_id = \"0123456789abcdef0123456789abcdef\"
+[folders]
+daily = {bad:?}
+");
+            std::fs::write(tmp.path().join(".pla/config"), &config).unwrap();
+            assert!(matches!(open_vault(tmp.path()), Err(VaultError::InvalidFolder(_))), "accepted {bad:?}");
+        }
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::create_dir(tmp.path().join(".pla")).unwrap();
+        std::fs::write(tmp.path().join(".pla/config"), "[folders]
+notes = \"Notlar/Arşiv\"
+").unwrap();
+        open_vault(tmp.path()).unwrap();
+        assert!(tmp.path().join("Notlar/Arşiv").is_dir());
     }
 
     #[test]

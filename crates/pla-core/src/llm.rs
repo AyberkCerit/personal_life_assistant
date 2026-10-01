@@ -82,6 +82,15 @@ pub fn free_port() -> std::io::Result<u16> {
     Ok(TcpListener::bind(("127.0.0.1", 0))?.local_addr()?.port())
 }
 
+/// Plain HTTP to 127.0.0.1 only: environment proxies are ignored (NFR-SEC-001).
+fn http_agent() -> ureq::Agent {
+    ureq::Agent::config_builder()
+        .proxy(None)
+        .timeout_global(Some(Duration::from_secs(120)))
+        .build()
+        .into()
+}
+
 pub struct LlamaServer {
     child: Child,
     base_url: String,
@@ -114,10 +123,7 @@ impl LlamaServer {
         }
         let child = cmd.spawn()?;
 
-        let agent: ureq::Agent = ureq::Agent::config_builder()
-            .timeout_global(Some(Duration::from_secs(120)))
-            .build()
-            .into();
+        let agent = http_agent();
         let mut server = Self { child, base_url: format!("http://127.0.0.1:{port}"), api_key, agent };
         server.wait_healthy(cfg.startup_timeout)?; // on error, Drop kills the child
         Ok(server)
@@ -178,6 +184,17 @@ mod tests {
         assert_eq!(a.len(), 64);
         assert!(a.bytes().all(|c| c.is_ascii_hexdigit()));
         assert_ne!(a, b);
+    }
+
+    #[test]
+    fn http_agent_ignores_system_proxies() {
+        // NFR-SEC-001: HTTP_PROXY/ALL_PROXY must never route sidecar traffic off the machine.
+        // The proxy is read from the environment when the agent is built, so set one for that moment.
+        // (Port 9 is "discard": should another test build an agent meanwhile, its requests fail fast.)
+        std::env::set_var("ALL_PROXY", "http://127.0.0.1:9");
+        let agent = http_agent();
+        std::env::remove_var("ALL_PROXY");
+        assert!(agent.config().proxy().is_none(), "proxy picked up: {:?}", agent.config().proxy());
     }
 
     #[test]

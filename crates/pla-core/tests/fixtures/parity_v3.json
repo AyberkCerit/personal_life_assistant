@@ -902,7 +902,7 @@
     },
     "date": "2026-09-30",
     "valid": true,
-    "value": 0
+    "value": null
   },
   {
     "id": "eval/tr-059",
@@ -983,7 +983,7 @@
     },
     "date": "2026-09-29",
     "valid": true,
-    "value": 0
+    "value": null
   },
   {
     "id": "eval/tr-064",
@@ -1710,7 +1710,7 @@
     },
     "date": "2026-09-30",
     "valid": true,
-    "value": 1
+    "value": null
   },
   {
     "id": "eval/en-013",
@@ -2426,7 +2426,7 @@
     },
     "date": "2026-09-30",
     "valid": true,
-    "value": 0
+    "value": null
   },
   {
     "id": "eval/en-059",
@@ -2507,7 +2507,7 @@
     },
     "date": "2026-09-29",
     "valid": true,
-    "value": 0
+    "value": null
   },
   {
     "id": "eval/en-064",
@@ -3931,7 +3931,7 @@
     },
     "date": "2026-10-11",
     "valid": true,
-    "value": 0
+    "value": null
   },
   {
     "id": "test/tr-058",
@@ -4045,7 +4045,7 @@
     },
     "date": "2026-11-20",
     "valid": true,
-    "value": 0
+    "value": null
   },
   {
     "id": "test/tr-065",
@@ -5439,7 +5439,7 @@
     },
     "date": "2026-10-11",
     "valid": true,
-    "value": 0
+    "value": null
   },
   {
     "id": "test/en-058",
@@ -5553,7 +5553,7 @@
     },
     "date": "2026-11-20",
     "valid": true,
-    "value": 0
+    "value": null
   },
   {
     "id": "test/en-065",
@@ -6006,7 +6006,7 @@
     },
     "date": "2026-11-20",
     "valid": true,
-    "value": 0
+    "value": null
   },
   {
     "id": "test/en-096",

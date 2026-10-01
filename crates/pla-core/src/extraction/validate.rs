@@ -62,8 +62,13 @@ pub enum InvalidReason {
 }
 
 /// Value in the kind's canonical unit: sleep h, water ml, weight and workout kg.
+/// A workout value counts only as a positive weight in kg, lb or without a unit
+/// (the model writes push-ups as `value 0, unit count` and "gym 1 hour" as `value 1, unit h`).
 pub fn canonical_value(m: &RawMetric, s: &ValidationSettings) -> Option<f64> {
     let v = m.value?;
+    if m.kind == Some(MetricKind::Workout) && (v <= 0.0 || !matches!(m.unit, None | Some(Unit::Kg) | Some(Unit::Lb))) {
+        return None;
+    }
     Some(match (m.kind, m.unit) {
         (Some(MetricKind::Water), Some(Unit::Glass)) => v * s.glass_ml,
         (Some(MetricKind::Water), Some(Unit::L)) => v * 1000.0,
@@ -125,7 +130,7 @@ pub fn validate(item: &RawItem, reference: NaiveDate, s: &ValidationSettings) ->
             let kind = m.kind.ok_or(InvalidReason::MissingMetricKind)?;
             let value = canonical_value(m, s);
             if kind == MetricKind::Workout {
-                if m.sets.is_none() && m.reps.is_none() && m.value.is_none() {
+                if m.sets.is_none() && m.reps.is_none() && value.is_none() {
                     return Err(InvalidReason::EmptyWorkout);
                 }
             } else {
@@ -211,6 +216,18 @@ mod tests {
         assert_eq!(check(r#"{"type":"metric","metric":{"kind":"steps","unit":"count"}}"#), Err(InvalidReason::MissingValue));
         assert_eq!(check(r#"{"type":"metric","metric":{"value":3}}"#), Err(InvalidReason::MissingMetricKind));
         assert_eq!(check(r#"{"type":"metric"}"#), Err(InvalidReason::MissingMetricKind));
+    }
+
+    #[test]
+    fn workout_value_is_a_weight_only_in_kg_or_lb() {
+        // F1 outputs: push-ups as `value 0, unit count`, "gym 1 hour" as `value 1, unit h`.
+        let pushups = check(r#"{"type":"metric","metric":{"kind":"workout","exercise":"push-ups","sets":3,"reps":20,"value":0,"unit":"count"}}"#).unwrap();
+        assert!(matches!(pushups, ValidItem::Metric { value: None, unit: None, sets: Some(3), reps: Some(20), .. }), "{pushups:?}");
+        assert_eq!(check(r#"{"type":"metric","metric":{"kind":"workout","exercise":"gym","value":1,"unit":"h"}}"#), Err(InvalidReason::EmptyWorkout));
+        let negative = check(r#"{"type":"metric","metric":{"kind":"workout","exercise":"squat","sets":3,"value":-5,"unit":"kg"}}"#).unwrap();
+        assert!(matches!(negative, ValidItem::Metric { value: None, .. }), "{negative:?}");
+        let no_unit = check(r#"{"type":"metric","metric":{"kind":"workout","exercise":"bench","sets":3,"reps":8,"value":60}}"#).unwrap();
+        assert!(matches!(no_unit, ValidItem::Metric { value: Some(v), unit: Some(Unit::Kg), .. } if v == 60.0), "{no_unit:?}");
     }
 
     #[test]
