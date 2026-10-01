@@ -69,3 +69,7 @@ docs/srs/build/report.js
 research/f1-model-eval/bin/
 research/f1-model-eval/models/
 research/f1-model-eval/.venv/
+
+# Superpowers implementation plans (kept locally, not versioned)
+docs/superpowers/
+.superpowers/
