@@ -3,12 +3,15 @@
   import { open } from "@tauri-apps/plugin-dialog";
   import { api, inTauri, type TreeEntry, type WorkerStatus } from "./lib/api";
   import FileTree from "./lib/FileTree.svelte";
+  import Editor from "./lib/Editor.svelte";
+  import { getCurrentWindow } from "@tauri-apps/api/window";
   import StatusBar from "./lib/StatusBar.svelte";
   import { t, lang } from "./lib/i18n";
 
   let vaultPath = $state<string | null>(null);
   let entries = $state<TreeEntry[]>([]);
   let current = $state<string | null>(null);
+  let editor: ReturnType<typeof Editor> | undefined = $state();
   let error = $state<string | null>(null);
   let status = $state<WorkerStatus>({ queued: 0, model: "off", busy: false, last_error: null, added: 0 });
 
@@ -29,6 +32,8 @@
   }
 
   async function openNote(path: string) {
+    if (path === current) return;
+    await editor?.close(); // save and, if edited, queue the note we are leaving (FR-EXT-002)
     current = path;
   }
 
@@ -53,9 +58,15 @@
     })();
     const unStatus = api.onStatus((s) => (status = s));
     const unTree = api.onTreeChanged(() => void refresh());
+    const unClose = inTauri
+      ? getCurrentWindow().onCloseRequested(async () => {
+          await editor?.close();
+        })
+      : Promise.resolve(() => {});
     return () => {
       void unStatus.then((f) => f());
       void unTree.then((f) => f());
+      void unClose.then((f) => f());
     };
   });
 </script>
@@ -75,7 +86,9 @@
     <section class="main">
       {#if error}<div class="banner danger" role="alert">{t("error.generic")}: {error}</div>{/if}
       {#if current}
-        <p class="empty">{current}</p>
+        {#key current}
+          <Editor bind:this={editor} path={current} onSavedCopy={() => void refresh()} />
+        {/key}
       {:else}
         <p class="empty">{t("editor.empty")}</p>
       {/if}
