@@ -21,6 +21,11 @@ pub const MAX_BLOCK_CHARS: usize = 2000;
 /// The model, as seen by the pipeline. `llm::ModelHost` is the real one; tests script answers.
 pub trait Extractor {
     fn extract_raw(&mut self, reference: NaiveDate, text: &str) -> Result<String, LlmError>;
+    /// Called about once a second while nothing else happens (lets the host stop an idle model, FR-MDL-013).
+    fn tick(&mut self) {}
+    fn is_running(&self) -> bool {
+        false
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]

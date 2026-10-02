@@ -303,6 +303,14 @@ impl crate::pipeline::Extractor for ModelHost {
         self.last_used = Instant::now();
         answer
     }
+
+    fn tick(&mut self) {
+        self.stop_if_idle();
+    }
+
+    fn is_running(&self) -> bool {
+        ModelHost::is_running(self)
+    }
 }
 
 #[cfg(test)]

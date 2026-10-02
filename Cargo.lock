@@ -528,6 +528,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "pla-desktop"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "pla-core",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
 name = "potential_utf"
 version = "0.1.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
