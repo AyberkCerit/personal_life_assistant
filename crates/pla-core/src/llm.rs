@@ -1,9 +1,13 @@
 //! The llama.cpp `llama-server` sidecar (FR-MDL-011, -012, -015, -017, -020, -021; NFR-SEC-002).
 //! Only the Rust core talks to it; it listens on 127.0.0.1 behind a per-run API key.
 
+use std::collections::VecDeque;
+use std::io::{BufRead, BufReader};
 use std::net::TcpListener;
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
+use std::sync::{Arc, Mutex};
+use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 use chrono::NaiveDate;
@@ -91,11 +95,40 @@ fn http_agent() -> ureq::Agent {
         .into()
 }
 
+/// One health probe must not outlive the startup limit (FR-MDL-014).
+fn health_agent() -> ureq::Agent {
+    ureq::Agent::config_builder()
+        .proxy(None)
+        .timeout_global(Some(Duration::from_secs(1)))
+        .build()
+        .into()
+}
+
+const STDERR_TAIL_LINES: usize = 20;
+
+pub(crate) fn wait_until_healthy(child: &mut Child, health: &ureq::Agent, base_url: &str, timeout: Duration) -> Result<(), LlmError> {
+    let deadline = Instant::now() + timeout;
+    loop {
+        if let Some(status) = child.try_wait()? {
+            return Err(LlmError::Exited(status.to_string()));
+        }
+        if health.get(format!("{base_url}/health")).call().is_ok() {
+            return Ok(());
+        }
+        if Instant::now() >= deadline {
+            return Err(LlmError::StartupTimeout(timeout));
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+}
+
 pub struct LlamaServer {
     child: Child,
     base_url: String,
     api_key: String,
     agent: ureq::Agent,
+    stderr_tail: Arc<Mutex<VecDeque<String>>>,
+    stderr_reader: Option<JoinHandle<()>>,
 }
 
 impl LlamaServer {
@@ -114,39 +147,60 @@ impl LlamaServer {
             .env("LLAMA_API_KEY", &api_key)
             .stdin(Stdio::null())
             .stdout(Stdio::null())
-            .stderr(Stdio::null());
+            .stderr(Stdio::piped());
         #[cfg(windows)]
         {
             use std::os::windows::process::CommandExt;
             const CREATE_NO_WINDOW: u32 = 0x0800_0000;
             cmd.creation_flags(CREATE_NO_WINDOW);
         }
-        let child = cmd.spawn()?;
+        let mut child = cmd.spawn()?;
 
-        let agent = http_agent();
-        let mut server = Self { child, base_url: format!("http://127.0.0.1:{port}"), api_key, agent };
-        server.wait_healthy(cfg.startup_timeout)?; // on error, Drop kills the child
-        Ok(server)
+        // Keep the last stderr lines for error messages; the pipe must be drained or the server blocks.
+        let stderr_tail = Arc::new(Mutex::new(VecDeque::with_capacity(STDERR_TAIL_LINES)));
+        let stderr_reader = child.stderr.take().map(|stderr| {
+            let tail = Arc::clone(&stderr_tail);
+            std::thread::spawn(move || {
+                let mut reader = BufReader::new(stderr);
+                let mut line = Vec::new();
+                while reader.read_until(b'\n', &mut line).is_ok_and(|n| n > 0) {
+                    let mut tail = tail.lock().expect("stderr tail lock");
+                    if tail.len() == STDERR_TAIL_LINES {
+                        tail.pop_front();
+                    }
+                    tail.push_back(String::from_utf8_lossy(&line).trim_end().to_owned());
+                    line.clear();
+                }
+            })
+        });
+
+        let mut server = Self {
+            child,
+            base_url: format!("http://127.0.0.1:{port}"),
+            api_key,
+            agent: http_agent(),
+            stderr_tail,
+            stderr_reader,
+        };
+        match wait_until_healthy(&mut server.child, &health_agent(), &server.base_url, cfg.startup_timeout) {
+            Ok(()) => Ok(server),
+            Err(LlmError::Exited(status)) => {
+                if let Some(reader) = server.stderr_reader.take() {
+                    let _ = reader.join(); // the pipe closed with the process
+                }
+                let tail = server.stderr_tail.lock().expect("stderr tail lock").iter().cloned().collect::<Vec<_>>().join(" | ");
+                Err(LlmError::Exited(if tail.is_empty() { status } else { format!("{status}: {tail}") }))
+            }
+            Err(e) => Err(e), // Drop kills the child
+        }
+    }
+
+    pub fn is_alive(&mut self) -> bool {
+        matches!(self.child.try_wait(), Ok(None))
     }
 
     pub fn base_url(&self) -> &str {
         &self.base_url
-    }
-
-    fn wait_healthy(&mut self, timeout: Duration) -> Result<(), LlmError> {
-        let deadline = Instant::now() + timeout;
-        loop {
-            if let Some(status) = self.child.try_wait()? {
-                return Err(LlmError::Exited(status.to_string()));
-            }
-            if self.agent.get(format!("{}/health", self.base_url)).call().is_ok() {
-                return Ok(());
-            }
-            if Instant::now() >= deadline {
-                return Err(LlmError::StartupTimeout(timeout));
-            }
-            std::thread::sleep(Duration::from_millis(100));
-        }
     }
 
     /// The model's raw JSON answer for one block of text.
@@ -173,9 +227,138 @@ impl Drop for LlamaServer {
     }
 }
 
+impl crate::pipeline::Extractor for LlamaServer {
+    fn extract_raw(&mut self, reference: NaiveDate, text: &str) -> Result<String, LlmError> {
+        LlamaServer::extract_raw(self, reference, text)
+    }
+}
+
+/// Owns the sidecar: starts it on first use, retries a failed start once (FR-MDL-014),
+/// restarts it after a crash and stops it after `idle_after` without requests (FR-MDL-013).
+pub struct ModelHost {
+    cfg: ServerConfig,
+    idle_after: Duration,
+    server: Option<LlamaServer>,
+    last_used: Instant,
+    start_attempts: u32,
+}
+
+impl ModelHost {
+    pub fn new(cfg: ServerConfig, idle_after: Duration) -> Self {
+        Self { cfg, idle_after, server: None, last_used: Instant::now(), start_attempts: 0 }
+    }
+
+    pub fn is_running(&self) -> bool {
+        self.server.is_some()
+    }
+
+    pub fn start_attempts(&self) -> u32 {
+        self.start_attempts
+    }
+
+    pub fn stop_if_idle(&mut self) -> bool {
+        if self.server.is_some() && self.last_used.elapsed() >= self.idle_after {
+            self.server = None;
+            return true;
+        }
+        false
+    }
+
+    pub fn stop(&mut self) {
+        self.server = None;
+    }
+
+    fn server(&mut self) -> Result<&LlamaServer, LlmError> {
+        if self.server.as_mut().is_some_and(|s| !s.is_alive()) {
+            self.server = None;
+        }
+        if self.server.is_none() {
+            self.start_attempts += 1;
+            let started = match LlamaServer::start(&self.cfg) {
+                Err(LlmError::MissingBinary(p)) => Err(LlmError::MissingBinary(p)),
+                Err(LlmError::MissingModel(p)) => Err(LlmError::MissingModel(p)),
+                Err(_) => {
+                    self.start_attempts += 1;
+                    LlamaServer::start(&self.cfg)
+                }
+                ok => ok,
+            }?;
+            self.server = Some(started);
+        }
+        Ok(self.server.as_ref().expect("server was just started"))
+    }
+}
+
+impl crate::pipeline::Extractor for ModelHost {
+    fn extract_raw(&mut self, reference: NaiveDate, text: &str) -> Result<String, LlmError> {
+        let answer = self.server()?.extract_raw(reference, text);
+        self.last_used = Instant::now();
+        answer
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::pipeline::Extractor;
+
+    fn dying_config() -> (tempfile::TempDir, ServerConfig) {
+        let tmp = tempfile::tempdir().unwrap();
+        let model = tmp.path().join("m.gguf");
+        std::fs::write(&model, b"not a model").unwrap();
+        let mut cfg = ServerConfig::new(std::env::current_exe().unwrap(), model);
+        cfg.startup_timeout = Duration::from_secs(20);
+        (tmp, cfg)
+    }
+
+    #[test]
+    fn startup_failure_reports_what_the_server_printed() {
+        // The test binary rejects llama-server's flags and prints why on stderr.
+        let (_tmp, cfg) = dying_config();
+        let Err(LlmError::Exited(message)) = LlamaServer::start(&cfg) else { panic!("expected Exited") };
+        assert!(message.to_lowercase().contains("option"), "stderr tail missing: {message}");
+    }
+
+    #[test]
+    fn model_host_retries_a_failed_start_once() {
+        let (_tmp, cfg) = dying_config();
+        let mut host = ModelHost::new(cfg, Duration::from_secs(60));
+        let reference = NaiveDate::from_ymd_opt(2026, 10, 6).unwrap();
+        assert!(matches!(host.extract_raw(reference, "x"), Err(LlmError::Exited(_))));
+        assert_eq!(host.start_attempts(), 2);
+        assert!(!host.is_running());
+    }
+
+    #[test]
+    fn model_host_does_not_retry_a_missing_model() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cfg = ServerConfig::new(std::env::current_exe().unwrap(), tmp.path().join("yok.gguf"));
+        let mut host = ModelHost::new(cfg, Duration::from_secs(60));
+        let reference = NaiveDate::from_ymd_opt(2026, 10, 6).unwrap();
+        assert!(matches!(host.extract_raw(reference, "x"), Err(LlmError::MissingModel(_))));
+        assert_eq!(host.start_attempts(), 1);
+        assert!(!host.stop_if_idle(), "nothing to stop");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_silent_listener_cannot_stall_startup_past_the_limit() {
+        // A port that accepts connections but never answers must not block each probe for minutes.
+        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let port = listener.local_addr().unwrap().port();
+        std::thread::spawn(move || {
+            let mut held = Vec::new();
+            for conn in listener.incoming() {
+                held.push(conn);
+            }
+        });
+        let mut child = Command::new("ping").args(["-n", "30", "127.0.0.1"]).stdout(Stdio::null()).spawn().unwrap();
+        let started = Instant::now();
+        let result = wait_until_healthy(&mut child, &health_agent(), &format!("http://127.0.0.1:{port}"), Duration::from_secs(3));
+        let _ = child.kill();
+        assert!(matches!(result, Err(LlmError::StartupTimeout(_))));
+        assert!(started.elapsed() < Duration::from_secs(6), "took {:?}", started.elapsed());
+    }
 
     #[test]
     fn api_key_is_256_bit_hex_and_fresh() {
