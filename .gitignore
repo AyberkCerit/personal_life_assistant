@@ -3,9 +3,9 @@ target/
 **/*.rs.bk
 
 # Tauri
-src-tauri/target/
-src-tauri/gen/schemas/
-src-tauri/binaries/
+**/src-tauri/target/
+**/src-tauri/gen/
+**/src-tauri/binaries/
 
 # Node / frontend
 node_modules/
