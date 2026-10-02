@@ -87,9 +87,8 @@ pub fn open_vault(root: &Path) -> Result<Vault, VaultError> {
     };
 
     if config.vault_id.is_empty() {
-        config.vault_id = uuid::Uuid::new_v4().simple().to_string();
-        let text = toml::to_string(&config).map_err(|e| VaultError::CorruptConfig(e.to_string()))?;
-        write_atomic(&config_path, text.as_bytes())?;
+        config.vault_id = new_vault_id();
+        save_config(root, &config)?;
     } else if !is_valid_vault_id(&config.vault_id) {
         return Err(VaultError::InvalidVaultId(config.vault_id));
     }
@@ -121,6 +120,54 @@ pub fn default_app_root() -> Option<PathBuf> {
     std::env::var_os("APPDATA").map(|p| PathBuf::from(p).join("PLA"))
 }
 
+const ROOT_MARKER: &str = "vault_root";
+
+/// This vault's data folder (E-D1), created if missing. The folder remembers which vault folder it
+/// belongs to: if that folder still exists with the same `vault_id`, this vault is a copy and gets a
+/// new identity (and an empty database); if it no longer exists, the vault was moved and keeps its data.
+pub fn resolve_data_dir(app_root: &Path, vault: &mut Vault) -> Result<PathBuf, VaultError> {
+    let here = std::fs::canonicalize(&vault.root)?.to_string_lossy().into_owned();
+    let dir = data_dir(app_root, &vault.config.vault_id)?;
+    let marker = dir.join(ROOT_MARKER);
+    let recorded = match std::fs::read_to_string(&marker) {
+        Ok(text) => Some(text),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+        Err(e) => return Err(e.into()),
+    };
+    match recorded {
+        Some(other) if other == here => Ok(dir),
+        Some(other) if belongs_to(Path::new(&other), &vault.config.vault_id) => {
+            vault.config.vault_id = new_vault_id();
+            save_config(&vault.root, &vault.config)?;
+            let dir = data_dir(app_root, &vault.config.vault_id)?;
+            std::fs::create_dir_all(&dir)?;
+            write_atomic(&dir.join(ROOT_MARKER), here.as_bytes())?;
+            Ok(dir)
+        }
+        _ => {
+            std::fs::create_dir_all(&dir)?;
+            write_atomic(&marker, here.as_bytes())?;
+            Ok(dir)
+        }
+    }
+}
+
+fn belongs_to(root: &Path, vault_id: &str) -> bool {
+    std::fs::read_to_string(root.join(CONFIG_PATH))
+        .ok()
+        .and_then(|text| toml::from_str::<VaultConfig>(&text).ok())
+        .is_some_and(|config| config.vault_id == vault_id)
+}
+
+fn new_vault_id() -> String {
+    uuid::Uuid::new_v4().simple().to_string()
+}
+
+fn save_config(root: &Path, config: &VaultConfig) -> Result<(), VaultError> {
+    let text = toml::to_string(config).map_err(|e| VaultError::CorruptConfig(e.to_string()))?;
+    write_atomic(&root.join(CONFIG_PATH), text.as_bytes())?;
+    Ok(())
+}
 fn is_valid_vault_id(id: &str) -> bool {
     id.len() == 32 && id.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
 }
@@ -141,6 +188,66 @@ fn is_network_path(path: &Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn copy_config(from: &Path, to: &Path) {
+        std::fs::create_dir_all(to.join(".pla")).unwrap();
+        std::fs::copy(from.join(".pla/config"), to.join(".pla/config")).unwrap();
+    }
+
+    #[test]
+    fn same_folder_keeps_its_data_dir() {
+        let app = tempfile::tempdir().unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let mut v = open_vault(tmp.path()).unwrap();
+        let first = resolve_data_dir(app.path(), &mut v).unwrap();
+        let mut again = open_vault(tmp.path()).unwrap();
+        assert_eq!(resolve_data_dir(app.path(), &mut again).unwrap(), first);
+        assert!(first.join("vault_root").is_file());
+    }
+
+    #[test]
+    fn copied_vault_gets_its_own_identity() {
+        // Review Focus 4: a backup copy must not write into the original's database.
+        let app = tempfile::tempdir().unwrap();
+        let parent = tempfile::tempdir().unwrap();
+        let original = parent.path().join("Kasa");
+        let copy = parent.path().join("Kasa - Kopya");
+        std::fs::create_dir_all(&original).unwrap();
+        let mut a = open_vault(&original).unwrap();
+        let a_dir = resolve_data_dir(app.path(), &mut a).unwrap();
+
+        std::fs::create_dir_all(&copy).unwrap();
+        copy_config(&original, &copy);
+        let mut b = open_vault(&copy).unwrap();
+        assert_eq!(b.config.vault_id, a.config.vault_id, "precondition: copied config");
+        let b_dir = resolve_data_dir(app.path(), &mut b).unwrap();
+
+        assert_ne!(b.config.vault_id, a.config.vault_id);
+        assert_ne!(b_dir, a_dir);
+        let on_disk = std::fs::read_to_string(copy.join(".pla/config")).unwrap();
+        assert!(on_disk.contains(&b.config.vault_id), "new id must be saved in the copy");
+        let mut a_again = open_vault(&original).unwrap();
+        assert_eq!(resolve_data_dir(app.path(), &mut a_again).unwrap(), a_dir, "original keeps its data");
+    }
+
+    #[test]
+    fn moved_vault_keeps_its_data() {
+        let app = tempfile::tempdir().unwrap();
+        let parent = tempfile::tempdir().unwrap();
+        let before = parent.path().join("eski yer");
+        let after = parent.path().join("yeni yer");
+        std::fs::create_dir_all(&before).unwrap();
+        let mut v = open_vault(&before).unwrap();
+        let dir = resolve_data_dir(app.path(), &mut v).unwrap();
+        let id = v.config.vault_id.clone();
+
+        std::fs::rename(&before, &after).unwrap();
+        let mut moved = open_vault(&after).unwrap();
+        assert_eq!(resolve_data_dir(app.path(), &mut moved).unwrap(), dir);
+        assert_eq!(moved.config.vault_id, id);
+        let recorded = std::fs::read_to_string(dir.join("vault_root")).unwrap();
+        assert!(recorded.contains("yeni yer"), "binding must follow the move: {recorded}");
+    }
 
     const SYSTEM_DIRS: [&str; 8] = ["inbox", "daily", "notes", "reports/weekly", "attachments", "templates", ".pla", ".pla/backup"];
 
