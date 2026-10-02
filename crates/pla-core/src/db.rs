@@ -4,7 +4,10 @@ use std::path::Path;
 
 use rusqlite::Connection;
 
-const PLA_MIGRATIONS: &[&str] = &[include_str!("../migrations/pla/001_init.sql")];
+const PLA_MIGRATIONS: &[&str] = &[
+    include_str!("../migrations/pla/001_init.sql"),
+    include_str!("../migrations/pla/002_blocks_queue.sql"),
+];
 const CACHE_MIGRATIONS: &[&str] = &[include_str!("../migrations/cache/001_init.sql")];
 
 pub struct Databases {
@@ -113,7 +116,7 @@ mod tests {
         drop(open_databases(tmp.path()).unwrap());
         let dbs = open_databases(tmp.path()).unwrap();
         let n: i64 = dbs.pla.query_row("SELECT COUNT(*) FROM schema_version", [], |r| r.get(0)).unwrap();
-        assert_eq!(n, 1);
+        assert_eq!(n, PLA_MIGRATIONS.len() as i64);
     }
 
     #[test]
