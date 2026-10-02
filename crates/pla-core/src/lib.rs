@@ -9,3 +9,4 @@ pub mod llm;
 pub mod notes;
 pub mod pipeline;
 pub mod settings;
+pub mod tasks;
