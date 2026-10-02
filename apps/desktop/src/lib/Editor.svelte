@@ -9,7 +9,7 @@
   import { NoteSession } from "./triggers";
   import { t } from "./i18n";
 
-  let { path, onSavedCopy }: { path: string; onSavedCopy: (rel: string) => void } = $props();
+  let { path, reveal = null, onSavedCopy }: { path: string; reveal?: string | null; onSavedCopy: (rel: string) => void } = $props();
 
   let host: HTMLDivElement | undefined = $state();
   let view: EditorView | undefined;
@@ -55,6 +55,13 @@
     doc = new NoteDoc(path, note.text, note.hash, () => current.state.doc.toString(), saveApi, sync);
     session = new NoteSession(path, () => doc!.save(), (p) => void api.queueNote(p));
     sync();
+    if (reveal) {
+      const at = note.text.indexOf(reveal);
+      if (at >= 0) {
+        current.dispatch({ selection: { anchor: at, head: at + reveal.length }, scrollIntoView: true });
+        current.focus(); // show the selected source line (FR-TSK-017)
+      }
+    }
   }
 
   /** Leaving the note: save, queue it if edited, and never drop text (a copy is written if needed). */

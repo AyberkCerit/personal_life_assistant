@@ -1,5 +1,6 @@
 <script lang="ts">
-  import { onMount } from "svelte";
+  import { onMount, tick } from "svelte";
+  import AddedToast from "./lib/AddedToast.svelte";
   import { open } from "@tauri-apps/plugin-dialog";
   import { api, inTauri, type TreeEntry, type WorkerStatus } from "./lib/api";
   import FileTree from "./lib/FileTree.svelte";
@@ -14,6 +15,7 @@
   let current = $state<string | null>(null);
   let inbox = $state("inbox");
   let tasksVersion = $state(0);
+  let reveal = $state<string | null>(null);
   let editor: ReturnType<typeof Editor> | undefined = $state();
   let error = $state<string | null>(null);
   let status = $state<WorkerStatus>({ queued: 0, model: "off", busy: false, last_error: null, added: 0 });
@@ -37,20 +39,26 @@
     }
   }
 
-  async function openNote(path: string) {
-    if (path === current) return;
+  async function openNote(path: string, text: string | null = null) {
     try {
       await editor?.close(); // save, queue if edited (FR-EXT-002); text is never dropped
     } catch (e) {
       error = String(e); // stay on the note rather than lose what could not be saved
       return;
     }
+    reveal = text;
+    if (path === current) {
+      current = null; // re-create the editor so the selection is applied
+      await tick();
+    }
     current = path;
   }
 
-  function openSource(path: string) {
-    void openNote(path);
+
+  function openSource(path: string, blockText: string | null) {
+    void openNote(path, blockText);
   }
+
 
   async function createNote(title: string) {
     try {
@@ -110,7 +118,7 @@
       {#if error}<div class="banner danger" role="alert">{t("error.generic")}: {error}</div>{/if}
       {#if current}
         {#key current}
-          <Editor bind:this={editor} path={current} onSavedCopy={() => void refresh()} />
+          <Editor bind:this={editor} path={current} {reveal} onSavedCopy={() => void refresh()} />
         {/key}
       {:else}
         <p class="empty">{t("editor.empty")}</p>
@@ -120,5 +128,6 @@
       <TaskPanel version={tasksVersion} onOpenSource={openSource} />
     </aside>
     <StatusBar {status} />
+    <AddedToast onChanged={() => tasksVersion++} />
   </div>
 {/if}
