@@ -40,6 +40,7 @@
   }
 
   async function openNote(path: string, text: string | null = null) {
+    if (path === current && text === null) return; // already open: keep cursor, scroll and undo history
     try {
       await editor?.close(); // save, queue if edited (FR-EXT-002); text is never dropped
     } catch (e) {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { dayLabel, filterByOrigin, groupTasks, isOverdue, todayIso, type Labels, type Task } from "./tasks";
+import { dayLabel, filterByOrigin, groupTasks, isOverdue, msUntilNextDay, revealRange, todayIso, type Labels, type Task } from "./tasks";
 
 const L: Labels = { today: "Bugün", tomorrow: "Yarın", noDate: "Tarihsiz", overdue: "Gecikmiş" };
 const TODAY = "2026-10-06";
@@ -45,5 +45,19 @@ describe("tasks", () => {
     const list = [task("a", null), task("b", null, { origin: "extracted" })];
     expect(filterByOrigin(list, "extracted").map((t) => t.title)).toEqual(["b"]);
     expect(filterByOrigin(list, "all")).toHaveLength(2);
+  });
+
+  it("knows how long until the local day changes (Final review I4)", () => {
+    expect(msUntilNextDay(new Date(2026, 9, 6, 23, 59, 30))).toBe(30_000);
+    expect(msUntilNextDay(new Date(2026, 9, 6, 0, 0, 0))).toBe(24 * 3600 * 1000);
+  });
+
+  it("finds the source block in a CRLF note at the editor's offsets (Final review I3)", () => {
+    const file = "# Başlık\r\n\r\nYarın dişçi.\r\nİkinci satır.\r\n";
+    const block = "Yarın dişçi.\nİkinci satır.";
+    const range = revealRange(file, block)!;
+    const editorText = file.replace(/\r\n/g, "\n");
+    expect(editorText.slice(range.anchor, range.head)).toBe(block);
+    expect(revealRange(file, "yok")).toBeNull();
   });
 });

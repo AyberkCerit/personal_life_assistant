@@ -81,3 +81,19 @@ export function groupTasks(tasks: Task[], list: TaskList, today: string, labels:
     tasks: groups.get(key)!,
   }));
 }
+
+/** Milliseconds until the local date changes (the panel refreshes "today" then, Final review I4). */
+export function msUntilNextDay(now: Date = new Date()): number {
+  const next = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+  return next.getTime() - now.getTime();
+}
+
+/**
+ * Where a source block sits in the editor's text. CodeMirror shows CRLF files with LF line breaks
+ * and blocks are stored with LF, so the search runs on LF text (Final review I3).
+ */
+export function revealRange(fileText: string, block: string): { anchor: number; head: number } | null {
+  const text = fileText.replace(/\r\n?/g, "\n");
+  const at = text.indexOf(block);
+  return at < 0 ? null : { anchor: at, head: at + block.length };
+}

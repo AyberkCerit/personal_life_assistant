@@ -1,6 +1,7 @@
 <script lang="ts">
   import { api, type ReviewItem, type Task, type TaskInput } from "./api";
-  import { filterByOrigin, groupTasks, todayIso, type OriginFilter, type TaskList } from "./tasks";
+  import { onMount } from "svelte";
+  import { filterByOrigin, groupTasks, msUntilNextDay, todayIso, type OriginFilter, type TaskList } from "./tasks";
   import TaskRow from "./TaskRow.svelte";
   import { lang, t } from "./i18n";
 
@@ -17,7 +18,7 @@
   let newDate = $state("");
   let newTime = $state("");
   let reviewForms = $state<Record<string, TaskInput>>({});
-  const today = $derived(todayIso());
+  let today = $state(todayIso()); // refreshed on every load and at local midnight
   const labels = $derived({ today: t("tasks.today"), tomorrow: t("tasks.tomorrow"), noDate: t("tasks.noDate"), overdue: t("tasks.overdue") });
   const groups = $derived(tab === "review" ? [] : groupTasks(filterByOrigin(tasks, filter), tab, today, labels, lang));
 
@@ -32,6 +33,7 @@
   }
 
   async function load() {
+    today = todayIso();
     try {
       if (tab === "review") {
         review = await api.listReview();
@@ -48,6 +50,18 @@
     void version; // reload when the worker reports changes
     void tab;
     void load();
+  });
+
+  onMount(() => {
+    let timer = 0;
+    const atMidnight = () => {
+      timer = window.setTimeout(() => {
+        void load(); // "today", "overdue" and "tomorrow" move with the date
+        atMidnight();
+      }, msUntilNextDay() + 1000);
+    };
+    atMidnight();
+    return () => window.clearTimeout(timer);
   });
 
   function onTabKey(e: KeyboardEvent) {

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { tick } from "svelte";
   import type { Task, TaskInput } from "./api";
   import { isOverdue } from "./tasks";
   import { t } from "./i18n";
@@ -21,6 +22,42 @@
 
   let editing = $state(false);
   let confirming = $state(false);
+  let titleButton: HTMLButtonElement | undefined = $state();
+  let deleteButton: HTMLButtonElement | undefined = $state();
+
+  /** Puts keyboard focus on an element as soon as it appears (IR-UI-003). */
+  function focusOnMount(node: HTMLElement) {
+    node.focus();
+  }
+
+  async function backTo(target: () => HTMLElement | undefined) {
+    await tick();
+    target()?.focus();
+  }
+
+  function cancelEdit() {
+    editing = false;
+    void backTo(() => titleButton);
+  }
+
+  function cancelDelete() {
+    confirming = false;
+    void backTo(() => deleteButton);
+  }
+
+  function onEscape(e: KeyboardEvent, cancel: () => void) {
+    if (e.key === "Escape") {
+      e.preventDefault();
+      cancel();
+    }
+  }
+
+  /** Escape cancels the form it is attached to. */
+  function escapeCancels(node: HTMLElement, cancel: () => void) {
+    const handler = (e: KeyboardEvent) => onEscape(e, cancel);
+    node.addEventListener("keydown", handler);
+    return { destroy: () => node.removeEventListener("keydown", handler) };
+  }
   let form = $state<TaskInput>({ title: "", date: "", time: "", details: "" });
 
   function startEdit() {
@@ -32,13 +69,14 @@
     e.preventDefault();
     await onSave(form);
     editing = false;
+    void backTo(() => titleButton);
   }
 </script>
 
 <li class="task" class:done={task.status === "done"}>
   {#if editing}
-    <form class="edit" onsubmit={save}>
-      <input bind:value={form.title} aria-label={t("tasks.title")} required maxlength="200" />
+    <form class="edit" onsubmit={save} use:escapeCancels={cancelEdit}>
+      <input bind:value={form.title} aria-label={t("tasks.title")} required maxlength="200" use:focusOnMount />
       <div class="when">
         <input type="date" bind:value={form.date} aria-label={t("tasks.date")} />
         <input type="time" bind:value={form.time} aria-label={t("tasks.time")} />
@@ -46,14 +84,14 @@
       <textarea bind:value={form.details} aria-label={t("tasks.details")} rows="2"></textarea>
       <div class="actions">
         <button type="submit">{t("tasks.save")}</button>
-        <button type="button" onclick={() => (editing = false)}>{t("tasks.cancel")}</button>
+        <button type="button" onclick={cancelEdit}>{t("tasks.cancel")}</button>
       </div>
     </form>
   {:else if confirming}
-    <div class="confirm" role="alertdialog" aria-label={t("tasks.delete")}>
+    <div class="confirm" role="alertdialog" aria-label={t("tasks.delete")} tabindex="-1" onkeydown={(e) => onEscape(e, cancelDelete)}>
       <span>'{task.title}' {t("tasks.confirmDelete")}</span>
-      <button class="danger" onclick={onDelete}>{t("tasks.delete")}</button>
-      <button onclick={() => (confirming = false)}>{t("tasks.cancel")}</button>
+      <button class="danger" onclick={onDelete} use:focusOnMount>{t("tasks.delete")}</button>
+      <button onclick={cancelDelete}>{t("tasks.cancel")}</button>
     </div>
   {:else}
     <input
@@ -63,7 +101,7 @@
       onchange={(e) => onDone((e.currentTarget as HTMLInputElement).checked)}
     />
     <div class="body">
-      <button class="title" onclick={startEdit} title={t("tasks.edit")}>{task.title}</button>
+      <button class="title" bind:this={titleButton} onclick={startEdit} title={t("tasks.edit")}>{task.title}</button>
       <div class="meta">
         {#if task.time}<span>{task.time}</span>{/if}
         {#if isOverdue(task, today)}<span class="overdue">{t("tasks.overdue")}</span>{/if}
@@ -77,7 +115,7 @@
         {/if}
       </div>
     </div>
-    <button class="icon" aria-label={t("tasks.delete")} title={t("tasks.delete")} onclick={() => (confirming = true)}>✕</button>
+    <button class="icon" bind:this={deleteButton} aria-label={t("tasks.delete")} title={t("tasks.delete")} onclick={() => (confirming = true)}>✕</button>
   {/if}
 </li>
 

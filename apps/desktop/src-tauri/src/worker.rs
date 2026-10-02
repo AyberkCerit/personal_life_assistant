@@ -13,7 +13,7 @@ use chrono::{DateTime, FixedOffset, Local};
 use chrono::NaiveDate;
 use pla_core::llm::LlmError;
 use pla_core::pipeline::items::ItemRef;
-use pla_core::pipeline::{enqueue, enqueue_all, process_queue, queued_notes, Extractor, Outcome, PipelineSettings};
+use pla_core::pipeline::{enqueue, enqueue_all, process_queue_with, queued_notes, Extractor, Outcome, PipelineSettings};
 use pla_core::vault::Vault;
 use rusqlite::Connection;
 use serde::Serialize;
@@ -122,11 +122,14 @@ pub struct Worker {
     status: WorkerStatus,
     cancel: Arc<AtomicBool>,
     on_added: Option<AddedListener>,
+    /// Reads titles of added items while the main connection is busy in the pipeline.
+    reader: Option<Connection>,
 }
 
 impl Worker {
     pub fn new(vault: Vault, conn: Connection, extractor: Option<Box<dyn Extractor + Send>>, notify: Notify) -> Self {
         let model = if extractor.is_some() { ModelState::Off } else { ModelState::NotInstalled };
+        let reader = conn.path().and_then(|p| Connection::open(p).ok());
         Self {
             vault,
             conn,
@@ -137,6 +140,7 @@ impl Worker {
             later: HashMap::new(),
             cancel: Arc::new(AtomicBool::new(false)),
             on_added: None,
+            reader,
             status: WorkerStatus { queued: 0, model, busy: false, last_error: None, added: 0 },
         }
     }
@@ -232,22 +236,23 @@ impl Worker {
             (self.notify)(&self.status); // field borrows: the extractor stays borrowed
             let now = (self.clock)();
             let mut guarded = Cancellable { inner: extractor.as_mut(), cancel: &self.cancel };
-            match process_queue(&self.vault, &mut self.conn, &mut guarded, &PipelineSettings::default(), now) {
-                Ok(report) => {
-                    self.status.added += report.outcomes.iter().filter(|(_, o)| matches!(o, Outcome::Added(_))).count();
-                    self.status.last_error = report.model_error;
-                    let added: Vec<AddedItem> = report
-                        .outcomes
-                        .iter()
-                        .filter_map(|(_, o)| match o {
-                            Outcome::Added(item) => describe(&self.conn, item),
-                            _ => None,
-                        })
-                        .collect();
-                    if let (Some(listener), false) = (&self.on_added, added.is_empty()) {
-                        listener(&added);
-                    }
+            let (reader, listener, added) = (&self.reader, &self.on_added, &mut self.status.added);
+            // Each note's additions are reported as soon as it is done (FR-EXT-015), not at the end of a long run.
+            let mut on_note = |_: &str, outcomes: &[Outcome]| {
+                let items: Vec<AddedItem> = outcomes
+                    .iter()
+                    .filter_map(|o| match o {
+                        Outcome::Added(item) => reader.as_ref().and_then(|c| describe(c, item)),
+                        _ => None,
+                    })
+                    .collect();
+                *added += outcomes.iter().filter(|o| matches!(o, Outcome::Added(_))).count();
+                if let (Some(listener), false) = (listener, items.is_empty()) {
+                    listener(&items);
                 }
+            };
+            match process_queue_with(&self.vault, &mut self.conn, &mut guarded, &PipelineSettings::default(), now, &mut on_note) {
+                Ok(report) => self.status.last_error = report.model_error,
                 Err(e) => self.status.last_error = Some(e.to_string()),
             }
             self.status.busy = false;
@@ -431,6 +436,40 @@ mod tests {
         let got = added.lock().unwrap().clone();
         assert_eq!(got.len(), 1);
         assert_eq!((got[0].kind.as_str(), got[0].title.as_str()), ("task", "Dişçi"));
+        handle.shutdown();
+    }
+
+    struct SlowTask;
+    impl Extractor for SlowTask {
+        fn extract_raw(&mut self, _: NaiveDate, _: &str) -> Result<String, LlmError> {
+            std::thread::sleep(Duration::from_millis(400));
+            Ok(TASK.to_owned())
+        }
+    }
+
+    #[test]
+    fn additions_are_reported_while_a_long_run_continues() {
+        // Final review I5: the first note's addition must not wait for the whole catch-up
+        let tmp = tempfile::tempdir().unwrap();
+        let vault = open_vault(tmp.path()).unwrap();
+        for name in ["a", "b", "c"] {
+            std::fs::write(vault.root.join(format!("notes/{name}.md")), format!("Yarın {name}.")).unwrap();
+        }
+        let conn = open_databases(&tmp.path().join(".data")).unwrap().pla;
+        let statuses = Arc::new(Mutex::new(Vec::<WorkerStatus>::new()));
+        let status_sink = Arc::clone(&statuses);
+        let busy_when_reported = Arc::new(Mutex::new(Vec::<bool>::new()));
+        let (seen, probe) = (Arc::clone(&busy_when_reported), Arc::clone(&statuses));
+        let handle = Worker::new(vault, conn, Some(Box::new(SlowTask)), Box::new(move |s| status_sink.lock().unwrap().push(s.clone())))
+            .with_added_listener(Box::new(move |_| {
+                let busy = probe.lock().unwrap().last().is_some_and(|s| s.busy);
+                seen.lock().unwrap().push(busy);
+            }))
+            .spawn();
+        wait_for(&statuses, |s| !s.busy && s.added == 3);
+        let reports = busy_when_reported.lock().unwrap().clone();
+        assert_eq!(reports.len(), 3, "one report per note: {reports:?}");
+        assert!(reports[0], "the first report came while the run was still going");
         handle.shutdown();
     }
 }

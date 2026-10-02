@@ -88,14 +88,13 @@ fn clean(input: &TaskInput) -> Result<Clean, TaskError> {
         return Err(TaskError::BadTitle);
     }
     let present = |s: &Option<String>| s.as_deref().map(str::trim).filter(|s| !s.is_empty()).map(str::to_owned);
-    let date = present(&input.date);
-    if let Some(d) = &date {
-        NaiveDate::parse_from_str(d, "%Y-%m-%d").map_err(|_| TaskError::BadDate(d.clone()))?;
-    }
-    let time = present(&input.time);
-    if let Some(t) = &time {
-        NaiveTime::parse_from_str(t, "%H:%M").map_err(|_| TaskError::BadTime(t.clone()))?;
-    }
+    // Stored in canonical form: dates are compared as text and notify_at is parsed later.
+    let date = present(&input.date)
+        .map(|d| NaiveDate::parse_from_str(&d, "%Y-%m-%d").map(|p| p.format("%Y-%m-%d").to_string()).map_err(|_| TaskError::BadDate(d)))
+        .transpose()?;
+    let time = present(&input.time)
+        .map(|t| NaiveTime::parse_from_str(&t, "%H:%M").map(|p| p.format("%H:%M").to_string()).map_err(|_| TaskError::BadTime(t)))
+        .transpose()?;
     Ok(Clean { title: title.to_owned(), details: present(&input.details), date, time })
 }
 
@@ -243,7 +242,8 @@ pub fn accept_review(conn: &Connection, review_id: &str, input: &TaskInput, now:
         )
         .optional()?;
     let Some((block_id, payload)) = found else { return Err(TaskError::NotFound) };
-    let kind = serde_json::from_str::<RawItem>(&payload).map(|i| i.kind).map_err(|_| TaskError::NotAnAction)?;
+    let raw = serde_json::from_str::<RawItem>(&payload).map_err(|_| TaskError::NotAnAction)?;
+    let kind = raw.kind;
     if kind == ItemType::Metric {
         return Err(TaskError::NotAnAction);
     }
@@ -253,7 +253,18 @@ pub fn accept_review(conn: &Connection, review_id: &str, input: &TaskInput, now:
         "INSERT INTO task (task_id, title, details, date, time, notify_at, status, origin, block_id, item_signature,
                            user_modified, created_at, updated_at)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'open', 'extracted', ?7, ?8, 1, ?9, ?9)",
-        params![id, c.title, c.details, c.date, c.time, notify_at, block_id, action_signature(&c.title), now.to_rfc3339()],
+        params![
+            id,
+            c.title,
+            c.details,
+            c.date,
+            c.time,
+            notify_at,
+            block_id,
+            // the model's wording, so a later valid extraction of the same item is recognised
+            action_signature(raw.title.as_deref().unwrap_or(&c.title)),
+            now.to_rfc3339()
+        ],
     )?;
     conn.execute("UPDATE review_item SET resolved = 1 WHERE review_id = ?1", [review_id])?;
     Ok(id)
@@ -408,5 +419,28 @@ mod tests {
         assert!(list_review(&conn).unwrap().is_empty());
         assert!(matches!(&extract(&conn, r#"{"type":"reminder","title":"Annemi ara"}"#)[..], [Outcome::AlreadyReviewed]));
         assert!(matches!(reject_review(&conn, &sleep.review_id), Err(TaskError::NotFound)));
+    }
+
+    #[test]
+    fn an_accepted_review_item_with_a_new_title_is_not_extracted_again() {
+        // Final review I1: the signature must follow the model's title, not the corrected one
+        let (_t, conn) = setup();
+        extract(&conn, r#"{"type":"reminder","title":"Annemi ara"}"#);
+        let review = list_review(&conn).unwrap();
+        accept_review(&conn, &review[0].review_id, &input("Doğum günü araması", Some("2026-10-07"), None), now()).unwrap();
+        let out = extract(&conn, r#"{"type":"task","title":"Annemi ara","when":{"day_offset":1}}"#);
+        assert!(matches!(&out[..], [Outcome::KeptUserVersion(_)]), "{out:?}");
+        let all: i64 = conn.query_row("SELECT COUNT(*) FROM task", [], |r| r.get(0)).unwrap();
+        assert_eq!(all, 1);
+    }
+
+    #[test]
+    fn dates_and_times_are_stored_in_canonical_form() {
+        // Final review I2: text ordering and notify_at parsing rely on YYYY-MM-DD / HH:MM
+        let (_t, conn) = setup();
+        let id = add_task(&conn, &input("Kısa", Some("2026-1-5"), Some("9:5")), now()).unwrap();
+        let (date, time): (String, String) =
+            conn.query_row("SELECT date, time FROM task WHERE task_id = ?1", [&id], |r| Ok((r.get(0)?, r.get(1)?))).unwrap();
+        assert_eq!((date.as_str(), time.as_str()), ("2026-01-05", "09:05"));
     }
 }

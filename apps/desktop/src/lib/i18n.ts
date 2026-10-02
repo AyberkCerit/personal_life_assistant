@@ -51,6 +51,7 @@ const dict = {
     "review.metricHint": "Metrikler şimdilik yalnız yoksayılabilir.",
     "toast.added": "AI ekledi",
     "toast.undo": "Geri al",
+    "toast.more": "öğe daha eklendi",
   },
   en: {
     "welcome.title": "Welcome to PLA",
@@ -104,6 +105,7 @@ const dict = {
     "review.metricHint": "Metrics can only be dismissed for now.",
     "toast.added": "AI added",
     "toast.undo": "Undo",
+    "toast.more": "more added",
   },
 } as const;
 

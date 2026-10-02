@@ -102,6 +102,19 @@ pub fn process_queue(
     settings: &PipelineSettings,
     now: DateTime<FixedOffset>,
 ) -> Result<RunReport, PipelineError> {
+    process_queue_with(vault, conn, extractor, settings, now, &mut |_, _| {})
+}
+
+/// `process_queue`, reporting each note's outcomes as soon as the note is done (the UI shows them
+/// with an Undo action while a long run continues, FR-EXT-015).
+pub fn process_queue_with(
+    vault: &Vault,
+    conn: &mut Connection,
+    extractor: &mut dyn Extractor,
+    settings: &PipelineSettings,
+    now: DateTime<FixedOffset>,
+    on_note: &mut dyn FnMut(&str, &[Outcome]),
+) -> Result<RunReport, PipelineError> {
     let mut report = RunReport::default();
     let mut queue = queued_notes(conn)?;
     // Vanished notes first, so a renamed note can take over their blocks (decision 2026-10-02).
@@ -138,6 +151,7 @@ pub fn process_queue(
             }
         };
 
+        let first_outcome = report.outcomes.len();
         if let Some(text) = text {
             let tx = write_tx(conn)?;
             let synced = blocks::sync_note_blocks(
@@ -169,6 +183,10 @@ pub fn process_queue(
                                 params![e.to_string(), note],
                             )?;
                             report.model_error = Some(e.to_string());
+                            let done: Vec<Outcome> = report.outcomes[first_outcome..].iter().map(|(_, o)| o.clone()).collect();
+                            if !done.is_empty() {
+                                on_note(&note, &done); // what this note already added still gets its Undo
+                            }
                             return Ok(report);
                         }
                     }
@@ -194,6 +212,10 @@ pub fn process_queue(
                 report.blocks_extracted += 1;
                 report.outcomes.extend(outcomes.into_iter().map(|o| (note.clone(), o)));
             }
+        }
+        let note_outcomes: Vec<Outcome> = report.outcomes[first_outcome..].iter().map(|(_, o)| o.clone()).collect();
+        if !note_outcomes.is_empty() {
+            on_note(&note, &note_outcomes);
         }
         // Only if nobody re-queued the note meanwhile (an edit during processing must not be lost).
         conn.execute("DELETE FROM extraction_queue WHERE note_path = ?1 AND generation = ?2", params![note, generation])?;
@@ -567,5 +589,23 @@ mod tests {
         assert!(other.execute_batch("BEGIN IMMEDIATE; COMMIT;").is_err(), "the write lock is held");
         drop(tx);
         other.execute_batch("BEGIN IMMEDIATE; COMMIT;").unwrap();
+    }
+
+    #[test]
+    fn each_finished_note_is_reported_during_the_run() {
+        // Final review I5: additions are shown per note, not only when a long run ends
+        let tmp = tempfile::tempdir().unwrap();
+        let vault = open_vault(tmp.path()).unwrap();
+        let mut conn = open_databases(&tmp.path().join(".data")).unwrap().pla;
+        write(&vault, "notes/a.md", DENTIST.as_bytes());
+        write(&vault, "notes/b.md", DENTIST.as_bytes());
+        let mut x = Scripted::new(&[(DENTIST, DENTIST_JSON)]);
+        enqueue_all(&vault, &conn, at(T1)).unwrap();
+        let mut seen: Vec<(String, usize)> = Vec::new();
+        process_queue_with(&vault, &mut conn, &mut x, &PipelineSettings::default(), at(T1), &mut |note, outcomes| {
+            seen.push((note.to_owned(), outcomes.len()))
+        })
+        .unwrap();
+        assert_eq!(seen, vec![("notes/a.md".to_owned(), 1), ("notes/b.md".to_owned(), 1)]);
     }
 }

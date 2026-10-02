@@ -7,6 +7,7 @@
   import { api } from "./api";
   import { NoteDoc } from "./saving";
   import { NoteSession } from "./triggers";
+  import { revealRange } from "./tasks";
   import { t } from "./i18n";
 
   let { path, reveal = null, onSavedCopy }: { path: string; reveal?: string | null; onSavedCopy: (rel: string) => void } = $props();
@@ -56,9 +57,9 @@
     session = new NoteSession(path, () => doc!.save(), (p) => void api.queueNote(p));
     sync();
     if (reveal) {
-      const at = note.text.indexOf(reveal);
-      if (at >= 0) {
-        current.dispatch({ selection: { anchor: at, head: at + reveal.length }, scrollIntoView: true });
+      const range = revealRange(note.text, reveal);
+      if (range) {
+        current.dispatch({ selection: range, scrollIntoView: true });
         current.focus(); // show the selected source line (FR-TSK-017)
       }
     }
