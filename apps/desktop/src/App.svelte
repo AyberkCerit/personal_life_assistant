@@ -3,6 +3,7 @@
   import { open } from "@tauri-apps/plugin-dialog";
   import { api, inTauri, type TreeEntry, type WorkerStatus } from "./lib/api";
   import FileTree from "./lib/FileTree.svelte";
+  import TaskPanel from "./lib/TaskPanel.svelte";
   import Editor from "./lib/Editor.svelte";
   import { getCurrentWindow } from "@tauri-apps/api/window";
   import StatusBar from "./lib/StatusBar.svelte";
@@ -11,6 +12,8 @@
   let vaultPath = $state<string | null>(null);
   let entries = $state<TreeEntry[]>([]);
   let current = $state<string | null>(null);
+  let inbox = $state("inbox");
+  let tasksVersion = $state(0);
   let editor: ReturnType<typeof Editor> | undefined = $state();
   let error = $state<string | null>(null);
   let status = $state<WorkerStatus>({ queued: 0, model: "off", busy: false, last_error: null, added: 0 });
@@ -23,7 +26,10 @@
     const picked = inTauri ? await open({ directory: true }) : "C:/Deneme Kasası";
     if (typeof picked !== "string") return;
     try {
-      vaultPath = await api.openVault(picked);
+      const info = await api.openVault(picked);
+      vaultPath = info.path;
+      inbox = info.inbox;
+      status = await api.workerStatus(); // the first status may have been sent before we listened
       error = null;
       await refresh();
     } catch (e) {
@@ -42,9 +48,13 @@
     current = path;
   }
 
+  function openSource(path: string) {
+    void openNote(path);
+  }
+
   async function createNote(title: string) {
     try {
-      const rel = await api.createNote("inbox", title);
+      const rel = await api.createNote(inbox, title);
       await refresh();
       await openNote(rel);
     } catch (e) {
@@ -59,9 +69,17 @@
       document.documentElement.dataset.theme = info.theme;
       error = info.error;
       vaultPath = info.vault_path;
-      if (vaultPath) await refresh();
+      inbox = info.inbox ?? "inbox";
+      if (vaultPath) {
+        await refresh();
+        status = await api.workerStatus(); // F4a M2: do not miss the first status
+      }
     })();
-    const unStatus = api.onStatus((s) => (status = s));
+    const unStatus = api.onStatus((s) => {
+      const finished = status.busy && !s.busy;
+      status = s;
+      if (finished) tasksVersion++;
+    });
     const unTree = api.onTreeChanged(() => void refresh());
     const unClose = inTauri
       ? getCurrentWindow().onCloseRequested(async () => {
@@ -98,7 +116,9 @@
         <p class="empty">{t("editor.empty")}</p>
       {/if}
     </section>
-    <aside class="side-panel">{t("side.placeholder")}</aside>
+    <aside class="side-panel">
+      <TaskPanel version={tasksVersion} onOpenSource={openSource} />
+    </aside>
     <StatusBar {status} />
   </div>
 {/if}

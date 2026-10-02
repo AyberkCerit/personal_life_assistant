@@ -25,13 +25,13 @@ button, input { font: inherit; color: inherit; }
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .layout {
   display: grid;
-  grid-template-columns: 260px minmax(0, 1fr) 280px;
+  grid-template-columns: 240px minmax(0, 1fr) 320px;
   grid-template-rows: minmax(0, 1fr) 28px;
   height: 100%;
 }
 .sidebar, .side-panel { background: var(--panel); overflow: auto; }
 .sidebar { border-right: 1px solid var(--border); }
-.side-panel { border-left: 1px solid var(--border); padding: 12px; color: var(--muted); }
+.side-panel { border-left: 1px solid var(--border); padding: 12px; color: var(--text); }
 .main { overflow: hidden; display: flex; flex-direction: column; }
 .empty { margin: auto; color: var(--muted); }
 .banner { padding: 8px 12px; border-bottom: 1px solid var(--border); background: var(--panel); display: flex; gap: 8px; align-items: center; }

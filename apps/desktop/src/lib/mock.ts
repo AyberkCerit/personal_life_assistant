@@ -4,6 +4,52 @@ const files = new Map<string, string>([
   ["notes/Fikirler.md", "# Fikirler\n\n- [ ] Blog yazısı\n"],
   ["inbox/Hoş geldin.md", "Bu, PLA'nın tarayıcıdaki deneme kasası.\n"],
 ]);
+import type { Task } from "./tasks";
+import { todayIso } from "./tasks";
+
+export const mockListeners = new Map<string, Array<(payload: unknown) => void>>();
+
+const day = (offset: number) => {
+  const d = new Date();
+  d.setDate(d.getDate() + offset);
+  return todayIso(d);
+};
+const base = { details: null, time: null, notify_at: null, status: "open" as const, note_path: null, block_text: null, source_missing: false, user_modified: false };
+let tasks: Task[] = [
+  { ...base, task_id: "t1", title: "Dişçi", date: day(1), time: "09:00", origin: "extracted", note_path: "daily/2026/2026-10-06.md", block_text: "Yarın 9'da dişçi var." },
+  { ...base, task_id: "t2", title: "Fatura öde", date: day(-1), origin: "manual" },
+  { ...base, task_id: "t3", title: "Kitap oku", date: null, origin: "manual" },
+];
+let review = [
+  {
+    review_id: "r1", reason: "reminder without a date", title: "Annemi ara", is_action: true,
+    payload_json: '{"type":"reminder","title":"Annemi ara"}', note_path: "daily/2026/2026-10-06.md",
+    block_text: "Dün 7 saat uyudum.", created_at: "",
+  },
+];
+let nextId = 10;
+
+function listTasks(list: string): Task[] {
+  const today = todayIso();
+  const byDate = (a: Task, b: Task) => (a.date ?? "9999").localeCompare(b.date ?? "9999") || (a.time ?? "99").localeCompare(b.time ?? "99");
+  if (list === "today") return tasks.filter((t) => t.status === "open" && t.date !== null && t.date <= today).sort(byDate);
+  if (list === "upcoming") return tasks.filter((t) => t.status === "open" && (t.date === null || t.date > today)).sort(byDate);
+  return tasks.filter((t) => t.status === "done");
+}
+
+type MockInput = { title: string; date?: string | null; time?: string | null; details?: string | null };
+
+function addMockTask(input: MockInput, origin: Task["origin"]): Task {
+  const task: Task = { ...base, task_id: `t${nextId++}`, title: input.title.trim(), date: input.date || null, time: input.time || null, details: input.details || null, origin };
+  tasks = [...tasks, task];
+  return task;
+}
+
+// Dev helper for the browser check: simulates the worker adding an item.
+(globalThis as Record<string, unknown>).__plaMockAdd = (title: string) => {
+  const task = addMockTask({ title, date: day(1) }, "extracted");
+  for (const cb of mockListeners.get("items-added") ?? []) cb([{ kind: "task", id: task.task_id, title }]);
+};
 let vault: string | null = null;
 
 function hash(s: string): string {
@@ -39,10 +85,10 @@ export async function mockBackend<T>(cmd: string, args: Record<string, unknown>)
   const path = String(args.path ?? "");
   switch (cmd) {
     case "startup":
-      return { vault_path: vault, first_run: vault === null, settings_recovered: false, theme: "dark", error: null } as T;
+      return { vault_path: vault, first_run: vault === null, settings_recovered: false, theme: "dark", error: null, inbox: vault ? "inbox" : null } as T;
     case "open_vault":
       vault = path;
-      return vault as T;
+      return { path: vault, inbox: "inbox" } as T;
     case "list_tree":
       return tree() as T;
     case "read_note": {
@@ -65,6 +111,36 @@ export async function mockBackend<T>(cmd: string, args: Record<string, unknown>)
       return rel as T;
     }
     case "queue_note":
+      return undefined as T;
+    case "vault_info":
+      return { path: vault, inbox: "inbox" } as T;
+    case "worker_status":
+      return { queued: 0, model: "not_installed", busy: false, last_error: null, added: 0 } as T;
+    case "list_tasks":
+      return listTasks(String(args.list)) as T;
+    case "add_task":
+      return addMockTask(args.input as MockInput, "manual").task_id as T;
+    case "edit_task": {
+      const input = args.input as MockInput;
+      tasks = tasks.map((t) =>
+        t.task_id === args.id ? { ...t, title: input.title, date: input.date || null, time: input.time || null, details: input.details || null, user_modified: true } : t,
+      );
+      return undefined as T;
+    }
+    case "set_task_done":
+      tasks = tasks.map((t) => (t.task_id === args.id ? { ...t, status: args.done ? "done" : "open", user_modified: true } : t));
+      return undefined as T;
+    case "delete_task":
+    case "undo_item":
+      tasks = tasks.filter((t) => t.task_id !== args.id);
+      return undefined as T;
+    case "list_review":
+      return review as T;
+    case "accept_review":
+      review = review.filter((r) => r.review_id !== args.id);
+      return addMockTask(args.input as MockInput, "extracted").task_id as T;
+    case "reject_review":
+      review = review.filter((r) => r.review_id !== args.id);
       return undefined as T;
     default:
       throw new Error(`mock: unknown command ${cmd}`);
