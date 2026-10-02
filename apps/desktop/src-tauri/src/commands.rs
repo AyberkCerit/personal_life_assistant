@@ -2,7 +2,7 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::Sender;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use pla_core::db::open_databases;
@@ -14,11 +14,13 @@ use pla_core::vault::{default_app_root, open_vault as open_vault_dir, resolve_da
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, State};
 
+use crate::watcher::{watch, SelfWrites, WatchHandle};
 use crate::worker::{Command, Worker};
 
 pub struct Session {
     pub vault: Vault,
     pub worker: Sender<Command>,
+    pub _watch: Option<WatchHandle>,
 }
 
 impl Drop for Session {
@@ -30,6 +32,7 @@ impl Drop for Session {
 #[derive(Default)]
 pub struct AppState {
     pub session: Mutex<Option<Session>>,
+    pub self_writes: Arc<SelfWrites>,
 }
 
 #[derive(Serialize)]
@@ -60,7 +63,7 @@ fn extractor(settings: &AppSettings) -> Option<Box<dyn Extractor + Send>> {
         .then(|| Box::new(ModelHost::new(ServerConfig::new(bin, model), Duration::from_secs(60))) as Box<dyn Extractor + Send>)
 }
 
-fn start_session(app: &AppHandle, root: &Path, settings: &AppSettings) -> Result<Session, String> {
+fn start_session(app: &AppHandle, root: &Path, settings: &AppSettings, own: Arc<SelfWrites>) -> Result<Session, String> {
     let mut vault = open_vault_dir(root).map_err(|e| e.to_string())?;
     let dir = resolve_data_dir(&app_root()?, &mut vault).map_err(|e| e.to_string())?;
     let dbs = open_databases(&dir).map_err(|e| e.to_string())?;
@@ -74,7 +77,8 @@ fn start_session(app: &AppHandle, root: &Path, settings: &AppSettings) -> Result
         }),
     );
     let (tx, _join) = worker.spawn();
-    Ok(Session { vault, worker: tx })
+    let watch_handle = watch(vault.clone(), own, tx.clone(), app.clone()).ok(); // no watcher → manual refresh still works
+    Ok(Session { vault, worker: tx, _watch: watch_handle })
 }
 
 fn with_vault<T>(state: &State<AppState>, f: impl FnOnce(&Vault) -> Result<T, FileError>) -> Result<T, String> {
@@ -99,7 +103,7 @@ pub fn startup(app: AppHandle, state: State<AppState>) -> Result<StartupInfo, St
         error: None,
     };
     if let Some(path) = loaded.settings.vault_path.clone() {
-        match start_session(&app, &path, &loaded.settings) {
+        match start_session(&app, &path, &loaded.settings, Arc::clone(&state.self_writes)) {
             Ok(session) => {
                 info.vault_path = Some(session.vault.root.to_string_lossy().into_owned());
                 *state.session.lock().expect("session lock") = Some(session);
@@ -114,7 +118,7 @@ pub fn startup(app: AppHandle, state: State<AppState>) -> Result<StartupInfo, St
 pub fn open_vault(app: AppHandle, state: State<AppState>, path: String) -> Result<String, String> {
     let root = app_root()?;
     let mut settings = load_settings(&root).map_err(|e| e.to_string())?.settings;
-    let session = start_session(&app, Path::new(&path), &settings)?;
+    let session = start_session(&app, Path::new(&path), &settings, Arc::clone(&state.self_writes))?;
     let opened = session.vault.root.to_string_lossy().into_owned();
     settings.vault_path = Some(session.vault.root.clone());
     save_settings(&root, &settings).map_err(|e| e.to_string())?;
@@ -134,8 +138,12 @@ pub fn read_note(state: State<AppState>, path: String) -> Result<NoteFile, Strin
 
 #[tauri::command]
 pub fn save_note(state: State<AppState>, path: String, text: String, expected_hash: Option<String>) -> Result<SaveResult, String> {
+    let own = Arc::clone(&state.self_writes);
     with_vault(&state, |v| match files::save_note(v, &path, &text, expected_hash.as_deref()) {
-        Ok(hash) => Ok(SaveResult::Saved { hash }),
+        Ok(hash) => {
+            own.record(&path, &hash);
+            Ok(SaveResult::Saved { hash })
+        }
         Err(FileError::Conflict { current_hash }) => Ok(SaveResult::Conflict { current_hash }),
         Err(e) => Err(e),
     })

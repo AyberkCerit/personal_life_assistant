@@ -1,6 +1,7 @@
 //! PLA desktop app: Tauri shell around pla-core.
 
 mod commands;
+pub mod watcher;
 pub mod worker;
 
 pub fn run() {
