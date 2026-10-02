@@ -16,6 +16,7 @@ pub struct SyncedBlock {
     pub text: String,
     pub reference_date: NaiveDate,
     pub needs_extraction: bool,
+    pub first_sight: bool,
 }
 
 struct Stored {
@@ -25,14 +26,18 @@ struct Stored {
     missing: bool,
 }
 
-/// FNV-1a 64-bit — only answers "did this block change?" (FR-EXT-007), not a security hash.
-pub fn text_hash(text: &str) -> String {
+/// FNV-1a 64-bit — only answers "did this change?" (FR-EXT-007, FR-VLT-012), not a security hash.
+pub fn content_hash(bytes: &[u8]) -> String {
     let mut h: u64 = 0xcbf2_9ce4_8422_2325;
-    for byte in text.as_bytes() {
+    for byte in bytes {
         h ^= u64::from(*byte);
         h = h.wrapping_mul(0x0000_0100_0000_01b3);
     }
     format!("{h:016x}")
+}
+
+pub fn text_hash(text: &str) -> String {
+    content_hash(text.as_bytes())
 }
 
 /// `note_written` is the note file's modification time: when PLA sees a note for the first time,
@@ -76,6 +81,7 @@ pub fn sync_note_blocks(
             text: b.text.clone(),
             reference_date: daily_date.unwrap_or(first_seen),
             needs_extraction: s.extracted_hash.as_deref() != Some(hash.as_str()),
+            first_sight: false,
         });
     }
     // Blocks that disappear in this sync: a new block made of their text (a split or merged
@@ -84,6 +90,12 @@ pub fn sync_note_blocks(
         m.unmatched_old.iter().filter_map(|id| stored.iter().find(|s| &s.block.id == id && !s.missing)).collect();
     for &i in &m.unmatched_new {
         let b = &blocks[i];
+        if first_sight {
+            if let Some(moved) = take_over_moved_block(conn, note_path, b, daily_date, now)? {
+                out[i] = Some(moved);
+                continue;
+            }
+        }
         let id = uuid::Uuid::new_v4().simple().to_string();
         let first_seen = inherited_first_seen(&b.text, &vanished).unwrap_or(new_first_seen);
         conn.execute(
@@ -95,6 +107,7 @@ pub fn sync_note_blocks(
             text: b.text.clone(),
             reference_date: daily_date.unwrap_or(first_seen.date_naive()),
             needs_extraction: true,
+            first_sight,
         });
     }
     for id in &m.unmatched_old {
@@ -123,6 +136,44 @@ fn inherited_first_seen(text: &str, vanished: &[&Stored]) -> Option<DateTime<Fix
         })
         .filter_map(|s| DateTime::parse_from_rfc3339(&s.first_seen_at).ok())
         .min()
+}
+
+/// Decision 2026-10-02: a note seen for the first time takes over identical blocks of a note that
+/// vanished recently (a rename or move outside PLA), so its items move instead of being duplicated.
+fn take_over_moved_block(
+    conn: &Connection,
+    note_path: &str,
+    block: &Block,
+    daily_date: Option<NaiveDate>,
+    now: DateTime<FixedOffset>,
+) -> rusqlite::Result<Option<SyncedBlock>> {
+    let revive_after = now - TimeDelta::hours(REVIVE_WINDOW_HOURS);
+    let candidates: Vec<(String, String, Option<String>, Option<String>)> = conn
+        .prepare(
+            "SELECT block_id, first_seen_at, extracted_hash, missing_since FROM block
+             WHERE note_path <> ?1 AND missing = 1 AND text = ?2 ORDER BY missing_since DESC",
+        )?
+        .query_map(params![note_path, block.text], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))?
+        .collect::<rusqlite::Result<_>>()?;
+    let Some((id, first_seen_at, extracted_hash, _)) = candidates.into_iter().find(|(_, _, _, since)| {
+        since.as_deref().and_then(|t| DateTime::parse_from_rfc3339(t).ok()).is_some_and(|t| t >= revive_after)
+    }) else {
+        return Ok(None);
+    };
+    let hash = text_hash(&block.text);
+    conn.execute(
+        "UPDATE block SET note_path = ?1, position = ?2, last_seen_at = ?3, missing = 0, missing_since = NULL WHERE block_id = ?4",
+        params![note_path, block.position as i64, now.to_rfc3339(), id],
+    )?;
+    set_source_missing(conn, &id, false)?;
+    let first_seen = DateTime::parse_from_rfc3339(&first_seen_at).map_or(now.date_naive(), |t| t.date_naive());
+    Ok(Some(SyncedBlock {
+        block_id: id,
+        text: block.text.clone(),
+        reference_date: daily_date.unwrap_or(first_seen),
+        needs_extraction: extracted_hash.as_deref() != Some(hash.as_str()),
+        first_sight: false,
+    }))
 }
 
 pub fn mark_extracted(conn: &Connection, block_id: &str) -> rusqlite::Result<()> {

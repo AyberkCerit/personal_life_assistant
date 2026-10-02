@@ -10,7 +10,7 @@ use rusqlite::{params, Connection};
 
 use crate::extraction::{parse_extraction, ValidationSettings};
 use crate::llm::LlmError;
-use crate::notes::{daily_note_date, is_excluded, is_generated, list_user_notes, split_blocks};
+use crate::notes::{daily_note_date, is_checked_item, is_excluded, is_generated, list_user_notes, split_blocks};
 use crate::vault::Vault;
 
 pub use items::{ItemRef, Outcome};
@@ -91,7 +91,10 @@ pub fn process_queue(
     now: DateTime<FixedOffset>,
 ) -> Result<RunReport, PipelineError> {
     let mut report = RunReport::default();
-    for note in queued_notes(conn)? {
+    let mut queue = queued_notes(conn)?;
+    // Vanished notes first, so a renamed note can take over their blocks (decision 2026-10-02).
+    queue.sort_by_key(|note| vault.root.join(note).exists());
+    for note in queue {
         let generation: i64 =
             conn.query_row("SELECT generation FROM extraction_queue WHERE note_path = ?1", [&note], |r| r.get(0))?;
         let path = vault.root.join(&note);
@@ -137,6 +140,10 @@ pub fn process_queue(
             tx.commit()?;
 
             for block in synced.iter().filter(|b| b.needs_extraction) {
+                if is_checked_item(&block.text) {
+                    blocks::mark_extracted(conn, &block.block_id)?;
+                    continue;
+                }
                 let answer = if block.text.chars().count() > MAX_BLOCK_CHARS {
                     Err("block too long for the model".to_owned())
                 } else {
@@ -164,6 +171,7 @@ pub fn process_queue(
                             block.reference_date,
                             &extraction,
                             &settings.validation,
+                            block.first_sight.then(|| now.date_naive()),
                             now,
                         )?,
                         Err(e) => vec![items::record_unreadable_answer(&tx, &block.block_id, &answer, &e.to_string(), now)?],
@@ -490,5 +498,49 @@ mod tests {
         let mut x = Scripted::new(&[(DENTIST, DENTIST_JSON)]);
         run(&vault, &mut conn, &mut x, T1);
         assert_eq!(x.calls[0].0, d("2025-03-01"));
+    }
+    #[test]
+    fn checked_items_never_reach_the_model() {
+        // Decision 2
+        let tmp = tempfile::tempdir().unwrap();
+        let vault = open_vault(tmp.path()).unwrap();
+        let mut conn = open_databases(&tmp.path().join(".data")).unwrap().pla;
+        write(&vault, "notes/liste.md", format!("- [x] {DENTIST}\n- [ ] {DENTIST}").as_bytes());
+        let mut x = Scripted::new(&[(&*format!("- [ ] {DENTIST}"), DENTIST_JSON)]);
+        run(&vault, &mut conn, &mut x, T1);
+        assert_eq!(x.calls.len(), 1, "only the unchecked item is sent");
+        assert_eq!(tasks(&conn).len(), 1);
+    }
+
+    #[test]
+    fn importing_an_old_note_creates_no_past_tasks() {
+        // Decision 3
+        let tmp = tempfile::tempdir().unwrap();
+        let vault = open_vault(tmp.path()).unwrap();
+        let mut conn = open_databases(&tmp.path().join(".data")).unwrap().pla;
+        write(&vault, "notes/eski.md", DENTIST.as_bytes());
+        let old = std::time::SystemTime::from(DateTime::parse_from_rfc3339("2025-03-01T09:00:00+03:00").unwrap());
+        std::fs::File::options().write(true).open(vault.root.join("notes/eski.md")).unwrap().set_modified(old).unwrap();
+        let mut x = Scripted::new(&[(DENTIST, DENTIST_JSON)]);
+        let report = run(&vault, &mut conn, &mut x, T1);
+        assert!(tasks(&conn).is_empty());
+        assert!(matches!(&report.outcomes[..], [(_, Outcome::SkippedPast)]));
+    }
+
+    #[test]
+    fn a_note_renamed_outside_pla_keeps_its_tasks() {
+        // Decision 4
+        let tmp = tempfile::tempdir().unwrap();
+        let vault = open_vault(tmp.path()).unwrap();
+        let mut conn = open_databases(&tmp.path().join(".data")).unwrap().pla;
+        write(&vault, "notes/plan.md", DENTIST.as_bytes());
+        let mut x = Scripted::new(&[(DENTIST, DENTIST_JSON)]);
+        run(&vault, &mut conn, &mut x, T1);
+        std::fs::rename(vault.root.join("notes/plan.md"), vault.root.join("notes/yeni ad.md")).unwrap();
+        run(&vault, &mut conn, &mut x, T1);
+        assert_eq!(tasks(&conn), vec![("Dişçi".into(), Some("2026-10-07".into()), 0)]);
+        assert_eq!(x.calls.len(), 1, "unchanged text is not sent again");
+        let note: String = conn.query_row("SELECT note_path FROM block", [], |r| r.get(0)).unwrap();
+        assert_eq!(note, "notes/yeni ad.md");
     }
 }

@@ -22,6 +22,7 @@ pub enum Outcome {
     Updated(ItemRef),
     KeptUserVersion(ItemRef),
     Rejected { signature: String },
+    SkippedPast,
     Review { review_id: String, reason: String },
 }
 
@@ -100,6 +101,7 @@ pub fn apply_block_items(
     reference: NaiveDate,
     extraction: &RawExtraction,
     settings: &ValidationSettings,
+    skip_past_before: Option<NaiveDate>,
     now: DateTime<FixedOffset>,
 ) -> rusqlite::Result<Vec<Outcome>> {
     let now_s = now.to_rfc3339();
@@ -111,6 +113,9 @@ pub fn apply_block_items(
             Err(reason) => outcomes.push(review(conn, block_id, raw, &reason.to_string(), &now_s)?),
             Ok(ValidItem::Action { reminder: true, date: None, .. }) => {
                 outcomes.push(review(conn, block_id, raw, "reminder without a date", &now_s)?)
+            }
+            Ok(ValidItem::Action { date: Some(d), .. }) if skip_past_before.is_some_and(|today| d < today) => {
+                outcomes.push(Outcome::SkippedPast)
             }
             Ok(item) => {
                 let signature = item_signature(&item);
@@ -410,7 +415,7 @@ mod tests {
     }
     fn apply(conn: &Connection, json: &str) -> Vec<Outcome> {
         let ex = parse_extraction(&format!(r#"{{"items": [{json}]}}"#)).unwrap();
-        apply_block_items(conn, "b1", reference(), &ex, &ValidationSettings::default(), now()).unwrap()
+        apply_block_items(conn, "b1", reference(), &ex, &ValidationSettings::default(), None, now()).unwrap()
     }
     fn count(conn: &Connection, table: &str) -> i64 {
         conn.query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |r| r.get(0)).unwrap()
@@ -515,7 +520,7 @@ mod tests {
             ]}"#,
         )
         .unwrap();
-        apply_block_items(&conn, "b1", reference(), &ex, &ValidationSettings::default(), now()).unwrap();
+        apply_block_items(&conn, "b1", reference(), &ex, &ValidationSettings::default(), None, now()).unwrap();
         let rows: Vec<(String, String, Option<String>, String, String)> = conn
             .prepare("SELECT type, value_json, unit, date, item_signature FROM metric_record ORDER BY rowid")
             .unwrap()
@@ -569,6 +574,24 @@ mod tests {
         let out = apply(&conn, r#"{"type":"task","title":"Kuaför randevusu"}"#);
         assert!(matches!(&out[..], [Outcome::Added(_)]), "{out:?}");
         assert_eq!(count(&conn, "task"), 2);
+    }
+
+    #[test]
+    fn first_sight_skips_past_actions_but_keeps_metrics() {
+        // Decision 3 (2026-10-02)
+        let (_t, conn) = setup();
+        let ex = parse_extraction(
+            r#"{"items": [
+                {"type":"task","title":"Eski iş","when":{"day_offset":-3}},
+                {"type":"task","title":"Yeni iş","when":{"day_offset":2}},
+                {"type":"metric","when":{"day_offset":-3},"metric":{"kind":"sleep","value":7,"unit":"h"}}
+            ]}"#,
+        )
+        .unwrap();
+        let out = apply_block_items(&conn, "b1", reference(), &ex, &ValidationSettings::default(), Some(reference()), now()).unwrap();
+        assert_eq!(out[0], Outcome::SkippedPast);
+        assert_eq!(count(&conn, "task"), 1);
+        assert_eq!(count(&conn, "metric_record"), 1);
     }
 
     #[test]

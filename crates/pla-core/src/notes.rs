@@ -70,6 +70,16 @@ fn is_list_item(trimmed: &str) -> bool {
     digits > 0 && (trimmed[digits..].starts_with(". ") || trimmed[digits..].starts_with(") "))
 }
 
+/// Decision 2026-10-02 (FR-EDT-019): a checked list item is done and never produces items.
+pub fn is_checked_item(text: &str) -> bool {
+    let t = text.trim_start();
+    let after_marker = ["- ", "* ", "+ "].iter().find_map(|m| t.strip_prefix(m)).or_else(|| {
+        let digits = t.chars().take_while(char::is_ascii_digit).count();
+        (digits > 0).then(|| &t[digits..]).and_then(|r| r.strip_prefix(". ").or_else(|| r.strip_prefix(") ")))
+    });
+    after_marker.is_some_and(|r| r.starts_with("[x]") || r.starts_with("[X]"))
+}
+
 /// Index of the first body line: after a `---` … `---`/`...` frontmatter, or 0 when there is none.
 fn frontmatter_end(lines: &[&str]) -> usize {
     if lines.first().map(|l| l.trim_end()) != Some("---") {
@@ -150,6 +160,16 @@ fn walk(root: &Path, dir: &Path, folders: &Folders, out: &mut Vec<String>) -> st
 mod tests {
     use super::*;
     use crate::vault::{open_vault, Folders};
+
+    #[test]
+    fn checked_list_items_are_recognised() {
+        assert!(is_checked_item("- [x] Fatura öde"));
+        assert!(is_checked_item("* [X] Fatura öde"));
+        assert!(is_checked_item("  1. [x] birinci"));
+        assert!(!is_checked_item("- [ ] Fatura öde"));
+        assert!(!is_checked_item("[x] liste değil"));
+        assert!(!is_checked_item("- x işaret değil"));
+    }
 
     fn texts(text: &str) -> Vec<String> {
         split_blocks(text).into_iter().map(|b| b.text).collect()
