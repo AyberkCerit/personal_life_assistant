@@ -28,7 +28,6 @@ pub enum Outcome {
 struct Existing {
     item: ItemRef,
     signature: String,
-    group: String,
     user_owned: bool,
     claimed: bool,
 }
@@ -71,10 +70,27 @@ pub fn item_signature(item: &ValidItem) -> String {
     }
 }
 
-fn group_of(item: &ValidItem) -> String {
-    match item {
-        ValidItem::Action { .. } => "action".into(),
-        ValidItem::Metric { kind, .. } => format!("metric:{}", metric_kind_name(*kind)),
+/// Titles (or workout exercises) at least this similar (Jaro-Winkler) are the same item, reworded.
+const SAME_ITEM_SIMILARITY: f64 = 0.8;
+
+/// Splits a signature into its group (action, metric kind) and its label (title or exercise).
+fn split_signature(signature: &str) -> (&str, &str) {
+    if let Some(rest) = signature.strip_prefix("action:") {
+        ("action", rest)
+    } else if let Some(rest) = signature.strip_prefix("metric:workout:") {
+        ("metric:workout", rest)
+    } else {
+        (signature, "")
+    }
+}
+
+/// How alike two signatures are: 0 across groups, otherwise the similarity of their labels.
+fn signature_similarity(a: &str, b: &str) -> f64 {
+    let ((ga, la), (gb, lb)) = (split_signature(a), split_signature(b));
+    if ga == gb {
+        strsim::jaro_winkler(la, lb)
+    } else {
+        0.0
     }
 }
 
@@ -98,41 +114,56 @@ pub fn apply_block_items(
             }
             Ok(item) => {
                 let signature = item_signature(&item);
-                if is_rejected(conn, block_id, &signature)? {
-                    outcomes.push(Outcome::Rejected { signature });
-                } else {
-                    accepted.push((item, signature));
-                }
+                accepted.push((item, signature));
             }
         }
     }
 
-    let mut existing = load_existing(conn, block_id)?;
+    let rejections = load_rejections(conn, block_id)?;
+    let mut existing = load_existing(conn, block_id, &now_s)?;
     let mut pairing: Vec<Option<usize>> = vec![None; accepted.len()];
+    let mut rejected = vec![false; accepted.len()];
+
+    // 1. the same item as before (identical signature)
     for (i, (_, signature)) in accepted.iter().enumerate() {
         if let Some(j) = existing.iter().position(|e| !e.claimed && &e.signature == signature) {
             existing[j].claimed = true;
             pairing[i] = Some(j);
         }
     }
-    for i in 0..accepted.len() {
-        if pairing[i].is_some() {
-            continue;
+    // 2. what the user rejected stays rejected, even when the model words it differently (FR-EXT-019)
+    for (i, (_, signature)) in accepted.iter().enumerate() {
+        if pairing[i].is_none() {
+            rejected[i] = rejections.iter().any(|r| r == signature || signature_similarity(r, signature) >= SAME_ITEM_SIMILARITY);
         }
-        let group = group_of(&accepted[i].0);
-        let new_left = (0..accepted.len()).filter(|&k| pairing[k].is_none() && group_of(&accepted[k].0) == group).count();
-        let old_left: Vec<usize> = (0..existing.len()).filter(|&j| !existing[j].claimed && existing[j].group == group).collect();
-        if new_left == 1 && old_left.len() == 1 {
-            existing[old_left[0]].claimed = true;
-            pairing[i] = Some(old_left[0]);
+    }
+    // 3. reworded items: most similar pair first (FR-EXT-016)
+    let mut candidates = Vec::new();
+    for (i, (_, signature)) in accepted.iter().enumerate().filter(|(i, _)| pairing[*i].is_none() && !rejected[*i]) {
+        for (j, e) in existing.iter().enumerate().filter(|(_, e)| !e.claimed) {
+            let score = signature_similarity(signature, &e.signature);
+            if score >= SAME_ITEM_SIMILARITY {
+                candidates.push((score, i, j));
+            }
+        }
+    }
+    candidates.sort_by(|a, b| b.0.total_cmp(&a.0).then(a.1.cmp(&b.1)).then(a.2.cmp(&b.2)));
+    for (_, i, j) in candidates {
+        if pairing[i].is_none() && !existing[j].claimed {
+            existing[j].claimed = true;
+            pairing[i] = Some(j);
         }
     }
 
     for (i, (item, signature)) in accepted.iter().enumerate() {
         outcomes.push(match pairing[i] {
-            Some(j) if existing[j].user_owned => Outcome::KeptUserVersion(existing[j].item.clone()),
+            _ if rejected[i] => Outcome::Rejected { signature: signature.clone() },
+            Some(j) if existing[j].user_owned => {
+                adopt(conn, &existing[j].item, block_id)?;
+                Outcome::KeptUserVersion(existing[j].item.clone())
+            }
             Some(j) => {
-                update_item(conn, &existing[j].item, item, signature, &now_s)?;
+                update_item(conn, &existing[j].item, block_id, item, signature, &now_s)?;
                 Outcome::Updated(existing[j].item.clone())
             }
             None => Outcome::Added(insert_item(conn, block_id, item, signature, &now_s)?),
@@ -150,6 +181,12 @@ pub fn record_unreadable_answer(
 ) -> rusqlite::Result<Outcome> {
     let payload = serde_json::json!({ "raw_answer": answer }).to_string();
     insert_review(conn, block_id, &payload, reason, &now.to_rfc3339())
+}
+
+/// A block the model could not handle (too long, refused, timed out): kept for the user to look at.
+pub fn record_block_problem(conn: &Connection, block_id: &str, problem: &str, now: DateTime<FixedOffset>) -> rusqlite::Result<Outcome> {
+    let payload = serde_json::json!({ "problem": problem }).to_string();
+    insert_review(conn, block_id, &payload, problem, &now.to_rfc3339())
 }
 
 /// The user undid or deleted an extracted item: remember the rejection, then remove the item.
@@ -176,12 +213,10 @@ fn new_id() -> String {
     uuid::Uuid::new_v4().simple().to_string()
 }
 
-fn is_rejected(conn: &Connection, block_id: &str, signature: &str) -> rusqlite::Result<bool> {
-    conn.query_row(
-        "SELECT EXISTS (SELECT 1 FROM rejection WHERE block_id = ?1 AND item_signature = ?2)",
-        [block_id, signature],
-        |r| r.get(0),
-    )
+fn load_rejections(conn: &Connection, block_id: &str) -> rusqlite::Result<Vec<String>> {
+    conn.prepare("SELECT item_signature FROM rejection WHERE block_id = ?1")?
+        .query_map([block_id], |r| r.get(0))?
+        .collect()
 }
 
 fn review(conn: &Connection, block_id: &str, raw: &RawItem, reason: &str, now: &str) -> rusqlite::Result<Outcome> {
@@ -211,34 +246,46 @@ fn insert_review(conn: &Connection, block_id: &str, payload: &str, reason: &str,
     Ok(Outcome::Review { review_id, reason: reason.to_owned() })
 }
 
-fn load_existing(conn: &Connection, block_id: &str) -> rusqlite::Result<Vec<Existing>> {
+/// This block's extracted items, plus those of blocks of the same note that disappeared in this
+/// same sync — so splitting or merging paragraphs moves items instead of duplicating them.
+fn load_existing(conn: &Connection, block_id: &str, now: &str) -> rusqlite::Result<Vec<Existing>> {
+    const SOURCES: &str = "(block_id = ?1 OR block_id IN (SELECT o.block_id FROM block o JOIN block b ON o.note_path = b.note_path
+                           WHERE b.block_id = ?1 AND o.missing = 1 AND o.missing_since = ?2))";
     let mut out: Vec<Existing> = conn
-        .prepare("SELECT task_id, COALESCE(item_signature, ''), user_modified, status FROM task WHERE block_id = ?1 AND origin = 'extracted'")?
-        .query_map([block_id], |r| {
+        .prepare(&format!(
+            "SELECT task_id, COALESCE(item_signature, ''), user_modified, status FROM task WHERE origin = 'extracted' AND {SOURCES}"
+        ))?
+        .query_map([block_id, now], |r| {
             let status: String = r.get(3)?;
             Ok(Existing {
                 item: ItemRef::Task(r.get(0)?),
                 signature: r.get(1)?,
-                group: "action".into(),
                 user_owned: r.get::<_, bool>(2)? || status != "open",
                 claimed: false,
             })
         })?
         .collect::<Result<_, _>>()?;
     let metrics: Vec<Existing> = conn
-        .prepare("SELECT metric_id, COALESCE(item_signature, ''), user_modified, type FROM metric_record WHERE block_id = ?1 AND origin = 'extracted'")?
-        .query_map([block_id], |r| {
-            Ok(Existing {
-                item: ItemRef::Metric(r.get(0)?),
-                signature: r.get(1)?,
-                group: format!("metric:{}", r.get::<_, String>(3)?),
-                user_owned: r.get(2)?,
-                claimed: false,
-            })
+        .prepare(&format!(
+            "SELECT metric_id, COALESCE(item_signature, ''), user_modified FROM metric_record WHERE origin = 'extracted' AND {SOURCES}"
+        ))?
+        .query_map([block_id, now], |r| {
+            Ok(Existing { item: ItemRef::Metric(r.get(0)?), signature: r.get(1)?, user_owned: r.get(2)?, claimed: false })
         })?
         .collect::<Result<_, _>>()?;
     out.extend(metrics);
     Ok(out)
+}
+
+/// A user-owned item found in a moved block: keep it as the user left it, but follow its source.
+fn adopt(conn: &Connection, item: &ItemRef, block_id: &str) -> rusqlite::Result<()> {
+    match item {
+        ItemRef::Task(id) => conn.execute("UPDATE task SET block_id = ?1, source_missing = 0 WHERE task_id = ?2", [block_id, id])?,
+        ItemRef::Metric(id) => {
+            conn.execute("UPDATE metric_record SET block_id = ?1, source_missing = 0 WHERE metric_id = ?2", [block_id, id])?
+        }
+    };
+    Ok(())
 }
 
 struct TaskFields {
@@ -310,25 +357,26 @@ fn insert_item(conn: &Connection, block_id: &str, item: &ValidItem, signature: &
     }
 }
 
-fn update_item(conn: &Connection, target: &ItemRef, item: &ValidItem, signature: &str, now: &str) -> rusqlite::Result<()> {
+fn update_item(conn: &Connection, target: &ItemRef, block_id: &str, item: &ValidItem, signature: &str, now: &str) -> rusqlite::Result<()> {
     match (target, item) {
         (ItemRef::Task(id), ValidItem::Action { reminder, title, date, time }) => {
             let f = task_fields(*reminder, title, *date, *time);
             conn.execute(
-                "UPDATE task SET title = ?1, date = ?2, time = ?3, notify_at = ?4, item_signature = ?5, source_missing = 0, updated_at = ?6 WHERE task_id = ?7",
-                params![f.title, f.date, f.time, f.notify_at, signature, now, id],
+                "UPDATE task SET title = ?1, date = ?2, time = ?3, notify_at = ?4, item_signature = ?5, source_missing = 0, updated_at = ?6, block_id = ?8 WHERE task_id = ?7",
+                params![f.title, f.date, f.time, f.notify_at, signature, now, id, block_id],
             )?;
         }
         (ItemRef::Metric(id), ValidItem::Metric { kind, date, value, unit, exercise, sets, reps }) => {
             conn.execute(
-                "UPDATE metric_record SET type = ?1, value_json = ?2, unit = ?3, date = ?4, item_signature = ?5, source_missing = 0 WHERE metric_id = ?6",
+                "UPDATE metric_record SET type = ?1, value_json = ?2, unit = ?3, date = ?4, item_signature = ?5, source_missing = 0, block_id = ?7 WHERE metric_id = ?6",
                 params![
                     metric_kind_name(*kind),
                     metric_value_json(*value, exercise, *sets, *reps),
                     unit.map(unit_name),
                     date.format("%Y-%m-%d").to_string(),
                     signature,
-                    id
+                    id,
+                    block_id
                 ],
             )?;
         }
@@ -488,6 +536,39 @@ mod tests {
         assert!(matches!(out, Outcome::Review { .. }));
         let payload: String = conn.query_row("SELECT payload_json FROM review_item", [], |r| r.get(0)).unwrap();
         assert!(payload.contains("raw_answer"));
+    }
+
+    #[test]
+    fn several_reworded_items_update_their_own_counterparts() {
+        // Final review I2(a)
+        let (_t, conn) = setup();
+        apply(&conn, r#"{"type":"task","title":"Dişçi"},{"type":"task","title":"Market"}"#);
+        apply(&conn, r#"{"type":"task","title":"Markete git"},{"type":"task","title":"Dişçiye git"}"#);
+        let titles: Vec<String> = conn.prepare("SELECT title FROM task ORDER BY title").unwrap()
+            .query_map([], |r| r.get(0)).unwrap().map(Result::unwrap).collect();
+        assert_eq!(titles, vec!["Dişçiye git", "Markete git"]);
+    }
+
+    #[test]
+    fn a_reworded_rejected_item_stays_rejected() {
+        // Final review I2(b): FR-EXT-017/019
+        let (_t, conn) = setup();
+        let Outcome::Added(item) = apply(&conn, DENTIST).remove(0) else { panic!("expected Added") };
+        reject_item(&conn, &item, now()).unwrap();
+        let out = apply(&conn, r#"{"type":"task","title":"Dişçiye git","when":{"day_offset":1}}"#);
+        assert!(matches!(&out[..], [Outcome::Rejected { .. }]), "{out:?}");
+        assert_eq!(count(&conn, "task"), 0);
+    }
+
+    #[test]
+    fn an_unrelated_item_is_not_taken_for_the_old_one() {
+        // Final review I2(c): the user finished one appointment and reused the line for another
+        let (_t, conn) = setup();
+        apply(&conn, r#"{"type":"task","title":"Dişçi randevusu"}"#);
+        conn.execute("UPDATE task SET status = 'done'", []).unwrap();
+        let out = apply(&conn, r#"{"type":"task","title":"Kuaför randevusu"}"#);
+        assert!(matches!(&out[..], [Outcome::Added(_)]), "{out:?}");
+        assert_eq!(count(&conn, "task"), 2);
     }
 
     #[test]

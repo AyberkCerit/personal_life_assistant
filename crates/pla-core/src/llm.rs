@@ -69,6 +69,10 @@ pub enum LlmError {
     StartupTimeout(Duration),
     #[error("request to llama-server failed: {0}")]
     Http(String),
+    #[error("llama-server refused the request with status {0}")]
+    Status(u16),
+    #[error("llama-server did not answer in time")]
+    Timeout,
     #[error("unexpected response from llama-server")]
     BadResponse,
     #[error("model answer is not valid extraction JSON: {0}")]
@@ -210,7 +214,11 @@ impl LlamaServer {
             .post(format!("{}/v1/chat/completions", self.base_url))
             .header("Authorization", &format!("Bearer {}", self.api_key))
             .send_json(request_body(reference, text))
-            .map_err(|e| LlmError::Http(e.to_string()))?;
+            .map_err(|e| match e {
+                ureq::Error::StatusCode(code) => LlmError::Status(code),
+                ureq::Error::Timeout(_) => LlmError::Timeout,
+                other => LlmError::Http(other.to_string()),
+            })?;
         let body: Value = response.body_mut().read_json().map_err(|e| LlmError::Http(e.to_string()))?;
         body["choices"][0]["message"]["content"].as_str().map(str::to_owned).ok_or(LlmError::BadResponse)
     }

@@ -5,7 +5,7 @@ pub mod blocks;
 pub mod items;
 pub mod matching;
 
-use chrono::{DateTime, FixedOffset, NaiveDate};
+use chrono::{DateTime, FixedOffset, Local, NaiveDate};
 use rusqlite::{params, Connection};
 
 use crate::extraction::{parse_extraction, ValidationSettings};
@@ -14,6 +14,9 @@ use crate::notes::{daily_note_date, is_excluded, is_generated, list_user_notes, 
 use crate::vault::Vault;
 
 pub use items::{ItemRef, Outcome};
+
+/// Longer blocks (pasted articles, transcripts) do not fit the model's context; they go to Review.
+pub const MAX_BLOCK_CHARS: usize = 2000;
 
 /// The model, as seen by the pipeline. `llm::ModelHost` is the real one; tests script answers.
 pub trait Extractor {
@@ -51,15 +54,22 @@ pub struct RunReport {
 
 pub fn enqueue(conn: &Connection, note_path: &str, now: DateTime<FixedOffset>) -> rusqlite::Result<()> {
     conn.execute(
-        "INSERT INTO extraction_queue (note_path, queued_at) VALUES (?1, ?2) ON CONFLICT (note_path) DO NOTHING",
+        "INSERT INTO extraction_queue (note_path, queued_at) VALUES (?1, ?2)
+         ON CONFLICT (note_path) DO UPDATE SET generation = generation + 1",
         params![note_path, now.to_rfc3339()],
     )?;
     Ok(())
 }
 
-/// Queues every user note (first run, or after the app was closed while notes changed).
+/// Queues every user note (first run, or after the app was closed while notes changed), and every
+/// known note that is no longer on disk, so its items get marked (FR-VLT-019).
 pub fn enqueue_all(vault: &Vault, conn: &Connection, now: DateTime<FixedOffset>) -> Result<usize, PipelineError> {
-    let notes = list_user_notes(vault)?;
+    let mut notes = list_user_notes(vault)?;
+    let known: Vec<String> = conn
+        .prepare("SELECT DISTINCT note_path FROM block WHERE missing = 0")?
+        .query_map([], |r| r.get(0))?
+        .collect::<Result<_, _>>()?;
+    notes.extend(known.into_iter().filter(|n| !vault.root.join(n).exists()));
     for note in &notes {
         enqueue(conn, note, now)?;
     }
@@ -67,7 +77,7 @@ pub fn enqueue_all(vault: &Vault, conn: &Connection, now: DateTime<FixedOffset>)
 }
 
 pub fn queued_notes(conn: &Connection) -> rusqlite::Result<Vec<String>> {
-    conn.prepare("SELECT note_path FROM extraction_queue ORDER BY queued_at, note_path")?
+    conn.prepare("SELECT note_path FROM extraction_queue ORDER BY attempts, queued_at, note_path")?
         .query_map([], |r| r.get(0))?
         .collect()
 }
@@ -82,20 +92,34 @@ pub fn process_queue(
 ) -> Result<RunReport, PipelineError> {
     let mut report = RunReport::default();
     for note in queued_notes(conn)? {
+        let generation: i64 =
+            conn.query_row("SELECT generation FROM extraction_queue WHERE note_path = ?1", [&note], |r| r.get(0))?;
         let path = vault.root.join(&note);
+        let mut written = None;
         let text = if is_excluded(&note, &vault.config.folders) {
             None
-        } else if !path.exists() {
-            let tx = conn.transaction()?;
-            blocks::mark_note_missing(&tx, &note)?;
-            tx.commit()?;
-            None
         } else {
-            match std::fs::read_to_string(&path) {
+            match std::fs::metadata(&path).and_then(|meta| {
+                written = meta.modified().ok().map(|t| DateTime::<Local>::from(t).fixed_offset());
+                std::fs::read_to_string(&path)
+            }) {
                 Ok(text) if !is_generated(&text) => Some(text),
                 Ok(_) => None,
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                    let tx = conn.transaction()?;
+                    blocks::mark_note_missing(&tx, &note, now)?;
+                    tx.commit()?;
+                    None
+                }
                 Err(e) if e.kind() == std::io::ErrorKind::InvalidData => None, // FR-VLT-016: not UTF-8, left alone
-                Err(e) => return Err(e.into()),
+                Err(e) => {
+                    // Locked or unreadable right now: try again next run, keep going with the others.
+                    conn.execute(
+                        "UPDATE extraction_queue SET attempts = attempts + 1, last_error = ?1 WHERE note_path = ?2",
+                        params![e.to_string(), note],
+                    )?;
+                    continue;
+                }
             }
         };
 
@@ -106,34 +130,44 @@ pub fn process_queue(
                 &note,
                 &split_blocks(&text),
                 daily_note_date(&note, &vault.config.folders),
+                written,
                 now,
                 settings.similarity_threshold,
             )?;
             tx.commit()?;
 
             for block in synced.iter().filter(|b| b.needs_extraction) {
-                let answer = match extractor.extract_raw(block.reference_date, &block.text) {
-                    Ok(answer) => answer,
-                    Err(e) => {
-                        conn.execute(
-                            "UPDATE extraction_queue SET attempts = attempts + 1, last_error = ?1 WHERE note_path = ?2",
-                            params![e.to_string(), note],
-                        )?;
-                        report.model_error = Some(e.to_string());
-                        return Ok(report);
+                let answer = if block.text.chars().count() > MAX_BLOCK_CHARS {
+                    Err("block too long for the model".to_owned())
+                } else {
+                    match extractor.extract_raw(block.reference_date, &block.text) {
+                        Ok(answer) => Ok(answer),
+                        // The server refused or gave up on this block: its problem, not the run's (FR-EXT-022 covers outages).
+                        Err(e @ (LlmError::Status(400..=499) | LlmError::Timeout | LlmError::BadResponse)) => Err(e.to_string()),
+                        Err(e) => {
+                            conn.execute(
+                                "UPDATE extraction_queue SET attempts = attempts + 1, last_error = ?1 WHERE note_path = ?2",
+                                params![e.to_string(), note],
+                            )?;
+                            report.model_error = Some(e.to_string());
+                            return Ok(report);
+                        }
                     }
                 };
                 let tx = conn.transaction()?;
-                let outcomes = match parse_extraction(&answer) {
-                    Ok(extraction) => items::apply_block_items(
-                        &tx,
-                        &block.block_id,
-                        block.reference_date,
-                        &extraction,
-                        &settings.validation,
-                        now,
-                    )?,
-                    Err(e) => vec![items::record_unreadable_answer(&tx, &block.block_id, &answer, &e.to_string(), now)?],
+                let outcomes = match answer {
+                    Err(problem) => vec![items::record_block_problem(&tx, &block.block_id, &problem, now)?],
+                    Ok(answer) => match parse_extraction(&answer) {
+                        Ok(extraction) => items::apply_block_items(
+                            &tx,
+                            &block.block_id,
+                            block.reference_date,
+                            &extraction,
+                            &settings.validation,
+                            now,
+                        )?,
+                        Err(e) => vec![items::record_unreadable_answer(&tx, &block.block_id, &answer, &e.to_string(), now)?],
+                    },
                 };
                 blocks::mark_extracted(&tx, &block.block_id)?;
                 tx.commit()?;
@@ -141,7 +175,8 @@ pub fn process_queue(
                 report.outcomes.extend(outcomes.into_iter().map(|o| (note.clone(), o)));
             }
         }
-        conn.execute("DELETE FROM extraction_queue WHERE note_path = ?1", [&note])?;
+        // Only if nobody re-queued the note meanwhile (an edit during processing must not be lost).
+        conn.execute("DELETE FROM extraction_queue WHERE note_path = ?1 AND generation = ?2", params![note, generation])?;
         report.notes_done += 1;
     }
     Ok(report)
@@ -158,11 +193,20 @@ mod tests {
         answers: HashMap<String, String>,
         calls: Vec<(NaiveDate, String)>,
         down: bool,
+        rejects: HashMap<String, u16>,
+        /// Enqueues this note through a second connection during the first call (an edit arriving mid-run).
+        side_enqueue: Option<(Connection, String)>,
     }
 
     impl Scripted {
         fn new(pairs: &[(&str, &str)]) -> Self {
-            Self { answers: pairs.iter().map(|(k, v)| ((*k).into(), (*v).into())).collect(), calls: Vec::new(), down: false }
+            Self {
+                answers: pairs.iter().map(|(k, v)| ((*k).into(), (*v).into())).collect(),
+                calls: Vec::new(),
+                down: false,
+                rejects: HashMap::new(),
+                side_enqueue: None,
+            }
         }
     }
 
@@ -170,6 +214,12 @@ mod tests {
         fn extract_raw(&mut self, reference: NaiveDate, text: &str) -> Result<String, LlmError> {
             if self.down {
                 return Err(LlmError::Http("connection refused".into()));
+            }
+            if let Some((side, note)) = self.side_enqueue.take() {
+                enqueue(&side, &note, at(T2)).unwrap();
+            }
+            if let Some(code) = self.rejects.get(text) {
+                return Err(LlmError::Status(*code));
             }
             self.calls.push((reference, text.to_owned()));
             Ok(self.answers.get(text).cloned().unwrap_or_else(|| r#"{"items": []}"#.into()))
@@ -184,10 +234,14 @@ mod tests {
     fn d(s: &str) -> NaiveDate {
         NaiveDate::parse_from_str(s, "%Y-%m-%d").unwrap()
     }
+    /// Writes a note "just now": tests simulate `now`, so the real file time is pushed past it
+    /// (a file time later than `now` counts as written now).
     fn write(vault: &Vault, rel: &str, body: &[u8]) {
         let p = vault.root.join(rel);
         std::fs::create_dir_all(p.parent().unwrap()).unwrap();
-        std::fs::write(p, body).unwrap();
+        std::fs::write(&p, body).unwrap();
+        let later = std::time::SystemTime::from(DateTime::parse_from_rfc3339("2030-01-01T00:00:00+03:00").unwrap());
+        std::fs::File::options().write(true).open(&p).unwrap().set_modified(later).unwrap();
     }
     fn tasks(conn: &Connection) -> Vec<(String, Option<String>, i64)> {
         conn.prepare("SELECT title, date, source_missing FROM task ORDER BY title")
@@ -317,5 +371,124 @@ mod tests {
         assert!(tasks(&conn).is_empty());
         assert!(queued_notes(&conn).unwrap().is_empty());
         assert_eq!(report.model_error, None);
+    }
+
+    #[test]
+    fn a_block_the_model_rejects_does_not_block_the_vault() {
+        // Final review C1: a request the server refuses (e.g. too long) is the block's problem, not the run's
+        let tmp = tempfile::tempdir().unwrap();
+        let vault = open_vault(tmp.path()).unwrap();
+        let mut conn = open_databases(&tmp.path().join(".data")).unwrap().pla;
+        write(&vault, "notes/a.md", b"Sorunlu blok.");
+        write(&vault, "notes/b.md", DENTIST.as_bytes());
+        let mut x = Scripted::new(&[(DENTIST, DENTIST_JSON)]);
+        x.rejects.insert("Sorunlu blok.".into(), 400);
+
+        let report = run(&vault, &mut conn, &mut x, T1);
+        assert_eq!(report.model_error, None);
+        assert_eq!(tasks(&conn).len(), 1, "the other note is processed");
+        assert!(queued_notes(&conn).unwrap().is_empty());
+        let reviews: i64 = conn.query_row("SELECT COUNT(*) FROM review_item", [], |r| r.get(0)).unwrap();
+        assert_eq!(reviews, 1);
+        run(&vault, &mut conn, &mut x, T2);
+        assert_eq!(x.calls.len(), 1, "the failed block is not retried forever");
+    }
+
+    #[test]
+    fn an_oversized_block_goes_to_review_without_a_model_call() {
+        let tmp = tempfile::tempdir().unwrap();
+        let vault = open_vault(tmp.path()).unwrap();
+        let mut conn = open_databases(&tmp.path().join(".data")).unwrap().pla;
+        write(&vault, "notes/makale.md", "uzun ".repeat(1000).as_bytes());
+        let mut x = Scripted::new(&[]);
+        let report = run(&vault, &mut conn, &mut x, T1);
+        assert!(x.calls.is_empty());
+        assert!(
+            matches!(&report.outcomes[..], [(_, Outcome::Review { reason, .. })] if reason.contains("too long")),
+            "{:?}",
+            report.outcomes
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn an_unreadable_note_does_not_stop_the_others() {
+        use std::os::windows::fs::OpenOptionsExt;
+        let tmp = tempfile::tempdir().unwrap();
+        let vault = open_vault(tmp.path()).unwrap();
+        let mut conn = open_databases(&tmp.path().join(".data")).unwrap().pla;
+        write(&vault, "notes/a.md", b"Kilitli.");
+        write(&vault, "notes/b.md", DENTIST.as_bytes());
+        let _lock = std::fs::OpenOptions::new().read(true).share_mode(0).open(vault.root.join("notes/a.md")).unwrap();
+        let mut x = Scripted::new(&[(DENTIST, DENTIST_JSON)]);
+        let report = run(&vault, &mut conn, &mut x, T1);
+        assert_eq!(tasks(&conn).len(), 1);
+        assert_eq!(queued_notes(&conn).unwrap(), vec!["notes/a.md"], "kept for the next run");
+        assert_eq!(report.notes_done, 1);
+    }
+
+    #[test]
+    fn an_edit_arriving_during_processing_stays_queued() {
+        // Final review I3
+        let tmp = tempfile::tempdir().unwrap();
+        let vault = open_vault(tmp.path()).unwrap();
+        let data = tmp.path().join(".data");
+        let mut conn = open_databases(&data).unwrap().pla;
+        write(&vault, "notes/plan.md", DENTIST.as_bytes());
+        let mut x = Scripted::new(&[(DENTIST, DENTIST_JSON)]);
+        x.side_enqueue = Some((Connection::open(data.join("pla.db")).unwrap(), "notes/plan.md".into()));
+        run(&vault, &mut conn, &mut x, T1);
+        assert_eq!(queued_notes(&conn).unwrap(), vec!["notes/plan.md"]);
+    }
+
+    #[test]
+    fn a_note_deleted_while_the_app_was_closed_is_noticed() {
+        // Final review I4: FR-VLT-019
+        let tmp = tempfile::tempdir().unwrap();
+        let vault = open_vault(tmp.path()).unwrap();
+        let mut conn = open_databases(&tmp.path().join(".data")).unwrap().pla;
+        write(&vault, "notes/plan.md", DENTIST.as_bytes());
+        let mut x = Scripted::new(&[(DENTIST, DENTIST_JSON)]);
+        run(&vault, &mut conn, &mut x, T1);
+        std::fs::remove_file(vault.root.join("notes/plan.md")).unwrap();
+        run(&vault, &mut conn, &mut x, T2);
+        assert_eq!(tasks(&conn)[0].2, 1);
+    }
+
+    #[test]
+    fn splitting_a_paragraph_into_a_list_keeps_the_tasks() {
+        // Final review I1
+        let tmp = tempfile::tempdir().unwrap();
+        let vault = open_vault(tmp.path()).unwrap();
+        let mut conn = open_databases(&tmp.path().join(".data")).unwrap().pla;
+        let para = "Yarın dişçiye git, cuma faturayı öde.";
+        let both = r#"{"items": [{"type": "task", "title": "Dişçi", "when": {"day_offset": 1}}, {"type": "task", "title": "Fatura öde", "when": {"weekday": "fri"}}]}"#;
+        let mut x = Scripted::new(&[
+            (para, both),
+            ("- Yarın dişçiye git", r#"{"items": [{"type": "task", "title": "Dişçi", "when": {"day_offset": 1}}]}"#),
+            ("- Cuma faturayı öde", r#"{"items": [{"type": "task", "title": "Fatura öde", "when": {"weekday": "fri"}}]}"#),
+        ]);
+        write(&vault, "notes/plan.md", para.as_bytes());
+        run(&vault, &mut conn, &mut x, T1);
+        write(&vault, "notes/plan.md", "- Yarın dişçiye git\n- Cuma faturayı öde".as_bytes());
+        run(&vault, &mut conn, &mut x, T2);
+        assert_eq!(
+            tasks(&conn),
+            vec![("Dişçi".into(), Some("2026-10-07".into()), 0), ("Fatura öde".into(), Some("2026-10-09".into()), 0)]
+        );
+    }
+
+    #[test]
+    fn an_old_note_is_dated_by_its_file_time() {
+        // Final review I5
+        let tmp = tempfile::tempdir().unwrap();
+        let vault = open_vault(tmp.path()).unwrap();
+        let mut conn = open_databases(&tmp.path().join(".data")).unwrap().pla;
+        write(&vault, "notes/eski.md", DENTIST.as_bytes());
+        let written = std::time::SystemTime::from(DateTime::parse_from_rfc3339("2025-03-01T09:00:00+03:00").unwrap());
+        std::fs::File::options().write(true).open(vault.root.join("notes/eski.md")).unwrap().set_modified(written).unwrap();
+        let mut x = Scripted::new(&[(DENTIST, DENTIST_JSON)]);
+        run(&vault, &mut conn, &mut x, T1);
+        assert_eq!(x.calls[0].0, d("2025-03-01"));
     }
 }
