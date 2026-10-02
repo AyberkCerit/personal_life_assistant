@@ -5,6 +5,7 @@
   import { EditorView } from "@codemirror/view";
   import { markdown } from "@codemirror/lang-markdown";
   import { api } from "./api";
+  import { NoteDoc } from "./saving";
   import { NoteSession } from "./triggers";
   import { t } from "./i18n";
 
@@ -13,31 +14,21 @@
   let host: HTMLDivElement | undefined = $state();
   let view: EditorView | undefined;
   let session: NoteSession | undefined;
-  let hash: string | null = null;
+  let doc: NoteDoc | undefined;
+  let destroyed = false;
   let readOnly = $state(false);
-  let conflict = $state(false);
+  let problem = $state<"conflict" | "missing" | null>(null);
   let error = $state<string | null>(null);
 
-  async function save(p: string): Promise<void> {
-    if (!view || readOnly || conflict) return;
-    try {
-      const result = await api.saveNote(p, view.state.doc.toString(), hash);
-      if (result.kind === "saved") {
-        hash = result.hash;
-        error = null;
-      } else {
-        conflict = true; // Review Focus 1: never overwrite; the user decides
-      }
-    } catch (e) {
-      error = String(e);
-    }
+  function sync() {
+    problem = doc?.problem ?? null;
+    error = doc?.error ?? null;
   }
 
   async function load(): Promise<void> {
     const note = await api.readNote(path);
-    hash = note.hash;
+    if (destroyed) return;
     readOnly = note.read_only;
-    conflict = false;
     view?.destroy();
     view = new EditorView({
       parent: host!,
@@ -59,11 +50,19 @@
         ],
       }),
     });
-    session = new NoteSession(path, save, (p) => void api.queueNote(p));
+    const current = view;
+    const saveApi = { save: api.saveNote, saveCopy: api.saveCopy };
+    doc = new NoteDoc(path, note.text, note.hash, () => current.state.doc.toString(), saveApi, sync);
+    session = new NoteSession(path, () => doc!.save(), (p) => void api.queueNote(p));
+    sync();
   }
 
+  /** Leaving the note: save, queue it if edited, and never drop text (a copy is written if needed). */
   export async function close(): Promise<void> {
+    if (readOnly) return;
     await session?.close();
+    const copy = await doc?.leave();
+    if (copy) onSavedCopy(copy);
   }
 
   async function takeExternal(): Promise<void> {
@@ -71,23 +70,39 @@
   }
 
   async function keepMineAsCopy(): Promise<void> {
-    if (!view) return;
-    const copy = await api.saveCopy(path, view.state.doc.toString());
-    onSavedCopy(copy);
-    await load();
+    try {
+      const copy = await doc?.leave();
+      if (copy) onSavedCopy(copy);
+      if (problem === "conflict") await load();
+    } catch (e) {
+      error = String(e);
+    }
   }
 
   onMount(() => {
     load().catch((e) => (error = String(e)));
-    return () => view?.destroy();
+    const unChanged = api.onNoteChanged((changed) => {
+      if (changed !== path || !doc) return;
+      if (doc.externalChange() === "reload") void load(); // clean: show the outside version at once
+    });
+    return () => {
+      destroyed = true;
+      view?.destroy();
+      void unChanged.then((f) => f());
+    };
   });
 </script>
 
 {#if readOnly}<div class="banner">{t("editor.readOnly")}</div>{/if}
-{#if conflict}
+{#if problem === "conflict"}
   <div class="banner danger" role="alert">
     <span>{t("conflict.message")}</span>
     <button onclick={takeExternal}>{t("conflict.takeExternal")}</button>
+    <button onclick={keepMineAsCopy}>{t("conflict.keepMine")}</button>
+  </div>
+{:else if problem === "missing"}
+  <div class="banner danger" role="alert">
+    <span>{t("missing.message")}</span>
     <button onclick={keepMineAsCopy}>{t("conflict.keepMine")}</button>
   </div>
 {/if}

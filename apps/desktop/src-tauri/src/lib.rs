@@ -5,7 +5,7 @@ pub mod watcher;
 pub mod worker;
 
 pub fn run() {
-    tauri::Builder::default()
+    let app = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .manage(commands::AppState::default())
         .invoke_handler(tauri::generate_handler![
@@ -18,6 +18,25 @@ pub fn run() {
             commands::create_note,
             commands::queue_note,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running PLA");
+        .build(tauri::generate_context!())
+        .expect("error while building PLA");
+    app.run(|handle, event| {
+        if let tauri::RunEvent::Exit = event {
+            // Tauri ends the process without running destructors: stop the worker (and with it the
+            // model) explicitly. The job object in pla-core is the backstop for crashes.
+            use tauri::Manager;
+            let session = handle.state::<commands::AppState>().session.lock().expect("session lock").take();
+            drop(session);
+        }
+    });
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn the_window_may_be_closed() {
+        // Final review C1: with a close-requested listener, closing needs permission to destroy the window
+        let caps: serde_json::Value = serde_json::from_str(include_str!("../capabilities/default.json")).unwrap();
+        assert!(caps["permissions"].as_array().unwrap().iter().any(|p| p == "core:window:allow-destroy"));
+    }
 }

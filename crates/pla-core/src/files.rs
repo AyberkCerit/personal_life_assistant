@@ -37,6 +37,8 @@ pub enum FileError {
     ReadOnly(String),
     #[error("the note was changed outside PLA")]
     Conflict { current_hash: String },
+    #[error("the note was moved or deleted outside PLA")]
+    Missing,
     #[error(transparent)]
     Io(#[from] std::io::Error),
 }
@@ -74,6 +76,8 @@ pub fn save_note(vault: &Vault, rel: &str, text: &str, expected_hash: Option<&st
                 return Err(FileError::Conflict { current_hash });
             }
         }
+        // Saving an opened note whose file is gone would bring back a deleted or moved note (FR-VLT-013).
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound && expected_hash.is_some() => return Err(FileError::Missing),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
         Err(e) => return Err(e.into()),
     }
@@ -224,5 +228,16 @@ mod tests {
         assert_eq!(&paths[notes_at + 1..notes_at + 3], &["notes/A.md", "notes/b.md"]);
         assert_eq!(tree[notes_at + 1].depth, 1);
         assert!(paths.iter().position(|p| *p == "daily").unwrap() < notes_at);
+    }
+
+    #[test]
+    fn a_note_removed_outside_is_not_recreated_by_a_save() {
+        // Final review I2: FR-VLT-013 also covers deletes and moves made outside PLA
+        let (_t, v) = vault();
+        let rel = create_note(&v, "inbox", "Plan").unwrap();
+        let h = read_note(&v, &rel).unwrap().hash;
+        std::fs::remove_file(v.root.join(&rel)).unwrap();
+        assert!(matches!(save_note(&v, &rel, "benim", Some(&h)), Err(FileError::Missing)));
+        assert!(!v.root.join(&rel).exists());
     }
 }

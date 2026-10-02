@@ -37,6 +37,8 @@ pub fn open_databases(dir: &Path) -> Result<Databases, DbError> {
 
 fn open(path: &Path) -> Result<Connection, DbError> {
     let conn = Connection::open(path)?;
+    // A second writer (another window, a restarting worker) waits instead of failing.
+    conn.busy_timeout(std::time::Duration::from_secs(5))?;
     conn.pragma_update(None, "journal_mode", "WAL")?;
     conn.pragma_update(None, "foreign_keys", "ON")?;
     conn.pragma_update(None, "synchronous", "NORMAL")?;
@@ -145,5 +147,14 @@ mod tests {
         // Review Focus 5: an older app opening a newer database
         let err = migrate(&mut conn, &v1, Some(&backup)).unwrap_err();
         assert!(matches!(err, DbError::NewerSchema { found: 2, supported: 1 }));
+    }
+
+    #[test]
+    fn writers_wait_instead_of_failing_when_busy() {
+        // Final review I6
+        let tmp = tempfile::tempdir().unwrap();
+        let dbs = open_databases(tmp.path()).unwrap();
+        let ms: i64 = dbs.pla.query_row("PRAGMA busy_timeout", [], |r| r.get(0)).unwrap();
+        assert!(ms >= 5000, "busy_timeout {ms}");
     }
 }

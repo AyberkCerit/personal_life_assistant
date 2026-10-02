@@ -33,7 +33,12 @@
 
   async function openNote(path: string) {
     if (path === current) return;
-    await editor?.close(); // save and, if edited, queue the note we are leaving (FR-EXT-002)
+    try {
+      await editor?.close(); // save, queue if edited (FR-EXT-002); text is never dropped
+    } catch (e) {
+      error = String(e); // stay on the note rather than lose what could not be saved
+      return;
+    }
     current = path;
   }
 

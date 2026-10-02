@@ -3,11 +3,15 @@
 //! the model host stop an idle model (FR-MDL-013). The UI learns everything through `WorkerStatus`.
 
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
+use std::sync::Arc;
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 use chrono::{DateTime, FixedOffset, Local};
+use chrono::NaiveDate;
+use pla_core::llm::LlmError;
 use pla_core::pipeline::{enqueue, enqueue_all, process_queue, queued_notes, Extractor, Outcome, PipelineSettings};
 use pla_core::vault::Vault;
 use rusqlite::Connection;
@@ -21,7 +25,59 @@ const EXTERNAL_DELAY: Duration = Duration::from_secs(45);
 pub enum Command {
     Enqueue(String),
     EnqueueLater(String),
+    /// A folder changed outside PLA: queue every note again (and the ones that vanished).
+    Rescan,
     Shutdown,
+}
+
+/// The running worker. Dropping it (or `shutdown`) stops the current run between two model calls,
+/// waits for the thread, and so drops the model host, which ends llama-server (FR-MDL-017).
+pub struct WorkerHandle {
+    tx: Sender<Command>,
+    cancel: Arc<AtomicBool>,
+    join: Option<JoinHandle<()>>,
+}
+
+impl WorkerHandle {
+    pub fn send(&self, command: Command) {
+        let _ = self.tx.send(command);
+    }
+
+    pub fn sender(&self) -> Sender<Command> {
+        self.tx.clone()
+    }
+
+    pub fn shutdown(self) {}
+
+    fn stop(&mut self) {
+        self.cancel.store(true, Ordering::SeqCst);
+        let _ = self.tx.send(Command::Shutdown);
+        if let Some(join) = self.join.take() {
+            let _ = join.join();
+        }
+    }
+}
+
+impl Drop for WorkerHandle {
+    fn drop(&mut self) {
+        self.stop();
+    }
+}
+
+/// Lets a closing session interrupt a long run: once cancelled, the next model call fails like an
+/// outage, so the pipeline stops and keeps the rest queued (FR-EXT-022).
+struct Cancellable<'a> {
+    inner: &'a mut (dyn Extractor + Send),
+    cancel: &'a AtomicBool,
+}
+
+impl Extractor for Cancellable<'_> {
+    fn extract_raw(&mut self, reference: NaiveDate, text: &str) -> Result<String, LlmError> {
+        if self.cancel.load(Ordering::SeqCst) {
+            return Err(LlmError::Http("PLA is closing".into()));
+        }
+        self.inner.extract_raw(reference, text)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -54,6 +110,7 @@ pub struct Worker {
     external_delay: Duration,
     later: HashMap<String, Instant>,
     status: WorkerStatus,
+    cancel: Arc<AtomicBool>,
 }
 
 impl Worker {
@@ -67,6 +124,7 @@ impl Worker {
             clock: Box::new(|| Local::now().fixed_offset()),
             external_delay: EXTERNAL_DELAY,
             later: HashMap::new(),
+            cancel: Arc::new(AtomicBool::new(false)),
             status: WorkerStatus { queued: 0, model, busy: false, last_error: None, added: 0 },
         }
     }
@@ -81,10 +139,11 @@ impl Worker {
         self
     }
 
-    pub fn spawn(self) -> (Sender<Command>, JoinHandle<()>) {
+    pub fn spawn(self) -> WorkerHandle {
         let (tx, rx) = mpsc::channel();
-        let handle = std::thread::Builder::new().name("pla-worker".into()).spawn(move || self.run(rx)).expect("spawn worker");
-        (tx, handle)
+        let cancel = Arc::clone(&self.cancel);
+        let join = std::thread::Builder::new().name("pla-worker".into()).spawn(move || self.run(rx)).expect("spawn worker");
+        WorkerHandle { tx, cancel, join: Some(join) }
     }
 
     fn run(mut self, rx: Receiver<Command>) {
@@ -103,6 +162,12 @@ impl Worker {
                 }
                 Ok(Command::EnqueueLater(note)) => {
                     self.later.insert(note, Instant::now());
+                }
+                Ok(Command::Rescan) => {
+                    if let Err(e) = enqueue_all(&self.vault, &self.conn, (self.clock)()) {
+                        self.status.last_error = Some(e.to_string());
+                    }
+                    self.process();
                 }
                 Ok(Command::Shutdown) | Err(RecvTimeoutError::Disconnected) => break,
                 Err(RecvTimeoutError::Timeout) => self.tick(),
@@ -149,7 +214,8 @@ impl Worker {
             self.status.queued = queued_notes(&self.conn).map_or(0, |q| q.len());
             (self.notify)(&self.status); // field borrows: the extractor stays borrowed
             let now = (self.clock)();
-            match process_queue(&self.vault, &mut self.conn, extractor.as_mut(), &PipelineSettings::default(), now) {
+            let mut guarded = Cancellable { inner: extractor.as_mut(), cancel: &self.cancel };
+            match process_queue(&self.vault, &mut self.conn, &mut guarded, &PipelineSettings::default(), now) {
                 Ok(report) => {
                     self.status.added += report.outcomes.iter().filter(|(_, o)| matches!(o, Outcome::Added(_))).count();
                     self.status.last_error = report.model_error;
@@ -179,9 +245,7 @@ impl Worker {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chrono::NaiveDate;
     use pla_core::db::open_databases;
-    use pla_core::llm::LlmError;
     use pla_core::vault::open_vault;
     use std::sync::{Arc, Mutex};
     use std::time::Instant;
@@ -206,7 +270,7 @@ mod tests {
         }
     }
 
-    fn setup(extractor: Option<Box<dyn Extractor + Send>>) -> (tempfile::TempDir, Sender<Command>, Arc<Mutex<Vec<WorkerStatus>>>, std::path::PathBuf) {
+    fn setup(extractor: Option<Box<dyn Extractor + Send>>) -> (tempfile::TempDir, WorkerHandle, Arc<Mutex<Vec<WorkerStatus>>>, std::path::PathBuf) {
         let tmp = tempfile::tempdir().unwrap();
         let vault = open_vault(tmp.path()).unwrap();
         std::fs::write(vault.root.join("notes/plan.md"), "Yarın dişçi.").unwrap();
@@ -216,8 +280,8 @@ mod tests {
         let sink = Arc::clone(&statuses);
         let worker = Worker::new(vault, conn, extractor, Box::new(move |s| sink.lock().unwrap().push(s.clone())))
             .with_external_delay(Duration::from_millis(300));
-        let (tx, _join) = worker.spawn();
-        (tmp, tx, statuses, data)
+        let handle = worker.spawn();
+        (tmp, handle, statuses, data)
     }
 
     fn task_count(data: &std::path::Path) -> i64 {
@@ -230,7 +294,7 @@ mod tests {
         let done = wait_for(&statuses, |s| !s.busy && s.added == 1);
         assert_eq!(done.queued, 0);
         assert_eq!(task_count(&data), 1);
-        tx.send(Command::Shutdown).unwrap();
+        tx.shutdown();
     }
 
     #[test]
@@ -240,7 +304,7 @@ mod tests {
         let s = wait_for(&statuses, |s| s.queued == 1);
         assert_eq!(s.model, ModelState::NotInstalled);
         assert_eq!(task_count(&data), 0);
-        tx.send(Command::Shutdown).unwrap();
+        tx.shutdown();
     }
 
     #[test]
@@ -250,7 +314,7 @@ mod tests {
         wait_for(&statuses, |s| !s.busy && s.added == 1);
         let before = statuses.lock().unwrap().len();
         std::fs::write(tmp.path().join("notes/plan.md"), "Yarın dişçi var.").unwrap();
-        tx.send(Command::EnqueueLater("notes/plan.md".into())).unwrap();
+        tx.send(Command::EnqueueLater("notes/plan.md".into()));
         std::thread::sleep(Duration::from_millis(100));
         assert_eq!(statuses.lock().unwrap().len(), before, "nothing happens before the quiet period");
         let start = Instant::now();
@@ -267,6 +331,49 @@ mod tests {
             std::thread::sleep(Duration::from_millis(20));
         }
         assert_eq!(task_count(&data), 1, "updated, not duplicated");
-        tx.send(Command::Shutdown).unwrap();
+        tx.shutdown();
+    }
+
+    #[test]
+    fn rescan_picks_up_notes_added_outside() {
+        // Final review I5
+        let (tmp, tx, statuses, data) = setup(Some(Box::new(Fixed(TASK))));
+        wait_for(&statuses, |s| !s.busy && s.added == 1);
+        std::fs::write(tmp.path().join("notes/ikinci.md"), "Cuma fatura.").unwrap();
+        tx.send(Command::Rescan);
+        wait_for(&statuses, |s| !s.busy && s.added == 2);
+        assert_eq!(task_count(&data), 2);
+        tx.shutdown();
+    }
+
+    struct Slow;
+    impl Extractor for Slow {
+        fn extract_raw(&mut self, _: NaiveDate, _: &str) -> Result<String, LlmError> {
+            std::thread::sleep(Duration::from_millis(300));
+            Ok(r#"{"items": []}"#.to_owned())
+        }
+    }
+
+    #[test]
+    fn shutdown_interrupts_a_long_run_and_keeps_the_rest_queued() {
+        // Final review I6: replacing or closing a session must not wait for a whole catch-up
+        let tmp = tempfile::tempdir().unwrap();
+        let vault = open_vault(tmp.path()).unwrap();
+        let body: Vec<String> = (0..30).map(|i| format!("Paragraf {i}.")).collect();
+        std::fs::write(vault.root.join("notes/uzun.md"), body.join("\n\n")).unwrap();
+        let data = tmp.path().join(".data");
+        let conn = open_databases(&data).unwrap().pla;
+        let statuses = Arc::new(Mutex::new(Vec::new()));
+        let sink = Arc::clone(&statuses);
+        let handle = Worker::new(vault, conn, Some(Box::new(Slow)), Box::new(move |s| sink.lock().unwrap().push(s.clone()))).spawn();
+        wait_for(&statuses, |s| s.busy);
+        let started = Instant::now();
+        handle.shutdown();
+        assert!(started.elapsed() < Duration::from_secs(3), "shutdown took {:?}", started.elapsed());
+        let queued: i64 = rusqlite::Connection::open(data.join("pla.db"))
+            .unwrap()
+            .query_row("SELECT COUNT(*) FROM extraction_queue", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(queued, 1, "the unfinished note waits for the next start");
     }
 }

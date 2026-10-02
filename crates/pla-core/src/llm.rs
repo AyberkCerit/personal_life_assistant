@@ -126,6 +126,53 @@ pub(crate) fn wait_until_healthy(child: &mut Child, health: &ureq::Agent, base_u
     }
 }
 
+/// Ties a child process to PLA's lifetime: when PLA exits for any reason (closed, crashed, killed
+/// in Task Manager) Windows ends the child too, so a multi-GB model never lingers (FR-MDL-017).
+#[cfg(windows)]
+pub(crate) fn kill_with_parent(child: &Child) {
+    use std::os::windows::io::AsRawHandle;
+    use std::sync::OnceLock;
+    use windows_sys::Win32::Foundation::HANDLE;
+    use windows_sys::Win32::System::JobObjects::{
+        AssignProcessToJobObject, CreateJobObjectW, JobObjectExtendedLimitInformation, SetInformationJobObject,
+        JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+    };
+
+    struct Job(HANDLE);
+    // SAFETY: a job handle is a kernel handle usable from any thread; it is never closed (lives as long as PLA).
+    unsafe impl Send for Job {}
+    unsafe impl Sync for Job {}
+
+    static JOB: OnceLock<Option<Job>> = OnceLock::new();
+    let job = JOB.get_or_init(|| {
+        // SAFETY: plain Win32 calls with valid arguments; the handle is checked before use.
+        unsafe {
+            let handle = CreateJobObjectW(std::ptr::null(), std::ptr::null());
+            if handle.is_null() {
+                return None;
+            }
+            let mut info: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = std::mem::zeroed();
+            info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+            let ok = SetInformationJobObject(
+                handle,
+                JobObjectExtendedLimitInformation,
+                std::ptr::from_ref(&info).cast(),
+                std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
+            );
+            (ok != 0).then_some(Job(handle))
+        }
+    });
+    if let Some(Job(handle)) = job {
+        // SAFETY: both handles are valid for the duration of the call.
+        unsafe {
+            AssignProcessToJobObject(*handle, child.as_raw_handle() as HANDLE);
+        }
+    }
+}
+
+#[cfg(not(windows))]
+pub(crate) fn kill_with_parent(_child: &Child) {}
+
 pub struct LlamaServer {
     child: Child,
     base_url: String,
@@ -159,6 +206,7 @@ impl LlamaServer {
             cmd.creation_flags(CREATE_NO_WINDOW);
         }
         let mut child = cmd.spawn()?;
+        kill_with_parent(&child);
 
         // Keep the last stderr lines for error messages; the pipe must be drained or the server blocks.
         let stderr_tail = Arc::new(Mutex::new(VecDeque::with_capacity(STDERR_TAIL_LINES)));
@@ -429,5 +477,49 @@ mod tests {
         let started = Instant::now();
         assert!(matches!(LlamaServer::start(&cfg), Err(LlmError::Exited(_))));
         assert!(started.elapsed() < Duration::from_secs(10));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn child_processes_die_with_their_parent() {
+        // Final review C2: a closed, crashed or killed PLA must not leave llama-server behind
+        if std::env::var_os("PLA_JOB_PARENT").is_some() {
+            let child = Command::new("ping")
+                .args(["-n", "60", "127.0.0.1"])
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()
+                .unwrap();
+            kill_with_parent(&child);
+            println!("CHILD_PID={}", child.id());
+            std::process::exit(0); // leaves without dropping or killing the child
+        }
+        // Read the pid line and wait for the parent to exit; do not wait for the pipe to close, because a
+        // child that inherited it would keep it open (that is exactly what this test must not depend on).
+        let mut parent = Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", "llm::tests::child_processes_die_with_their_parent", "--nocapture", "--test-threads=1"])
+            .env("PLA_JOB_PARENT", "1")
+            .stdout(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let mut reader = BufReader::new(parent.stdout.take().unwrap());
+        let mut pid = None;
+        let mut line = String::new();
+        while pid.is_none() && reader.read_line(&mut line).unwrap() > 0 {
+            pid = line.split("CHILD_PID=").nth(1).and_then(|s| s.trim().parse::<u32>().ok());
+            line.clear();
+        }
+        let pid = pid.expect("parent printed the child pid");
+        parent.wait().unwrap();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            let list = Command::new("tasklist").args(["/FI", &format!("PID eq {pid}"), "/NH"]).output().unwrap();
+            if !String::from_utf8_lossy(&list.stdout).contains(&pid.to_string()) {
+                break;
+            }
+            assert!(Instant::now() < deadline, "child {pid} outlived its parent");
+            std::thread::sleep(Duration::from_millis(200));
+        }
     }
 }

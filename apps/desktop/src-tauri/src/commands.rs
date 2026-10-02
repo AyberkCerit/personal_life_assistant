@@ -1,7 +1,6 @@
 //! Tauri commands: thin wrappers; all rules live in pla-core and the worker.
 
 use std::path::{Path, PathBuf};
-use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -15,18 +14,13 @@ use serde::Serialize;
 use tauri::{AppHandle, Emitter, State};
 
 use crate::watcher::{watch, SelfWrites, WatchHandle};
-use crate::worker::{Command, Worker};
+use crate::worker::{Command, Worker, WorkerHandle};
 
+/// One open vault. Dropping it stops the watcher first, then the worker (which ends the model).
 pub struct Session {
     pub vault: Vault,
-    pub worker: Sender<Command>,
     pub _watch: Option<WatchHandle>,
-}
-
-impl Drop for Session {
-    fn drop(&mut self) {
-        let _ = self.worker.send(Command::Shutdown);
-    }
+    pub worker: WorkerHandle,
 }
 
 #[derive(Default)]
@@ -49,6 +43,7 @@ pub struct StartupInfo {
 pub enum SaveResult {
     Saved { hash: String },
     Conflict { current_hash: String },
+    Missing,
 }
 
 fn app_root() -> Result<PathBuf, String> {
@@ -76,9 +71,9 @@ fn start_session(app: &AppHandle, root: &Path, settings: &AppSettings, own: Arc<
             let _ = handle.emit("worker-status", status);
         }),
     );
-    let (tx, _join) = worker.spawn();
-    let watch_handle = watch(vault.clone(), own, tx.clone(), app.clone()).ok(); // no watcher → manual refresh still works
-    Ok(Session { vault, worker: tx, _watch: watch_handle })
+    let handle = worker.spawn();
+    let watch_handle = watch(vault.clone(), own, handle.sender(), app.clone()).ok();
+    Ok(Session { vault, _watch: watch_handle, worker: handle })
 }
 
 fn with_vault<T>(state: &State<AppState>, f: impl FnOnce(&Vault) -> Result<T, FileError>) -> Result<T, String> {
@@ -102,6 +97,10 @@ pub fn startup(app: AppHandle, state: State<AppState>) -> Result<StartupInfo, St
         theme: theme.to_owned(),
         error: None,
     };
+    if let Some(running) = state.session.lock().expect("session lock").as_ref() {
+        info.vault_path = Some(running.vault.root.to_string_lossy().into_owned());
+        return Ok(info);
+    }
     if let Some(path) = loaded.settings.vault_path.clone() {
         match start_session(&app, &path, &loaded.settings, Arc::clone(&state.self_writes)) {
             Ok(session) => {
@@ -118,12 +117,29 @@ pub fn startup(app: AppHandle, state: State<AppState>) -> Result<StartupInfo, St
 pub fn open_vault(app: AppHandle, state: State<AppState>, path: String) -> Result<String, String> {
     let root = app_root()?;
     let mut settings = load_settings(&root).map_err(|e| e.to_string())?.settings;
+    // Stop the previous vault before opening the next, outside the lock: one writer per pla.db.
+    let previous = state.session.lock().expect("session lock").take();
+    if let Some(old) = previous {
+        if same_folder(&old.vault.root, Path::new(&path)) {
+            let opened = old.vault.root.to_string_lossy().into_owned();
+            *state.session.lock().expect("session lock") = Some(old);
+            return Ok(opened);
+        }
+        drop(old);
+    }
     let session = start_session(&app, Path::new(&path), &settings, Arc::clone(&state.self_writes))?;
     let opened = session.vault.root.to_string_lossy().into_owned();
     settings.vault_path = Some(session.vault.root.clone());
     save_settings(&root, &settings).map_err(|e| e.to_string())?;
     *state.session.lock().expect("session lock") = Some(session); // drops (and stops) the previous one
     Ok(opened)
+}
+
+fn same_folder(a: &Path, b: &Path) -> bool {
+    match (std::fs::canonicalize(a), std::fs::canonicalize(b)) {
+        (Ok(a), Ok(b)) => a == b,
+        _ => false,
+    }
 }
 
 #[tauri::command]
@@ -145,18 +161,29 @@ pub fn save_note(state: State<AppState>, path: String, text: String, expected_ha
             Ok(SaveResult::Saved { hash })
         }
         Err(FileError::Conflict { current_hash }) => Ok(SaveResult::Conflict { current_hash }),
+        Err(FileError::Missing) => Ok(SaveResult::Missing),
         Err(e) => Err(e),
     })
 }
 
 #[tauri::command]
 pub fn save_copy(state: State<AppState>, path: String, text: String) -> Result<String, String> {
-    with_vault(&state, |v| files::save_copy(v, &path, &text))
+    let own = Arc::clone(&state.self_writes);
+    with_vault(&state, |v| {
+        let copy = files::save_copy(v, &path, &text)?;
+        own.record_text(&copy, &text);
+        Ok(copy)
+    })
 }
 
 #[tauri::command]
 pub fn create_note(state: State<AppState>, folder: String, title: String) -> Result<String, String> {
-    with_vault(&state, |v| files::create_note(v, &folder, &title))
+    let own = Arc::clone(&state.self_writes);
+    with_vault(&state, |v| {
+        let rel = files::create_note(v, &folder, &title)?;
+        own.record_text(&rel, "");
+        Ok(rel)
+    })
 }
 
 #[tauri::command]
@@ -164,5 +191,6 @@ pub fn queue_note(state: State<AppState>, path: String) -> Result<(), String> {
     let guard = state.session.lock().expect("session lock");
     let session = guard.as_ref().ok_or("No vault is open.")?;
     files::resolve(&session.vault, &path).map_err(|e| e.to_string())?;
-    session.worker.send(Command::Enqueue(path)).map_err(|e| e.to_string())
+    session.worker.send(Command::Enqueue(path));
+    Ok(())
 }

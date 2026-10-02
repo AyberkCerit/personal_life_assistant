@@ -4,7 +4,7 @@ import { mockBackend } from "./mock";
 
 export interface TreeEntry { path: string; name: string; is_dir: boolean; depth: number }
 export interface NoteFile { text: string; hash: string; read_only: boolean }
-export type SaveResult = { kind: "saved"; hash: string } | { kind: "conflict"; current_hash: string };
+export type SaveResult = { kind: "saved"; hash: string } | { kind: "conflict"; current_hash: string } | { kind: "missing" };
 export interface StartupInfo {
   vault_path: string | null;
   first_run: boolean;
@@ -43,4 +43,6 @@ export const api = {
   queueNote: (path: string) => call<void>("queue_note", { path }),
   onStatus: (cb: (s: WorkerStatus) => void) => on<WorkerStatus>("worker-status", cb),
   onTreeChanged: (cb: () => void) => on<unknown>("tree-changed", () => cb()),
+  /** A note changed outside PLA (Obsidian, OneDrive…). */
+  onNoteChanged: (cb: (path: string) => void) => on<string>("note-changed", cb),
 };
