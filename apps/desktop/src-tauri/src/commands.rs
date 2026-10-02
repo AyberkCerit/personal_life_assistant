@@ -10,6 +10,14 @@ use pla_core::llm::{ModelHost, ServerConfig};
 use pla_core::pipeline::Extractor;
 use pla_core::settings::{load_settings, save_settings, AppSettings, Theme};
 use pla_core::vault::{default_app_root, open_vault as open_vault_dir, resolve_data_dir, Vault};
+use chrono::Local;
+use pla_core::db::connect;
+use pla_core::pipeline::items::{reject_item, ItemRef};
+use pla_core::pipeline::write_tx;
+use pla_core::tasks::{self, ReviewView, TaskInput, TaskList, TaskView};
+use rusqlite::Connection;
+
+use crate::worker::{AddedItem, WorkerStatus};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, State};
 
@@ -19,6 +27,8 @@ use crate::worker::{Command, Worker, WorkerHandle};
 /// One open vault. Dropping it stops the watcher first, then the worker (which ends the model).
 pub struct Session {
     pub vault: Vault,
+    pub db: Mutex<Connection>,
+    pub status: Arc<Mutex<WorkerStatus>>,
     pub _watch: Option<WatchHandle>,
     pub worker: WorkerHandle,
 }
@@ -30,12 +40,23 @@ pub struct AppState {
 }
 
 #[derive(Serialize)]
+pub struct VaultInfo {
+    path: String,
+    inbox: String,
+}
+
+fn vault_info_of(vault: &Vault) -> VaultInfo {
+    VaultInfo { path: vault.root.to_string_lossy().into_owned(), inbox: vault.config.folders.inbox.clone() }
+}
+
+#[derive(Serialize)]
 pub struct StartupInfo {
     vault_path: Option<String>,
     first_run: bool,
     settings_recovered: bool,
     theme: String,
     error: Option<String>,
+    inbox: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -62,18 +83,25 @@ fn start_session(app: &AppHandle, root: &Path, settings: &AppSettings, own: Arc<
     let mut vault = open_vault_dir(root).map_err(|e| e.to_string())?;
     let dir = resolve_data_dir(&app_root()?, &mut vault).map_err(|e| e.to_string())?;
     let dbs = open_databases(&dir).map_err(|e| e.to_string())?;
-    let handle = app.clone();
+    let ui_db = connect(&dir.join("pla.db")).map_err(|e| e.to_string())?;
+    let status = Arc::new(Mutex::new(WorkerStatus { queued: 0, model: crate::worker::ModelState::Off, busy: false, last_error: None, added: 0 }));
+    let (status_app, status_copy) = (app.clone(), Arc::clone(&status));
+    let added_app = app.clone();
     let worker = Worker::new(
         vault.clone(),
         dbs.pla,
         extractor(settings),
-        Box::new(move |status| {
-            let _ = handle.emit("worker-status", status);
+        Box::new(move |s| {
+            *status_copy.lock().expect("status lock") = s.clone();
+            let _ = status_app.emit("worker-status", s);
         }),
-    );
+    )
+    .with_added_listener(Box::new(move |items: &[AddedItem]| {
+        let _ = added_app.emit("items-added", items);
+    }));
     let handle = worker.spawn();
     let watch_handle = watch(vault.clone(), own, handle.sender(), app.clone()).ok();
-    Ok(Session { vault, _watch: watch_handle, worker: handle })
+    Ok(Session { vault, db: Mutex::new(ui_db), status, _watch: watch_handle, worker: handle })
 }
 
 fn with_vault<T>(state: &State<AppState>, f: impl FnOnce(&Vault) -> Result<T, FileError>) -> Result<T, String> {
@@ -96,15 +124,18 @@ pub fn startup(app: AppHandle, state: State<AppState>) -> Result<StartupInfo, St
         settings_recovered: loaded.recovered_from_broken,
         theme: theme.to_owned(),
         error: None,
+        inbox: None,
     };
     if let Some(running) = state.session.lock().expect("session lock").as_ref() {
         info.vault_path = Some(running.vault.root.to_string_lossy().into_owned());
+        info.inbox = Some(running.vault.config.folders.inbox.clone());
         return Ok(info);
     }
     if let Some(path) = loaded.settings.vault_path.clone() {
         match start_session(&app, &path, &loaded.settings, Arc::clone(&state.self_writes)) {
             Ok(session) => {
                 info.vault_path = Some(session.vault.root.to_string_lossy().into_owned());
+                info.inbox = Some(session.vault.config.folders.inbox.clone());
                 *state.session.lock().expect("session lock") = Some(session);
             }
             Err(e) => info.error = Some(format!("{}: {e}", path.display())),
@@ -114,21 +145,21 @@ pub fn startup(app: AppHandle, state: State<AppState>) -> Result<StartupInfo, St
 }
 
 #[tauri::command]
-pub fn open_vault(app: AppHandle, state: State<AppState>, path: String) -> Result<String, String> {
+pub fn open_vault(app: AppHandle, state: State<AppState>, path: String) -> Result<VaultInfo, String> {
     let root = app_root()?;
     let mut settings = load_settings(&root).map_err(|e| e.to_string())?.settings;
     // Stop the previous vault before opening the next, outside the lock: one writer per pla.db.
     let previous = state.session.lock().expect("session lock").take();
     if let Some(old) = previous {
         if same_folder(&old.vault.root, Path::new(&path)) {
-            let opened = old.vault.root.to_string_lossy().into_owned();
+            let opened = vault_info_of(&old.vault);
             *state.session.lock().expect("session lock") = Some(old);
             return Ok(opened);
         }
         drop(old);
     }
     let session = start_session(&app, Path::new(&path), &settings, Arc::clone(&state.self_writes))?;
-    let opened = session.vault.root.to_string_lossy().into_owned();
+    let opened = vault_info_of(&session.vault);
     settings.vault_path = Some(session.vault.root.clone());
     save_settings(&root, &settings).map_err(|e| e.to_string())?;
     *state.session.lock().expect("session lock") = Some(session); // drops (and stops) the previous one
@@ -193,4 +224,91 @@ pub fn queue_note(state: State<AppState>, path: String) -> Result<(), String> {
     files::resolve(&session.vault, &path).map_err(|e| e.to_string())?;
     session.worker.send(Command::Enqueue(path));
     Ok(())
+}
+
+fn with_db<T>(state: &State<AppState>, f: impl FnOnce(&mut Connection) -> Result<T, tasks::TaskError>) -> Result<T, String> {
+    let guard = state.session.lock().expect("session lock");
+    let session = guard.as_ref().ok_or("No vault is open.")?;
+    let mut db = session.db.lock().expect("db lock");
+    f(&mut db).map_err(|e| e.to_string())
+}
+
+fn now() -> chrono::DateTime<chrono::FixedOffset> {
+    Local::now().fixed_offset()
+}
+
+#[tauri::command]
+pub fn vault_info(state: State<AppState>) -> Result<VaultInfo, String> {
+    let guard = state.session.lock().expect("session lock");
+    guard.as_ref().map(|s| vault_info_of(&s.vault)).ok_or_else(|| "No vault is open.".to_owned())
+}
+
+#[tauri::command]
+pub fn worker_status(state: State<AppState>) -> Result<WorkerStatus, String> {
+    let guard = state.session.lock().expect("session lock");
+    let session = guard.as_ref().ok_or("No vault is open.")?;
+    let status = session.status.lock().expect("status lock").clone();
+    Ok(status)
+}
+
+#[tauri::command]
+pub fn list_tasks(state: State<AppState>, list: TaskList) -> Result<Vec<TaskView>, String> {
+    with_db(&state, |db| tasks::list_tasks(db, list, Local::now().date_naive()))
+}
+
+#[tauri::command]
+pub fn add_task(state: State<AppState>, input: TaskInput) -> Result<String, String> {
+    with_db(&state, |db| tasks::add_task(db, &input, now()))
+}
+
+#[tauri::command]
+pub fn edit_task(state: State<AppState>, id: String, input: TaskInput) -> Result<(), String> {
+    with_db(&state, |db| tasks::edit_task(db, &id, &input, now()))
+}
+
+#[tauri::command]
+pub fn set_task_done(state: State<AppState>, id: String, done: bool) -> Result<(), String> {
+    with_db(&state, |db| tasks::set_done(db, &id, done, now()))
+}
+
+#[tauri::command]
+pub fn delete_task(state: State<AppState>, id: String) -> Result<(), String> {
+    with_db(&state, |db| {
+        let tx = write_tx(db)?;
+        tasks::delete_task(&tx, &id, now())?;
+        tx.commit()?;
+        Ok(())
+    })
+}
+
+/// Undo of an automatic addition (FR-EXT-015): removed and remembered as rejected (FR-EXT-018).
+#[tauri::command]
+pub fn undo_item(state: State<AppState>, kind: String, id: String) -> Result<(), String> {
+    with_db(&state, |db| {
+        let item = if kind == "metric" { ItemRef::Metric(id.clone()) } else { ItemRef::Task(id.clone()) };
+        let tx = write_tx(db)?;
+        reject_item(&tx, &item, now())?;
+        tx.commit()?;
+        Ok(())
+    })
+}
+
+#[tauri::command]
+pub fn list_review(state: State<AppState>) -> Result<Vec<ReviewView>, String> {
+    with_db(&state, |db| tasks::list_review(db))
+}
+
+#[tauri::command]
+pub fn accept_review(state: State<AppState>, id: String, input: TaskInput) -> Result<String, String> {
+    with_db(&state, |db| {
+        let tx = write_tx(db)?;
+        let task_id = tasks::accept_review(&tx, &id, &input, now())?;
+        tx.commit()?;
+        Ok(task_id)
+    })
+}
+
+#[tauri::command]
+pub fn reject_review(state: State<AppState>, id: String) -> Result<(), String> {
+    with_db(&state, |db| tasks::reject_review(db, &id))
 }

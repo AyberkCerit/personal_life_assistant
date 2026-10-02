@@ -17,6 +17,17 @@ pub fn run() {
             commands::save_copy,
             commands::create_note,
             commands::queue_note,
+            commands::vault_info,
+            commands::worker_status,
+            commands::list_tasks,
+            commands::add_task,
+            commands::edit_task,
+            commands::set_task_done,
+            commands::delete_task,
+            commands::undo_item,
+            commands::list_review,
+            commands::accept_review,
+            commands::reject_review,
         ])
         .build(tauri::generate_context!())
         .expect("error while building PLA");

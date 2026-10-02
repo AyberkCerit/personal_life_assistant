@@ -12,6 +12,7 @@ use std::time::{Duration, Instant};
 use chrono::{DateTime, FixedOffset, Local};
 use chrono::NaiveDate;
 use pla_core::llm::LlmError;
+use pla_core::pipeline::items::ItemRef;
 use pla_core::pipeline::{enqueue, enqueue_all, process_queue, queued_notes, Extractor, Outcome, PipelineSettings};
 use pla_core::vault::Vault;
 use rusqlite::Connection;
@@ -98,6 +99,15 @@ pub struct WorkerStatus {
     pub added: usize,
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct AddedItem {
+    pub kind: String,
+    pub id: String,
+    pub title: String,
+}
+
+type AddedListener = Box<dyn Fn(&[AddedItem]) + Send>;
+
 type Notify = Box<dyn Fn(&WorkerStatus) + Send>;
 type Clock = Box<dyn Fn() -> DateTime<FixedOffset> + Send>;
 
@@ -111,6 +121,7 @@ pub struct Worker {
     later: HashMap<String, Instant>,
     status: WorkerStatus,
     cancel: Arc<AtomicBool>,
+    on_added: Option<AddedListener>,
 }
 
 impl Worker {
@@ -125,8 +136,14 @@ impl Worker {
             external_delay: EXTERNAL_DELAY,
             later: HashMap::new(),
             cancel: Arc::new(AtomicBool::new(false)),
+            on_added: None,
             status: WorkerStatus { queued: 0, model, busy: false, last_error: None, added: 0 },
         }
+    }
+
+    pub fn with_added_listener(mut self, listener: AddedListener) -> Self {
+        self.on_added = Some(listener);
+        self
     }
 
     pub fn with_external_delay(mut self, delay: Duration) -> Self {
@@ -219,6 +236,17 @@ impl Worker {
                 Ok(report) => {
                     self.status.added += report.outcomes.iter().filter(|(_, o)| matches!(o, Outcome::Added(_))).count();
                     self.status.last_error = report.model_error;
+                    let added: Vec<AddedItem> = report
+                        .outcomes
+                        .iter()
+                        .filter_map(|(_, o)| match o {
+                            Outcome::Added(item) => describe(&self.conn, item),
+                            _ => None,
+                        })
+                        .collect();
+                    if let (Some(listener), false) = (&self.on_added, added.is_empty()) {
+                        listener(&added);
+                    }
                 }
                 Err(e) => self.status.last_error = Some(e.to_string()),
             }
@@ -240,6 +268,15 @@ impl Worker {
     fn publish(&self) {
         (self.notify)(&self.status);
     }
+}
+
+fn describe(conn: &Connection, item: &ItemRef) -> Option<AddedItem> {
+    let (kind, id, sql) = match item {
+        ItemRef::Task(id) => ("task", id, "SELECT title FROM task WHERE task_id = ?1"),
+        ItemRef::Metric(id) => ("metric", id, "SELECT type FROM metric_record WHERE metric_id = ?1"),
+    };
+    let title: String = conn.query_row(sql, [id], |r| r.get(0)).ok()?;
+    Some(AddedItem { kind: kind.to_owned(), id: id.clone(), title })
 }
 
 #[cfg(test)]
@@ -375,5 +412,25 @@ mod tests {
             .query_row("SELECT COUNT(*) FROM extraction_queue", [], |r| r.get(0))
             .unwrap();
         assert_eq!(queued, 1, "the unfinished note waits for the next start");
+    }
+    #[test]
+    fn reports_what_it_added_with_titles() {
+        // FR-EXT-015: the UI shows each automatic addition with an Undo action
+        let tmp = tempfile::tempdir().unwrap();
+        let vault = open_vault(tmp.path()).unwrap();
+        std::fs::write(vault.root.join("notes/plan.md"), "Yarın dişçi.").unwrap();
+        let conn = open_databases(&tmp.path().join(".data")).unwrap().pla;
+        let added = Arc::new(Mutex::new(Vec::<AddedItem>::new()));
+        let sink = Arc::clone(&added);
+        let statuses = Arc::new(Mutex::new(Vec::new()));
+        let status_sink = Arc::clone(&statuses);
+        let handle = Worker::new(vault, conn, Some(Box::new(Fixed(TASK))), Box::new(move |s| status_sink.lock().unwrap().push(s.clone())))
+            .with_added_listener(Box::new(move |items| sink.lock().unwrap().extend_from_slice(items)))
+            .spawn();
+        wait_for(&statuses, |s| !s.busy && s.added == 1);
+        let got = added.lock().unwrap().clone();
+        assert_eq!(got.len(), 1);
+        assert_eq!((got[0].kind.as_str(), got[0].title.as_str()), ("task", "Dişçi"));
+        handle.shutdown();
     }
 }
