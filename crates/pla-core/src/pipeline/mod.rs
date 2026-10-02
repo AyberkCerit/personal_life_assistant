@@ -87,6 +87,13 @@ pub fn queued_notes(conn: &Connection) -> rusqlite::Result<Vec<String>> {
         .collect()
 }
 
+/// A write transaction that takes the write lock at once. With two connections (worker and task
+/// panel) a deferred transaction that reads and then writes can fail immediately with
+/// SQLITE_BUSY_SNAPSHOT; an immediate one waits for `busy_timeout` instead.
+pub fn write_tx(conn: &mut Connection) -> rusqlite::Result<rusqlite::Transaction<'_>> {
+    conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+}
+
 /// Processes queued notes in one model session (FR-EXT-008). Only changed blocks reach the model.
 pub fn process_queue(
     vault: &Vault,
@@ -114,7 +121,7 @@ pub fn process_queue(
                 Ok(text) if !is_generated(&text) => Some(text),
                 Ok(_) => None,
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                    let tx = conn.transaction()?;
+                    let tx = write_tx(conn)?;
                     blocks::mark_note_missing(&tx, &note, now)?;
                     tx.commit()?;
                     None
@@ -132,7 +139,7 @@ pub fn process_queue(
         };
 
         if let Some(text) = text {
-            let tx = conn.transaction()?;
+            let tx = write_tx(conn)?;
             let synced = blocks::sync_note_blocks(
                 &tx,
                 &note,
@@ -166,7 +173,7 @@ pub fn process_queue(
                         }
                     }
                 };
-                let tx = conn.transaction()?;
+                let tx = write_tx(conn)?;
                 let outcomes = match answer {
                     Err(problem) => vec![items::record_block_problem(&tx, &block.block_id, &problem, now)?],
                     Ok(answer) => match parse_extraction(&answer) {
@@ -547,5 +554,18 @@ mod tests {
         assert_eq!(x.calls.len(), 1, "unchanged text is not sent again");
         let note: String = conn.query_row("SELECT note_path FROM block", [], |r| r.get(0)).unwrap();
         assert_eq!(note, "notes/yeni ad.md");
+    }
+    #[test]
+    fn write_transactions_take_the_lock_up_front() {
+        // Review Focus 5: with the panel's connection, a read-then-write transaction must not fail
+        let tmp = tempfile::tempdir().unwrap();
+        let data = tmp.path().join(".data");
+        let mut conn = open_databases(&data).unwrap().pla;
+        let other = Connection::open(data.join("pla.db")).unwrap();
+        other.busy_timeout(std::time::Duration::ZERO).unwrap();
+        let tx = write_tx(&mut conn).unwrap();
+        assert!(other.execute_batch("BEGIN IMMEDIATE; COMMIT;").is_err(), "the write lock is held");
+        drop(tx);
+        other.execute_batch("BEGIN IMMEDIATE; COMMIT;").unwrap();
     }
 }

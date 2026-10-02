@@ -12,6 +12,9 @@ use crate::vault::Vault;
 const FORBIDDEN: [char; 11] = ['[', ']', '#', '^', '|', '\\', '/', ':', '*', '"', '?'];
 const FORBIDDEN_EXTRA: [char; 2] = ['<', '>'];
 
+/// Name part of the copy PLA writes when the user keeps their text after a conflict.
+pub const CONFLICT_SUFFIX: &str = " (çakışma)";
+
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct NoteFile {
     pub text: String,
@@ -39,6 +42,8 @@ pub enum FileError {
     Conflict { current_hash: String },
     #[error("the note was moved or deleted outside PLA")]
     Missing,
+    #[error("a note with this name already exists: {0}")]
+    Exists(String),
     #[error(transparent)]
     Io(#[from] std::io::Error),
 }
@@ -48,7 +53,9 @@ pub enum FileError {
 pub fn resolve(vault: &Vault, rel: &str) -> Result<PathBuf, FileError> {
     let path = Path::new(rel);
     let ok = !rel.is_empty()
-        && path.components().all(|c| matches!(c, Component::Normal(p) if !p.to_string_lossy().starts_with('.')));
+        && path.components().all(|c| {
+            matches!(c, Component::Normal(p) if { let p = p.to_string_lossy(); !p.starts_with('.') && !p.contains(':') })
+        });
     if !ok {
         return Err(FileError::BadPath(rel.to_owned()));
     }
@@ -66,7 +73,11 @@ pub fn read_note(vault: &Vault, rel: &str) -> Result<NoteFile, FileError> {
 
 pub fn save_note(vault: &Vault, rel: &str, text: &str, expected_hash: Option<&str>) -> Result<String, FileError> {
     let path = resolve(vault, rel)?;
+    if !Path::new(rel).extension().is_some_and(|e| e.eq_ignore_ascii_case("md")) {
+        return Err(FileError::BadPath(rel.to_owned()));
+    }
     match std::fs::read(&path) {
+        Ok(_) if expected_hash.is_none() => return Err(FileError::Exists(rel.to_owned())),
         Ok(current) => {
             if std::str::from_utf8(&current).is_err() {
                 return Err(FileError::ReadOnly(rel.to_owned()));
@@ -105,7 +116,7 @@ pub fn save_copy(vault: &Vault, rel: &str, text: &str) -> Result<String, FileErr
     let path = Path::new(rel);
     let folder = path.parent().map(|p| p.to_string_lossy().replace('\\', "/")).unwrap_or_default();
     let stem = path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
-    let copy = unique_rel(vault, &folder, &format!("{stem} (çakışma)"))?;
+    let copy = unique_rel(vault, &folder, &format!("{stem}{CONFLICT_SUFFIX}"))?;
     save_note(vault, &copy, text, None)?;
     Ok(copy)
 }
@@ -239,5 +250,15 @@ mod tests {
         std::fs::remove_file(v.root.join(&rel)).unwrap();
         assert!(matches!(save_note(&v, &rel, "benim", Some(&h)), Err(FileError::Missing)));
         assert!(!v.root.join(&rel).exists());
+    }
+    #[test]
+    fn saves_are_limited_to_new_or_known_markdown_notes() {
+        // F4a review M1
+        let (_t, v) = vault();
+        let rel = create_note(&v, "inbox", "Var").unwrap();
+        assert!(matches!(save_note(&v, &rel, "x", None), Err(FileError::Exists(_))));
+        assert!(matches!(save_note(&v, "notes/betik.ps1", "x", None), Err(FileError::BadPath(_))));
+        assert!(matches!(save_note(&v, "notes/a:gizli.md", "x", None), Err(FileError::BadPath(_))));
+        assert!(matches!(resolve(&v, "notes/a.md:akış"), Err(FileError::BadPath(_))));
     }
 }

@@ -24,6 +24,7 @@ pub enum Outcome {
     Rejected { signature: String },
     SkippedPast,
     Review { review_id: String, reason: String },
+    AlreadyReviewed,
 }
 
 struct Existing {
@@ -60,10 +61,15 @@ fn normalize(s: &str) -> String {
     s.split_whitespace().collect::<Vec<_>>().join(" ").to_lowercase()
 }
 
+/// Signature of a task or reminder with this title (the same as `item_signature` gives).
+pub fn action_signature(title: &str) -> String {
+    format!("action:{}", normalize(title))
+}
+
 /// "The same item" within a block (SRS C.1): type plus normalized title, metric kind, or workout exercise.
 pub fn item_signature(item: &ValidItem) -> String {
     match item {
-        ValidItem::Action { title, .. } => format!("action:{}", normalize(title)),
+        ValidItem::Action { title, .. } => action_signature(title),
         ValidItem::Metric { kind: MetricKind::Workout, exercise, .. } => {
             format!("metric:workout:{}", normalize(exercise.as_deref().unwrap_or_default()))
         }
@@ -230,15 +236,17 @@ fn review(conn: &Connection, block_id: &str, raw: &RawItem, reason: &str, now: &
 }
 
 fn insert_review(conn: &Connection, block_id: &str, payload: &str, reason: &str, now: &str) -> rusqlite::Result<Outcome> {
-    let existing: Option<String> = conn
+    // Accepted or dismissed items stay decided (decision 3); an open identical one is reused.
+    let existing: Option<(String, bool)> = conn
         .query_row(
-            "SELECT review_id FROM review_item WHERE block_id = ?1 AND payload_json = ?2 AND resolved = 0",
+            "SELECT review_id, resolved FROM review_item WHERE block_id = ?1 AND payload_json = ?2 ORDER BY resolved LIMIT 1",
             [block_id, payload],
-            |r| r.get(0),
+            |r| Ok((r.get(0)?, r.get(1)?)),
         )
         .optional()?;
     let review_id = match existing {
-        Some(id) => id,
+        Some((_, true)) => return Ok(Outcome::AlreadyReviewed),
+        Some((id, false)) => id,
         None => {
             let id = new_id();
             conn.execute(
@@ -599,5 +607,21 @@ mod tests {
         let a = ValidItem::Action { reminder: false, title: "  Dişçi   Randevusu ".into(), date: None, time: None };
         let b = ValidItem::Action { reminder: true, title: "dişçi randevusu".into(), date: None, time: None };
         assert_eq!(item_signature(&a), item_signature(&b));
+    }
+    #[test]
+    fn a_resolved_review_item_does_not_come_back() {
+        // Review Focus 3
+        let (_t, conn) = setup();
+        let bad = r#"{"type":"metric","metric":{"kind":"sleep","value":30,"unit":"h"}}"#;
+        apply(&conn, bad);
+        conn.execute("UPDATE review_item SET resolved = 1", []).unwrap();
+        assert_eq!(apply(&conn, bad), vec![Outcome::AlreadyReviewed]);
+        assert_eq!(count(&conn, "review_item"), 1);
+    }
+
+    #[test]
+    fn action_signature_matches_item_signature() {
+        let item = ValidItem::Action { reminder: false, title: " Dişçi  Randevusu".into(), date: None, time: None };
+        assert_eq!(action_signature(" Dişçi  Randevusu"), item_signature(&item));
     }
 }

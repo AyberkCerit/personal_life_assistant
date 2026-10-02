@@ -28,14 +28,15 @@ pub enum DbError {
 /// Opens (creating if needed) `dir/pla.db` and `dir/cache.db` and brings both to the current schema.
 pub fn open_databases(dir: &Path) -> Result<Databases, DbError> {
     std::fs::create_dir_all(dir)?;
-    let mut pla = open(&dir.join("pla.db"))?;
+    let mut pla = connect(&dir.join("pla.db"))?;
     migrate(&mut pla, PLA_MIGRATIONS, Some(&dir.join("pla.before-upgrade.db")))?;
-    let mut cache = open(&dir.join("cache.db"))?;
+    let mut cache = connect(&dir.join("cache.db"))?;
     migrate(&mut cache, CACHE_MIGRATIONS, None)?;
     Ok(Databases { pla, cache })
 }
 
-fn open(path: &Path) -> Result<Connection, DbError> {
+/// A connection with PLA's pragmas (busy timeout, WAL, foreign keys); no migration.
+pub fn connect(path: &Path) -> Result<Connection, DbError> {
     let conn = Connection::open(path)?;
     // A second writer (another window, a restarting worker) waits instead of failing.
     conn.busy_timeout(std::time::Duration::from_secs(5))?;

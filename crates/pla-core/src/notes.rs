@@ -113,6 +113,7 @@ pub fn is_excluded(rel: &str, folders: &Folders) -> bool {
     path.components().any(|c| c.as_os_str().to_string_lossy().starts_with('.'))
         || path.starts_with(&folders.reports)
         || path.starts_with(&folders.templates)
+        || path.file_stem().is_some_and(|s| s.to_string_lossy().contains(crate::files::CONFLICT_SUFFIX))
 }
 
 /// `<daily>/…/YYYY-MM-DD.md` → that date (the reference date of a daily note, FR-EXT-009).
@@ -251,5 +252,13 @@ mod tests {
             std::fs::write(p, body).unwrap();
         }
         assert_eq!(list_user_notes(&v).unwrap(), vec!["daily/2026/2026-10-06.md", "notes/Fikir ğüş.MD"]);
+    }
+    #[test]
+    fn conflict_copies_are_not_extracted() {
+        // F4a review M5
+        let f = Folders::default();
+        assert!(is_excluded("inbox/Plan (çakışma).md", &f));
+        assert!(is_excluded("inbox/Plan (çakışma) 2.md", &f));
+        assert!(!is_excluded("inbox/Plan.md", &f));
     }
 }
