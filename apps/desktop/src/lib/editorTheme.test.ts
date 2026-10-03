@@ -24,6 +24,12 @@ describe("editor theme", () => {
     expect(EDITOR_THEME[".cm-content"]).toMatchObject({ width: "100%", maxWidth: "72ch", boxSizing: "border-box" });
   });
 
+  it("draws the active line and the selection from their own tokens (final review C1)", () => {
+    expect(EDITOR_THEME[".cm-activeLine"]).toEqual({ backgroundColor: "var(--color-active-line)" });
+    const sel = Object.entries(EDITOR_THEME).find(([k]) => k.includes(".cm-selectionBackground"));
+    expect(sel?.[1]).toEqual({ backgroundColor: "var(--color-selection)" });
+  });
+
   it("finds wikilinks, also with aliases and Turkish letters", () => {
     const text = "Bkz. [[Sağlık]] ve [[Projeler/PLA|PLA]], ama [tek] ve [[yarım\nsatır]] değil.";
     expect(text.match(WIKILINK)).toEqual(["[[Sağlık]]", "[[Projeler/PLA|PLA]]"]);

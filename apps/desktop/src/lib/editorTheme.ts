@@ -13,9 +13,10 @@ export const EDITOR_THEME = {
   ".cm-content": { width: "100%", maxWidth: "72ch", boxSizing: "border-box", margin: "0 auto", padding: "var(--space-6) var(--space-8)", caretColor: "var(--color-accent)" },
   ".cm-cursor, .cm-dropCursor": { borderLeftColor: "var(--color-accent)", borderLeftWidth: "2px" },
   "&.cm-focused > .cm-scroller > .cm-selectionLayer .cm-selectionBackground, .cm-selectionBackground, .cm-content ::selection": {
-    backgroundColor: "var(--color-accent-subtle)",
+    backgroundColor: "var(--color-selection)",
   },
-  ".cm-activeLine": { backgroundColor: "var(--color-surface-hover)" },
+  // See-through, so the selection layer drawn behind the text still shows on this line.
+  ".cm-activeLine": { backgroundColor: "var(--color-active-line)" },
   ".cm-selectionMatch": { backgroundColor: "var(--color-accent-subtle)" },
   ".cm-searchMatch": { backgroundColor: "var(--color-warning-subtle)", outline: "1px solid var(--color-warning)" },
   ".cm-searchMatch.cm-searchMatch-selected": { backgroundColor: "var(--color-accent-subtle)" },

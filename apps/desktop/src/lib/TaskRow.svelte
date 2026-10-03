@@ -2,7 +2,6 @@
   import { tick } from "svelte";
   import type { Task, TaskInput } from "./api";
   import Bell from "@lucide/svelte/icons/bell";
-  import Pencil from "@lucide/svelte/icons/pencil";
   import Trash2 from "@lucide/svelte/icons/trash-2";
   import { aiMark, isOverdue, isReminder } from "./tasks";
   import Badge from "./ui/Badge.svelte";
@@ -130,8 +129,6 @@
         {#if isOverdue(task, today)}<span class="overdue">{t("tasks.overdue")}</span>{/if}
         {#if mark === "ai"}
           <Badge kind="ai" label={t("tasks.aiLabel")}>{t("tasks.ai")}</Badge>
-        {:else if mark === "edited"}
-          <span class="edited"><Icon icon={Pencil} size="sm" />{t("tasks.edited")}</span>
         {/if}
         {#if task.note_path}
           <button class="link" disabled={task.source_missing} onclick={onOpenSource}>
@@ -157,13 +154,13 @@
   .title { background: none; border: 0; padding: 0; text-align: left; cursor: pointer; width: 100%; overflow-wrap: anywhere; color: var(--color-text); }
   .meta { display: flex; gap: var(--space-2); align-items: center; font-size: var(--text-sm); color: var(--color-text-muted); flex-wrap: wrap; margin-top: 0.125rem; }
   .overdue { color: var(--color-danger); font-weight: 600; }
-  .edited { display: inline-flex; gap: 0.1875rem; align-items: center; }
   .link { background: none; border: 0; padding: 0; color: var(--color-link); cursor: pointer; font-size: var(--text-sm); }
   .link:disabled { color: var(--color-text-muted); cursor: default; }
   .del { opacity: 0; transition: opacity var(--duration-fast) var(--ease-standard); }
   .task:hover .del, .task:focus-within .del { opacity: 1; }
   .edit, .confirm { display: flex; flex-direction: column; gap: var(--space-2); width: 100%; }
   .confirm { flex-direction: row; flex-wrap: wrap; align-items: center; }
+  .confirm > span { flex: 1 1 100%; min-width: 0; overflow-wrap: anywhere; } /* long unbroken titles wrap (final review I5) */
   .when, .actions { display: flex; gap: var(--space-2); }
   .when input { flex: 1; }
 </style>

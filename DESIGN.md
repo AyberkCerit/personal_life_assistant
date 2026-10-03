@@ -7,7 +7,7 @@ How PLA looks and why. Read this before drawing a new screen; the tokens live in
 
 1. **Calm workspace, one signature.** Neutral "night blue" surfaces; mint-teal is the only brand colour.
 2. **The note comes first.** The reading area is the lightest surface in the dark theme; panels sit one step darker.
-3. **AI is always marked, and only AI.** The `sparkles` icon with the `--color-ai*` colours means "the model made or asks about this". Nothing else uses it.
+3. **AI is always marked, and only AI.** The `sparkles` icon with the `--color-ai*` colours means "the model made or asks about this". Nothing else uses it. An AI-made task keeps its badge after the user ticks, snoozes or edits it (`aiMark` in `lib/tasks.ts`).
 4. **Readable, not loud.** Dark text contrast ≈ 11 : 1, never pure white on pure black; every text pair meets WCAG AA in both themes.
 5. **Quiet motion.** Short fades and slides that explain a change; none when the OS asks for reduced motion.
 
@@ -29,10 +29,14 @@ Use tokens, never raw colours (a test fails on hex, `rgb(` or `hsl(` outside `sr
 | `--color-warning(-subtle)` | paused, soft warnings |
 | `--color-danger(-subtle)` | errors, overdue, destructive actions |
 | `--color-banner(-border)` | reminder banner |
+| `--color-selection`, `--color-active-line` | editor selection / see-through tint of the cursor line (must stay translucent, or it hides the selection) |
 
 There is no separate success green: the accent means "ready / done".
 
-Contrast: add any new text-on-surface pair to `PAIRS` in `src/theme/contrast.test.ts`; the test must pass in both themes.
+Contrast (both themes, enforced by `src/theme/contrast.test.ts`):
+- text on its surfaces ≥ 4.5 : 1 — add every new text/surface pair to `PAIRS`;
+- what identifies a control (checkbox and input outlines in `--color-border-strong`, the accent focus ring) ≥ 3 : 1 — `NON_TEXT`;
+- placeholders use `--color-text-muted`.
 
 ## Type, space, shape, motion
 
@@ -45,7 +49,7 @@ Contrast: add any new text-on-surface pair to `PAIRS` in `src/theme/contrast.tes
 
 ## Icons
 
-Lucide only (`@lucide/svelte`), through `<Icon icon={…} size="sm|md|lg">` (14/16/20 px, stroke 1.75). Icon-only buttons use `<IconButton label="…">`; the label is required. No emoji as icons.
+Lucide only, imported one icon at a time (`import Bell from "@lucide/svelte/icons/bell"`; the package root pulls in ~8 000 files and stalls the tests), drawn through `<Icon icon={…} size="sm|md|lg">` (14/16/20 px, stroke 1.75). Icon-only buttons use `<IconButton label="…">`; the label is required. No emoji as icons.
 
 ## Components (`src/lib/ui/`)
 

@@ -12,9 +12,10 @@ function task(title: string, date: string | null, extra: Partial<Task> = {}): Ta
 }
 
 describe("tasks", () => {
-  it("marks AI items with a badge until the user edits them (IR-UI-007)", () => {
+  it("marks AI items with a badge wherever they are listed (IR-UI-007)", () => {
     expect(aiMark(task("a", null, { origin: "extracted" }))).toBe("ai");
-    expect(aiMark(task("b", null, { origin: "extracted", user_modified: true }))).toBe("edited");
+    // user_modified is also set by ticking off or snoozing, so it cannot mean "edited" (final review I2)
+    expect(aiMark(task("b", null, { origin: "extracted", user_modified: true, status: "done" }))).toBe("ai");
     expect(aiMark(task("c", null, { origin: "manual", user_modified: true }))).toBeNull();
   });
 

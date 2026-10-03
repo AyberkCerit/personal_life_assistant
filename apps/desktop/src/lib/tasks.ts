@@ -102,8 +102,10 @@ export function isReminder(task: Task): boolean {
   return task.notify_at !== null;
 }
 
-/** How an item's AI origin shows (IR-UI-007): a badge until the user edits it, then a quiet note. */
-export function aiMark(task: Pick<Task, "origin" | "user_modified">): "ai" | "edited" | null {
-  if (task.origin !== "extracted") return null;
-  return task.user_modified ? "edited" : "ai";
+/**
+ * AI-made items carry the AI badge wherever they are listed (IR-UI-007). `user_modified` is not
+ * used: ticking off and snoozing set it too, so it does not mean "edited" (final review I2).
+ */
+export function aiMark(task: Pick<Task, "origin">): "ai" | null {
+  return task.origin === "extracted" ? "ai" : null;
 }
