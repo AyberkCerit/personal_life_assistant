@@ -37,10 +37,11 @@ function listTasks(list: string): Task[] {
   return tasks.filter((t) => t.status === "done");
 }
 
-type MockInput = { title: string; date?: string | null; time?: string | null; details?: string | null };
+type MockInput = { title: string; date?: string | null; time?: string | null; details?: string | null; remind?: boolean | null };
 
 function addMockTask(input: MockInput, origin: Task["origin"]): Task {
   const task: Task = { ...base, task_id: `t${nextId++}`, title: input.title.trim(), date: input.date || null, time: input.time || null, details: input.details || null, origin };
+  if (input.remind && task.date) task.notify_at = `${task.date}T${task.time ?? "09:00"}`; // same rule as the Rust core
   tasks = [...tasks, task];
   return task;
 }
@@ -115,7 +116,7 @@ export async function mockBackend<T>(cmd: string, args: Record<string, unknown>)
     case "vault_info":
       return { path: vault, inbox: "inbox" } as T;
     case "worker_status":
-      return { queued: 0, model: "not_installed", busy: false, last_error: null, added: 0 } as T;
+      return { queued: 0, model: "not_installed", busy: false, last_error: null, added: 0, paused: false } as T;
     case "list_tasks":
       return listTasks(String(args.list)) as T;
     case "add_task":
@@ -142,7 +143,28 @@ export async function mockBackend<T>(cmd: string, args: Record<string, unknown>)
     case "reject_review":
       review = review.filter((r) => r.review_id !== args.id);
       return undefined as T;
+    case "reminder_done":
+      tasks = tasks.map((t) => (t.task_id === args.id ? { ...t, status: "done" } : t));
+      return undefined as T;
+    case "reminder_snooze":
+    case "hide_to_tray":
+      return undefined as T;
+    case "set_paused":
+      for (const cb of mockListeners.get("paused-changed") ?? []) cb(Boolean(args.paused));
+      return undefined as T;
     default:
       throw new Error(`mock: unknown command ${cmd}`);
   }
 }
+
+// Dev helpers for the browser check: simulate the scheduler.
+(globalThis as Record<string, unknown>).__plaMockDue = (title: string) => {
+  for (const cb of mockListeners.get("reminder-due") ?? []) cb({ task_id: "t1", title, notify_at: "2026-10-06T09:00" });
+};
+(globalThis as Record<string, unknown>).__plaMockMissed = () => {
+  for (const cb of mockListeners.get("missed-reminders") ?? [])
+    cb([
+      { task_id: "t2", title: "Fatura öde", notify_at: "2026-10-05T09:00" },
+      { task_id: "t3", title: "Kitap oku", notify_at: "2026-10-05T20:00" },
+    ]);
+};

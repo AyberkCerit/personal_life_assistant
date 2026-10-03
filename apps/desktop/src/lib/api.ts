@@ -2,7 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { mockBackend, mockListeners } from "./mock";
 
-export interface TaskInput { title: string; details?: string | null; date?: string | null; time?: string | null }
+export interface TaskInput { title: string; details?: string | null; date?: string | null; time?: string | null; remind?: boolean | null }
 export interface ReviewItem {
   review_id: string;
   reason: string;
@@ -35,7 +35,10 @@ export interface WorkerStatus {
   busy: boolean;
   last_error: string | null;
   added: number;
+  paused: boolean;
 }
+
+export interface DueReminder { task_id: string; title: string; notify_at: string }
 
 /** Inside the Tauri window; false in a plain browser (Vite dev server), where a mock backend answers. */
 export const inTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
@@ -77,4 +80,13 @@ export const api = {
   acceptReview: (id: string, input: TaskInput) => call<string>("accept_review", { id, input }),
   rejectReview: (id: string) => call<void>("reject_review", { id }),
   onItemsAdded: (cb: (items: AddedItem[]) => void) => on<AddedItem[]>("items-added", cb),
+  reminderDone: (id: string) => call<void>("reminder_done", { id }),
+  reminderSnooze: (id: string) => call<void>("reminder_snooze", { id }),
+  setPaused: (paused: boolean) => call<void>("set_paused", { paused }),
+  hideToTray: () => call<void>("hide_to_tray"),
+  onReminderDue: (cb: (r: DueReminder) => void) => on<DueReminder>("reminder-due", cb),
+  onMissedReminders: (cb: (list: DueReminder[]) => void) => on<DueReminder[]>("missed-reminders", cb),
+  onTasksChanged: (cb: () => void) => on<unknown>("tasks-changed", () => cb()),
+  onNewNote: (cb: () => void) => on<unknown>("new-note", () => cb()),
+  onPausedChanged: (cb: (paused: boolean) => void) => on<boolean>("paused-changed", cb),
 };

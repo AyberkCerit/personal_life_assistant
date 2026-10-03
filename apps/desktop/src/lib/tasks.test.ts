@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { dayLabel, filterByOrigin, groupTasks, isOverdue, msUntilNextDay, revealRange, todayIso, type Labels, type Task } from "./tasks";
+import { dayLabel, filterByOrigin, groupTasks, isOverdue, isReminder, msUntilNextDay, revealRange, todayIso, type Labels, type Task } from "./tasks";
 
 const L: Labels = { today: "Bugün", tomorrow: "Yarın", noDate: "Tarihsiz", overdue: "Gecikmiş" };
 const TODAY = "2026-10-06";
@@ -59,5 +59,9 @@ describe("tasks", () => {
     const editorText = file.replace(/\r\n/g, "\n");
     expect(editorText.slice(range.anchor, range.head)).toBe(block);
     expect(revealRange(file, "yok")).toBeNull();
+  });
+  it("knows a reminder by its notification time", () => {
+    expect(isReminder(task("a", TODAY, { notify_at: "2026-10-06T09:00" }))).toBe(true);
+    expect(isReminder(task("b", TODAY))).toBe(false);
   });
 });

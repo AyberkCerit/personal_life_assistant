@@ -97,3 +97,7 @@ export function revealRange(fileText: string, block: string): { anchor: number; 
   const at = text.indexOf(block);
   return at < 0 ? null : { anchor: at, head: at + block.length };
 }
+
+export function isReminder(task: Task): boolean {
+  return task.notify_at !== null;
+}

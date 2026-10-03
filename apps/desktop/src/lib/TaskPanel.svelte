@@ -17,6 +17,7 @@
   let newTitle = $state("");
   let newDate = $state("");
   let newTime = $state("");
+  let newRemind = $state(false);
   let reviewForms = $state<Record<string, TaskInput>>({});
   let today = $state(todayIso()); // refreshed on every load and at local midnight
   const labels = $derived({ today: t("tasks.today"), tomorrow: t("tasks.tomorrow"), noDate: t("tasks.noDate"), overdue: t("tasks.overdue") });
@@ -74,8 +75,11 @@
     e.preventDefault();
     const title = newTitle.trim();
     if (!title) return;
-    void run(() => api.addTask({ title, date: newDate || null, time: newTime || null })).then(() => {
-      if (!error) newTitle = newDate = newTime = "";
+    void run(() => api.addTask({ title, date: newDate || null, time: newTime || null, remind: newRemind })).then(() => {
+      if (!error) {
+        newTitle = newDate = newTime = "";
+        newRemind = false;
+      }
     });
   }
 </script>
@@ -109,6 +113,7 @@
           <input type="date" bind:value={newDate} aria-label={t("tasks.date")} />
           <input type="time" bind:value={newTime} aria-label={t("tasks.time")} />
         </div>
+        <label class="check"><input type="checkbox" bind:checked={newRemind} /> {t("tasks.remind")}</label>
       </form>
     {/if}
     {#each groups as group (group.key)}
@@ -175,6 +180,7 @@
   .tools select { background: var(--bg); border: 1px solid var(--border); border-radius: 6px; margin-left: 6px; }
   .add { display: flex; flex-direction: column; gap: 4px; }
   .when, .actions { display: flex; gap: 6px; }
+  .check { display: flex; gap: 6px; align-items: center; font-size: 13px; color: var(--muted); }
   input, select { background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 4px 6px; min-width: 0; }
   ul { list-style: none; margin: 0; padding: 0; }
   h3 { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 10px 0 2px; }

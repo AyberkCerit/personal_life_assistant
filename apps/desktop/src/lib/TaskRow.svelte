@@ -1,7 +1,7 @@
 <script lang="ts">
   import { tick } from "svelte";
   import type { Task, TaskInput } from "./api";
-  import { isOverdue } from "./tasks";
+  import { isOverdue, isReminder } from "./tasks";
   import { t } from "./i18n";
 
   let {
@@ -61,7 +61,7 @@
   let form = $state<TaskInput>({ title: "", date: "", time: "", details: "" });
 
   function startEdit() {
-    form = { title: task.title, date: task.date ?? "", time: task.time ?? "", details: task.details ?? "" };
+    form = { title: task.title, date: task.date ?? "", time: task.time ?? "", details: task.details ?? "", remind: isReminder(task) };
     editing = true;
   }
 
@@ -82,6 +82,7 @@
         <input type="time" bind:value={form.time} aria-label={t("tasks.time")} />
       </div>
       <textarea bind:value={form.details} aria-label={t("tasks.details")} rows="2"></textarea>
+      <label class="check"><input type="checkbox" bind:checked={form.remind} /> {t("tasks.remind")}</label>
       <div class="actions">
         <button type="submit">{t("tasks.save")}</button>
         <button type="button" onclick={cancelEdit}>{t("tasks.cancel")}</button>
@@ -104,6 +105,7 @@
       <button class="title" bind:this={titleButton} onclick={startEdit} title={t("tasks.edit")}>{task.title}</button>
       <div class="meta">
         {#if task.time}<span>{task.time}</span>{/if}
+        {#if isReminder(task)}<span title={t("tasks.reminderLabel")} aria-label={t("tasks.reminderLabel")}>🔔</span>{/if}
         {#if isOverdue(task, today)}<span class="overdue">{t("tasks.overdue")}</span>{/if}
         {#if task.origin === "extracted"}
           <span class="badge" title={t("tasks.aiLabel")} aria-label={t("tasks.aiLabel")}>{t("tasks.ai")}</span>
@@ -133,6 +135,7 @@
   .edit, .confirm { display: flex; flex-direction: column; gap: 6px; width: 100%; }
   .confirm { flex-direction: row; flex-wrap: wrap; align-items: center; }
   .when, .actions { display: flex; gap: 6px; }
+  .check { display: flex; gap: 6px; align-items: center; font-size: 13px; }
   input:not([type="checkbox"]), textarea { background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 4px 6px; min-width: 0; }
   .actions button, .confirm button { background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 2px 8px; cursor: pointer; }
   .danger { color: var(--danger); }

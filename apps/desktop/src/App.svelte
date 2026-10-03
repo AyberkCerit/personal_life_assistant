@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount, tick } from "svelte";
   import AddedToast from "./lib/AddedToast.svelte";
+  import ReminderBanner from "./lib/ReminderBanner.svelte";
   import { open } from "@tauri-apps/plugin-dialog";
   import { api, inTauri, type TreeEntry, type WorkerStatus } from "./lib/api";
   import FileTree from "./lib/FileTree.svelte";
@@ -18,7 +19,7 @@
   let reveal = $state<string | null>(null);
   let editor: ReturnType<typeof Editor> | undefined = $state();
   let error = $state<string | null>(null);
-  let status = $state<WorkerStatus>({ queued: 0, model: "off", busy: false, last_error: null, added: 0 });
+  let status = $state<WorkerStatus>({ queued: 0, model: "off", busy: false, last_error: null, added: 0, paused: false });
 
   async function refresh() {
     entries = await api.listTree();
@@ -90,15 +91,23 @@
       if (finished) tasksVersion++;
     });
     const unTree = api.onTreeChanged(() => void refresh());
+    const unTasks = api.onTasksChanged(() => tasksVersion++);
+    const unNew = api.onNewNote(() => document.querySelector<HTMLInputElement>(".tree input")?.focus());
+    const unPaused = api.onPausedChanged((p) => (status = { ...status, paused: p }));
     const unClose = inTauri
-      ? getCurrentWindow().onCloseRequested(async () => {
+      ? getCurrentWindow().onCloseRequested(async (event) => {
+          event.preventDefault();
           await editor?.close();
+          await api.hideToTray();
         })
       : Promise.resolve(() => {});
     return () => {
       void unStatus.then((f) => f());
       void unTree.then((f) => f());
       void unClose.then((f) => f());
+      void unTasks.then((f) => f());
+      void unNew.then((f) => f());
+      void unPaused.then((f) => f());
     };
   });
 </script>
@@ -116,6 +125,7 @@
       <FileTree {entries} selected={current} onOpen={openNote} onCreate={createNote} />
     </aside>
     <section class="main">
+      <ReminderBanner onChanged={() => tasksVersion++} />
       {#if error}<div class="banner danger" role="alert">{t("error.generic")}: {error}</div>{/if}
       {#if current}
         {#key current}
@@ -128,7 +138,7 @@
     <aside class="side-panel">
       <TaskPanel version={tasksVersion} onOpenSource={openSource} />
     </aside>
-    <StatusBar {status} />
+    <StatusBar {status} onResume={() => void api.setPaused(false)} />
     <AddedToast onChanged={() => tasksVersion++} />
   </div>
 {/if}
