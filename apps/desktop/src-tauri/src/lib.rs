@@ -2,6 +2,7 @@
 
 mod commands;
 mod notify;
+mod tray;
 pub mod scheduler;
 pub mod system;
 pub mod watcher;
@@ -10,6 +11,15 @@ pub mod worker;
 pub fn run() {
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_autostart::init(tauri_plugin_autostart::MacosLauncher::LaunchAgent, Some(vec!["--hidden"])))
+        .setup(|app| {
+            tray::build(app.handle())?;
+            // FR-SET-016: started by Windows sign-in → stay in the tray.
+            if !std::env::args().any(|a| a == "--hidden") {
+                tray::show_main(app.handle());
+            }
+            Ok(())
+        })
         .manage(commands::AppState::default())
         .invoke_handler(tauri::generate_handler![
             commands::startup,

@@ -1,0 +1,81 @@
+//! The tray icon (FR-SCH-001/002, FR-SET-016): PLA keeps running with the window closed.
+
+use tauri::menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem};
+use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
+use tauri::{AppHandle, Emitter, Manager};
+use tauri_plugin_autostart::ManagerExt;
+
+use crate::commands::AppState;
+use crate::worker::Command;
+
+struct Labels {
+    open: &'static str,
+    new_note: &'static str,
+    pause: &'static str,
+    autostart: &'static str,
+    quit: &'static str,
+}
+
+fn labels() -> Labels {
+    if crate::notify::strings().done == "Tamamlandı" {
+        Labels { open: "Aç", new_note: "Yeni not", pause: "Arka plan YZ'yi duraklat", autostart: "Windows ile başlat", quit: "Çık" }
+    } else {
+        Labels { open: "Open", new_note: "New note", pause: "Pause background AI", autostart: "Start with Windows", quit: "Quit" }
+    }
+}
+
+pub fn show_main(app: &AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.show();
+        let _ = window.unminimize();
+        let _ = window.set_focus();
+    }
+}
+
+pub fn build(app: &AppHandle) -> tauri::Result<()> {
+    let l = labels();
+    let autostart_on = app.autolaunch().is_enabled().unwrap_or(false);
+    let open = MenuItem::with_id(app, "open", l.open, true, None::<&str>)?;
+    let new_note = MenuItem::with_id(app, "new_note", l.new_note, true, None::<&str>)?;
+    let pause = CheckMenuItem::with_id(app, "pause", l.pause, true, false, None::<&str>)?;
+    let autostart = CheckMenuItem::with_id(app, "autostart", l.autostart, true, autostart_on, None::<&str>)?;
+    let quit = MenuItem::with_id(app, "quit", l.quit, true, None::<&str>)?;
+    let separator = PredefinedMenuItem::separator(app)?;
+    let menu = Menu::with_items(app, &[&open, &new_note, &separator, &pause, &autostart, &separator, &quit])?;
+
+    let pause_item = pause.clone();
+    let autostart_item = autostart.clone();
+    TrayIconBuilder::with_id("pla")
+        .icon(app.default_window_icon().cloned().expect("bundled icon"))
+        .tooltip("PLA")
+        .menu(&menu)
+        .show_menu_on_left_click(false)
+        .on_menu_event(move |app, event| match event.id.as_ref() {
+            "open" => show_main(app),
+            "new_note" => {
+                show_main(app);
+                let _ = app.emit("new-note", ());
+            }
+            "pause" => {
+                let paused = pause_item.is_checked().unwrap_or(false);
+                if let Some(session) = app.state::<AppState>().session.lock().expect("session lock").as_ref() {
+                    session.worker.send(Command::Pause(paused));
+                }
+                let _ = app.emit("paused-changed", paused);
+            }
+            "autostart" => {
+                let on = autostart_item.is_checked().unwrap_or(false);
+                let manager = app.autolaunch();
+                let _ = if on { manager.enable() } else { manager.disable() };
+            }
+            "quit" => app.exit(0),
+            _ => {}
+        })
+        .on_tray_icon_event(|tray, event| {
+            if let TrayIconEvent::Click { button: MouseButton::Left, button_state: MouseButtonState::Up, .. } = event {
+                show_main(tray.app_handle());
+            }
+        })
+        .build(app)?;
+    Ok(())
+}
