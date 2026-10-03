@@ -39,6 +39,16 @@ export interface WorkerStatus {
 }
 
 export interface DueReminder { task_id: string; title: string; notify_at: string }
+export interface CatalogEntry { id: string; name: string; file_name: string; size: number; sha256: string; url: string; source: string; licence: string; licence_url: string }
+export interface InstalledModel { name: string; size: number; path: string; local: boolean }
+export interface Progress { received: number; total: number; bytes_per_sec: number; eta_secs: number | null }
+export interface Failure { kind: string; needed: number | null; available: number | null; detail: string }
+export type DownloadState =
+  | { state: "running"; progress: Progress }
+  | { state: "paused"; received: number; total: number }
+  | { state: "failed"; failure: Failure; received: number; total: number }
+  | { state: "done"; path: string };
+export interface ModelStatus { installed: InstalledModel | null; recommended: CatalogEntry; download: DownloadState | null; models_dir: string | null }
 export interface PendingReminders { due: DueReminder[]; missed: DueReminder[] }
 
 /** Inside the Tauri window; false in a plain browser (Vite dev server), where a mock backend answers. */
@@ -86,6 +96,12 @@ export const api = {
   setPaused: (paused: boolean) => call<void>("set_paused", { paused }),
   /** Reminders shown but not answered yet (kept by the app, so none is lost before the UI listens). */
   pendingReminders: () => call<PendingReminders>("pending_reminders"),
+  modelStatus: () => call<ModelStatus>("model_status"),
+  modelDownloadStart: () => call<void>("model_download_start"),
+  modelDownloadPause: () => call<void>("model_download_pause"),
+  modelUseLocal: (path: string) => call<InstalledModel>("model_use_local", { path }),
+  onModelDownload: (cb: (s: DownloadState) => void) => on<DownloadState>("model-download", cb),
+  onModelChanged: (cb: (m: InstalledModel) => void) => on<InstalledModel>("model-changed", cb),
   dismissMissed: () => call<void>("dismiss_missed"),
   hideToTray: () => call<void>("hide_to_tray"),
   onReminderDue: (cb: (r: DueReminder) => void) => on<DueReminder>("reminder-due", cb),

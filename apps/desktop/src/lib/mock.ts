@@ -9,6 +9,14 @@ import { todayIso } from "./tasks";
 
 export const mockListeners = new Map<string, Array<(payload: unknown) => void>>();
 
+// Model manager stand-in: a fake 2.4 GB download that advances 10 % every 300 ms.
+const RECOMMENDED = { id: "gemma-4-e2b-it-q3km", name: "Gemma 4 E2B (Q3_K_M)", file_name: "gemma-4-E2B-it-Q3_K_M.gguf", size: 2_536_786_016, sha256: "086e…", url: "https://huggingface.co/…", source: "Hugging Face · unsloth", licence: "Apache-2.0", licence_url: "https://huggingface.co/unsloth/gemma-4-E2B-it-GGUF" };
+let installed: { name: string; size: number; path: string; local: boolean } | null = null;
+let download: unknown = null;
+let timer = 0;
+let received = 0;
+const emit = (event: string, payload: unknown) => { for (const cb of mockListeners.get(event) ?? []) cb(payload); };
+
 const day = (offset: number) => {
   const d = new Date();
   d.setDate(d.getDate() + offset);
@@ -163,6 +171,35 @@ export async function mockBackend<T>(cmd: string, args: Record<string, unknown>)
     case "set_paused":
       for (const cb of mockListeners.get("paused-changed") ?? []) cb(Boolean(args.paused));
       return undefined as T;
+    case "model_status":
+      return { installed, recommended: RECOMMENDED, download, models_dir: "C:/Users/me/AppData/Local/PLA/models" } as T;
+    case "model_download_start":
+      clearInterval(timer);
+      timer = window.setInterval(() => {
+        received = Math.min(RECOMMENDED.size, received + RECOMMENDED.size / 10);
+        download = { state: "running", progress: { received, total: RECOMMENDED.size, bytes_per_sec: 8_703_180, eta_secs: Math.round((RECOMMENDED.size - received) / 8_703_180) } };
+        emit("model-download", download);
+        if (received >= RECOMMENDED.size) {
+          clearInterval(timer);
+          download = { state: "done", path: "C:/Users/me/AppData/Local/PLA/models/gemma-4-E2B-it-Q3_K_M.gguf" };
+          emit("model-download", download);
+          installed = { name: RECOMMENDED.name, size: RECOMMENDED.size, path: "C:/…/gemma-4-E2B-it-Q3_K_M.gguf", local: false };
+          emit("model-changed", installed);
+        }
+      }, 300);
+      return undefined as T;
+    case "model_download_pause":
+      clearInterval(timer);
+      download = { state: "paused", received, total: RECOMMENDED.size };
+      emit("model-download", download);
+      return undefined as T;
+    case "model_use_local": {
+      const path = String(args.path);
+      if (!path.toLowerCase().endsWith(".gguf")) throw new Error("not_gguf");
+      installed = { name: path.split(/[\\/]/).pop() ?? path, size: 2_536_786_016, path, local: true };
+      emit("model-changed", installed);
+      return installed as T;
+    }
     default:
       throw new Error(`mock: unknown command ${cmd}`);
   }
@@ -184,3 +221,4 @@ let pending: { due: MockReminder[]; missed: MockReminder[] } = { due: [], missed
   pending.missed = list;
   for (const cb of mockListeners.get("missed-reminders") ?? []) cb(list);
 };
+(globalThis as Record<string, unknown>).__plaMockFail = (kind: string) => { clearInterval(timer); download = { state: "failed", failure: { kind, needed: 6_700_000_000, available: 4_400_000_000, detail: kind }, received, total: RECOMMENDED.size }; emit("model-download", download); };

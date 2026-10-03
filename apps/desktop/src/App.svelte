@@ -2,6 +2,7 @@
   import { onMount, tick } from "svelte";
   import AddedToast from "./lib/AddedToast.svelte";
   import ReminderBanner from "./lib/ReminderBanner.svelte";
+  import ModelBanner from "./lib/ModelBanner.svelte";
   import CircleAlert from "@lucide/svelte/icons/circle-alert";
   import FileText from "@lucide/svelte/icons/file-text";
   import FolderOpen from "@lucide/svelte/icons/folder-open";
@@ -10,7 +11,7 @@
   import Banner from "./lib/ui/Banner.svelte";
   import EmptyState from "./lib/ui/EmptyState.svelte";
   import { open } from "@tauri-apps/plugin-dialog";
-  import { api, inTauri, type TreeEntry, type WorkerStatus } from "./lib/api";
+  import { api, inTauri, type DownloadState, type TreeEntry, type WorkerStatus } from "./lib/api";
   import FileTree from "./lib/FileTree.svelte";
   import TaskPanel from "./lib/TaskPanel.svelte";
   import Editor from "./lib/Editor.svelte";
@@ -24,6 +25,8 @@
   let inbox = $state("inbox");
   let tasksVersion = $state(0);
   let panelEdits = $state(0); // changes made in the task panel itself
+  let modelDownload = $state<DownloadState | null>(null);
+  let showModel = $state(false);
   let reveal = $state<string | null>(null);
   let editor: ReturnType<typeof Editor> | undefined = $state();
   let error = $state<string | null>(null);
@@ -102,6 +105,7 @@
     const unTasks = api.onTasksChanged(() => tasksVersion++);
     const unNew = api.onNewNote(() => document.querySelector<HTMLInputElement>(".tree input")?.focus());
     const unPaused = api.onPausedChanged((p) => (status = { ...status, paused: p }));
+    const unModel = api.onModelDownload((s) => (modelDownload = s));
     const unClose = inTauri
       ? getCurrentWindow().onCloseRequested(async (event) => {
           event.preventDefault();
@@ -116,6 +120,7 @@
       void unTasks.then((f) => f());
       void unNew.then((f) => f());
       void unPaused.then((f) => f());
+      void unModel.then((f) => f());
     };
   });
 </script>
@@ -135,6 +140,7 @@
       <FileTree {entries} selected={current} onOpen={openNote} onCreate={createNote} />
     </aside>
     <section class="main">
+      <ModelBanner queued={status.queued} forceOpen={showModel} onOpened={() => (showModel = false)} />
       <ReminderBanner version={tasksVersion + panelEdits} onChanged={() => tasksVersion++} />
       {#if error}<Banner kind="danger" icon={CircleAlert} role="alert">{t("error.generic")}: {error}</Banner>{/if}
       {#if current}
@@ -148,7 +154,7 @@
     <aside class="side-panel">
       <TaskPanel version={tasksVersion} onOpenSource={openSource} onChanged={() => panelEdits++} />
     </aside>
-    <StatusBar {status} onResume={() => void api.setPaused(false)} />
+    <StatusBar {status} onResume={() => void api.setPaused(false)} download={modelDownload} onShowModel={() => (showModel = true)} />
     <AddedToast onChanged={() => tasksVersion++} />
   </div>
 {/if}
