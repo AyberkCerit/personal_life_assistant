@@ -32,7 +32,8 @@
 
 {#if status && !status.installed && !dismissed}
   <Banner kind="warning" icon={Cpu} role="region" label={t("model.download")}>
-    <p class="text">{t("model.banner")}{#if queued > 0} <strong>{queued} {t("model.waiting")}</strong>{/if}</p>
+    <p class="text">{t("model.banner")}</p>
+    {#if queued > 0}<p class="text"><strong>{t("model.waiting")}: {queued}</strong></p>{/if}
     <ModelCard {status} onDone={() => void refresh()} />
     {#snippet actions()}
       <IconButton icon={X} label={t("model.close")} onclick={() => (dismissed = true)} />
