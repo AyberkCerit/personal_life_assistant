@@ -32,6 +32,11 @@ fn labels() -> Labels {
     }
 }
 
+/// The simplified logo (no dot, thicker P): sharp at the tray's 16 px (design spec § 8).
+fn tray_icon() -> tauri::image::Image<'static> {
+    tauri::image::Image::from_bytes(include_bytes!("../icons/tray.png")).expect("bundled tray icon")
+}
+
 pub fn show_main(app: &AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.show();
@@ -55,7 +60,7 @@ pub fn build(app: &AppHandle) -> tauri::Result<()> {
     let pause_item = pause.clone();
     let autostart_item = autostart.clone();
     TrayIconBuilder::with_id("pla")
-        .icon(app.default_window_icon().cloned().expect("bundled icon"))
+        .icon(tray_icon())
         .tooltip("PLA")
         .menu(&menu)
         .show_menu_on_left_click(false)

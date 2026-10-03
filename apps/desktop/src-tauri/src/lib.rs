@@ -83,4 +83,26 @@ mod tests {
         let caps: serde_json::Value = serde_json::from_str(include_str!("../capabilities/default.json")).unwrap();
         assert!(caps["permissions"].as_array().unwrap().iter().any(|p| p == "core:window:allow-destroy"));
     }
+
+    fn png_size(bytes: &[u8]) -> (u32, u32) {
+        assert_eq!(&bytes[..8], b"\x89PNG\r\n\x1a\n", "not a PNG");
+        let be = |i: usize| u32::from_be_bytes(bytes[i..i + 4].try_into().unwrap());
+        (be(16), be(20))
+    }
+
+    #[test]
+    fn the_tray_has_its_own_small_logo() {
+        // Design spec § 8: a simplified 32 px logo stays sharp at 16 px in the tray
+        assert_eq!(png_size(include_bytes!("../icons/tray.png")), (32, 32));
+    }
+
+    #[test]
+    fn the_window_icon_has_small_and_large_frames() {
+        let ico = include_bytes!("../icons/icon.ico");
+        let count = u16::from_le_bytes([ico[4], ico[5]]) as usize;
+        let sizes: Vec<u32> = (0..count).map(|i| match ico[6 + i * 16] { 0 => 256, w => w as u32 }).collect();
+        for want in [16, 32, 256] {
+            assert!(sizes.contains(&want), "missing {want} px frame: {sizes:?}");
+        }
+    }
 }
