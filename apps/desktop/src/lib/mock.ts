@@ -147,7 +147,18 @@ export async function mockBackend<T>(cmd: string, args: Record<string, unknown>)
       tasks = tasks.map((t) => (t.task_id === args.id ? { ...t, status: "done" } : t));
       return undefined as T;
     case "reminder_snooze":
+      pending.due = pending.due.filter((r) => r.task_id !== args.id);
+      pending.missed = pending.missed.filter((r) => r.task_id !== args.id);
+      return undefined as T;
     case "hide_to_tray":
+      return undefined as T;
+    case "pending_reminders": {
+      const open = (r: { task_id: string }) => !tasks.some((t) => t.task_id === r.task_id && t.status === "done");
+      pending = { due: pending.due.filter(open), missed: pending.missed.filter(open) };
+      return { due: [...pending.due], missed: [...pending.missed] } as T;
+    }
+    case "dismiss_missed":
+      pending.missed = [];
       return undefined as T;
     case "set_paused":
       for (const cb of mockListeners.get("paused-changed") ?? []) cb(Boolean(args.paused));
@@ -158,13 +169,18 @@ export async function mockBackend<T>(cmd: string, args: Record<string, unknown>)
 }
 
 // Dev helpers for the browser check: simulate the scheduler.
+type MockReminder = { task_id: string; title: string; notify_at: string };
+let pending: { due: MockReminder[]; missed: MockReminder[] } = { due: [], missed: [] };
 (globalThis as Record<string, unknown>).__plaMockDue = (title: string) => {
-  for (const cb of mockListeners.get("reminder-due") ?? []) cb({ task_id: "t1", title, notify_at: "2026-10-06T09:00" });
+  const r = { task_id: "t1", title, notify_at: "2026-10-06T09:00" };
+  pending.due = [...pending.due.filter((x) => x.task_id !== r.task_id), r];
+  for (const cb of mockListeners.get("reminder-due") ?? []) cb(r);
 };
 (globalThis as Record<string, unknown>).__plaMockMissed = () => {
-  for (const cb of mockListeners.get("missed-reminders") ?? [])
-    cb([
-      { task_id: "t2", title: "Fatura öde", notify_at: "2026-10-05T09:00" },
-      { task_id: "t3", title: "Kitap oku", notify_at: "2026-10-05T20:00" },
-    ]);
+  const list = [
+    { task_id: "t2", title: "Fatura öde", notify_at: "2026-10-05T09:00" },
+    { task_id: "t3", title: "Kitap oku", notify_at: "2026-10-05T20:00" },
+  ];
+  pending.missed = list;
+  for (const cb of mockListeners.get("missed-reminders") ?? []) cb(list);
 };

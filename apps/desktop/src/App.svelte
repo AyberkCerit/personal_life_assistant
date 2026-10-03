@@ -16,6 +16,7 @@
   let current = $state<string | null>(null);
   let inbox = $state("inbox");
   let tasksVersion = $state(0);
+  let panelEdits = $state(0); // changes made in the task panel itself
   let reveal = $state<string | null>(null);
   let editor: ReturnType<typeof Editor> | undefined = $state();
   let error = $state<string | null>(null);
@@ -125,7 +126,7 @@
       <FileTree {entries} selected={current} onOpen={openNote} onCreate={createNote} />
     </aside>
     <section class="main">
-      <ReminderBanner onChanged={() => tasksVersion++} />
+      <ReminderBanner version={tasksVersion + panelEdits} onChanged={() => tasksVersion++} />
       {#if error}<div class="banner danger" role="alert">{t("error.generic")}: {error}</div>{/if}
       {#if current}
         {#key current}
@@ -136,7 +137,7 @@
       {/if}
     </section>
     <aside class="side-panel">
-      <TaskPanel version={tasksVersion} onOpenSource={openSource} />
+      <TaskPanel version={tasksVersion} onOpenSource={openSource} onChanged={() => panelEdits++} />
     </aside>
     <StatusBar {status} onResume={() => void api.setPaused(false)} />
     <AddedToast onChanged={() => tasksVersion++} />

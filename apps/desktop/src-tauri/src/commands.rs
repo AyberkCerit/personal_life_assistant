@@ -1,6 +1,7 @@
 //! Tauri commands: thin wrappers; all rules live in pla-core and the worker.
 
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -20,19 +21,20 @@ use rusqlite::Connection;
 
 use crate::worker::{AddedItem, WorkerStatus};
 use serde::Serialize;
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::notify::{show_info, strings, AppNotifier};
-use crate::scheduler::{SchedCommand, Scheduler, SchedulerHandle};
+use crate::scheduler::{Pending, PendingLists, SchedCommand, Scheduler, SchedulerHandle};
 use crate::system::WindowsProbe;
 use crate::watcher::{watch, SelfWrites, WatchHandle};
 use crate::worker::{Command, Worker, WorkerHandle};
 
-/// One open vault. Dropping it stops the watcher first, then the worker (which ends the model).
+/// One open vault. Fields drop in order: the scheduler stops first, then the watcher, then the
+/// worker (which ends the model).
 pub struct Session {
     pub vault: Vault,
-    /// Declared first after the vault: fields drop in order, so the scheduler stops before the worker.
     pub scheduler: SchedulerHandle,
+    pub pending: Arc<Pending>,
     pub db: Mutex<Connection>,
     pub status: Arc<Mutex<WorkerStatus>>,
     pub _watch: Option<WatchHandle>,
@@ -43,6 +45,8 @@ pub struct Session {
 pub struct AppState {
     pub session: Mutex<Option<Session>>,
     pub self_writes: Arc<SelfWrites>,
+    /// Background AI paused (FR-SCH-014); kept across vault switches.
+    pub paused: AtomicBool,
 }
 
 #[derive(Serialize)]
@@ -85,7 +89,7 @@ fn extractor(settings: &AppSettings) -> Option<Box<dyn Extractor + Send>> {
         .then(|| Box::new(ModelHost::new(ServerConfig::new(bin, model), Duration::from_secs(60))) as Box<dyn Extractor + Send>)
 }
 
-fn start_session(app: &AppHandle, root: &Path, settings: &AppSettings, own: Arc<SelfWrites>) -> Result<Session, String> {
+fn start_session(app: &AppHandle, root: &Path, settings: &AppSettings, own: Arc<SelfWrites>, paused: bool) -> Result<Session, String> {
     let mut vault = open_vault_dir(root).map_err(|e| e.to_string())?;
     let dir = resolve_data_dir(&app_root()?, &mut vault).map_err(|e| e.to_string())?;
     let dbs = open_databases(&dir).map_err(|e| e.to_string())?;
@@ -106,12 +110,16 @@ fn start_session(app: &AppHandle, root: &Path, settings: &AppSettings, own: Arc<
         let _ = added_app.emit("items-added", items);
     }));
     let handle = worker.spawn();
+    if paused {
+        handle.set_paused(true);
+    }
     let watch_handle = watch(vault.clone(), own, handle.sender(), app.clone()).ok();
     let sched_db = connect(&dir.join("pla.db")).map_err(|e| e.to_string())?;
     let (cmd_tx, cmd_rx) = std::sync::mpsc::channel::<SchedCommand>();
     let notifier = AppNotifier::new(app.clone(), cmd_tx.clone());
-    let scheduler = Scheduler::new(vault.root.clone(), sched_db, Box::new(notifier), Box::new(WindowsProbe), Box::new(|| Local::now().fixed_offset()))
-        .spawn(std::time::Duration::from_secs(30));
+    let scheduler = Scheduler::new(vault.root.clone(), sched_db, Box::new(notifier), Box::new(WindowsProbe), Box::new(|| Local::now().fixed_offset()));
+    let pending = scheduler.pending();
+    let scheduler = scheduler.spawn(std::time::Duration::from_secs(30));
     // Toast buttons send to `cmd_tx`; forward them to the scheduler thread.
     let forward = scheduler.sender();
     std::thread::spawn(move || {
@@ -121,7 +129,7 @@ fn start_session(app: &AppHandle, root: &Path, settings: &AppSettings, own: Arc<
             }
         }
     });
-    Ok(Session { vault, scheduler, db: Mutex::new(ui_db), status, _watch: watch_handle, worker: handle })
+    Ok(Session { vault, scheduler, pending, db: Mutex::new(ui_db), status, _watch: watch_handle, worker: handle })
 }
 
 fn with_vault<T>(state: &State<AppState>, f: impl FnOnce(&Vault) -> Result<T, FileError>) -> Result<T, String> {
@@ -152,7 +160,7 @@ pub fn startup(app: AppHandle, state: State<AppState>) -> Result<StartupInfo, St
         return Ok(info);
     }
     if let Some(path) = loaded.settings.vault_path.clone() {
-        match start_session(&app, &path, &loaded.settings, Arc::clone(&state.self_writes)) {
+        match start_session(&app, &path, &loaded.settings, Arc::clone(&state.self_writes), state.paused.load(Ordering::SeqCst)) {
             Ok(session) => {
                 info.vault_path = Some(session.vault.root.to_string_lossy().into_owned());
                 info.inbox = Some(session.vault.config.folders.inbox.clone());
@@ -178,7 +186,7 @@ pub fn open_vault(app: AppHandle, state: State<AppState>, path: String) -> Resul
         }
         drop(old);
     }
-    let session = start_session(&app, Path::new(&path), &settings, Arc::clone(&state.self_writes))?;
+    let session = start_session(&app, Path::new(&path), &settings, Arc::clone(&state.self_writes), state.paused.load(Ordering::SeqCst))?;
     let opened = vault_info_of(&session.vault);
     settings.vault_path = Some(session.vault.root.clone());
     save_settings(&root, &settings).map_err(|e| e.to_string())?;
@@ -354,10 +362,38 @@ pub fn backup_now(state: State<AppState>) -> Result<(), String> {
     Ok(())
 }
 
+/// Reminders shown but not answered yet, for the banner (FR-TSK-015/016).
 #[tauri::command]
-pub fn set_paused(state: State<AppState>, paused: bool) -> Result<(), String> {
+pub fn pending_reminders(state: State<AppState>) -> Result<PendingLists, String> {
     let guard = state.session.lock().expect("session lock");
-    guard.as_ref().ok_or("No vault is open.")?.worker.send(Command::Pause(paused));
+    let Some(session) = guard.as_ref() else { return Ok(PendingLists::default()) };
+    let db = session.db.lock().expect("db lock");
+    Ok(session.pending.current(&db))
+}
+
+#[tauri::command]
+pub fn dismiss_missed(state: State<AppState>) -> Result<(), String> {
+    if let Some(session) = state.session.lock().expect("session lock").as_ref() {
+        session.pending.dismiss_missed();
+    }
+    Ok(())
+}
+
+/// FR-SCH-014: the one path for pausing background AI, from the tray or the status bar, so the
+/// tray check, the worker and the UI agree (final review I4).
+pub fn apply_pause(app: &AppHandle, paused: bool) {
+    let state = app.state::<AppState>();
+    state.paused.store(paused, Ordering::SeqCst);
+    if let Some(session) = state.session.lock().expect("session lock").as_ref() {
+        session.worker.set_paused(paused);
+    }
+    crate::tray::set_pause_checked(app, paused);
+    let _ = app.emit("paused-changed", paused);
+}
+
+#[tauri::command]
+pub fn set_paused(app: AppHandle, paused: bool) -> Result<(), String> {
+    apply_pause(&app, paused);
     Ok(())
 }
 

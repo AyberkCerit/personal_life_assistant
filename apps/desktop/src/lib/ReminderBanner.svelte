@@ -3,36 +3,47 @@
   import { api, type DueReminder } from "./api";
   import { t } from "./i18n";
 
-  let { onChanged }: { onChanged: () => void } = $props();
+  // `version` changes whenever tasks change in the panel, so answered reminders disappear here too.
+  let { version, onChanged }: { version: number; onChanged: () => void } = $props();
   let due = $state<DueReminder[]>([]);
   let missed = $state<DueReminder[]>([]);
 
-  function drop(id: string) {
-    due = due.filter((r) => r.task_id !== id);
-    missed = missed.filter((r) => r.task_id !== id);
+  // The list lives in the app, not only in events: the scheduler's first tick may come before this
+  // banner listens (final review C1), and a reminder answered elsewhere must go (M2).
+  async function refresh() {
+    const lists = await api.pendingReminders();
+    due = lists.due;
+    missed = lists.missed;
   }
 
   async function act(id: string, action: "done" | "snooze") {
-    drop(id);
+    due = due.filter((r) => r.task_id !== id);
+    missed = missed.filter((r) => r.task_id !== id);
     await (action === "done" ? api.reminderDone(id) : api.reminderSnooze(id));
     onChanged();
   }
 
+  async function dismiss() {
+    missed = [];
+    await api.dismissMissed();
+  }
+
+  $effect(() => {
+    void version;
+    void refresh();
+  });
+
   onMount(() => {
-    const a = api.onReminderDue((r) => (due = [...due.filter((x) => x.task_id !== r.task_id), r]));
-    const b = api.onMissedReminders((list) => (missed = [...missed, ...list.filter((r) => !missed.some((m) => m.task_id === r.task_id))]));
-    return () => {
-      void a.then((f) => f());
-      void b.then((f) => f());
-    };
+    const subs = [api.onReminderDue(() => void refresh()), api.onMissedReminders(() => void refresh()), api.onTasksChanged(() => void refresh())];
+    return () => subs.forEach((s) => void s.then((f) => f()));
   });
 </script>
 
 {#snippet item(r: DueReminder)}
   <li>
-    <span>⏰ <strong>{r.title}</strong> <span class="time">{r.notify_at.slice(11, 16)}</span></span>
-    <button onclick={() => void act(r.task_id, "done")}>{t("reminder.done")}</button>
-    <button onclick={() => void act(r.task_id, "snooze")}>{t("reminder.snooze")}</button>
+    <span><span aria-hidden="true">⏰</span> <strong>{r.title}</strong> <span class="time">{r.notify_at.slice(11, 16)}</span></span>
+    <button onclick={() => void act(r.task_id, "done")} aria-label={`${t("reminder.done")}: ${r.title}`}>{t("reminder.done")}</button>
+    <button onclick={() => void act(r.task_id, "snooze")} aria-label={`${t("reminder.snooze")}: ${r.title}`}>{t("reminder.snooze")}</button>
   </li>
 {/snippet}
 
@@ -45,7 +56,7 @@
   <section class="reminders missed" aria-label={t("reminder.missed")}>
     <h3>{t("reminder.missed")} ({missed.length})</h3>
     <ul>{#each missed as r (r.task_id)}{@render item(r)}{/each}</ul>
-    <button class="close" onclick={() => (missed = [])}>{t("reminder.dismiss")}</button>
+    <button class="close" onclick={() => void dismiss()}>{t("reminder.dismiss")}</button>
   </section>
 {/if}
 

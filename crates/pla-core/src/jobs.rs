@@ -91,11 +91,11 @@ pub fn backup(conn: &Connection, vault_root: &Path, today: NaiveDate) -> Result<
     std::fs::rename(&partial, &target)?;
 
     // FR-BKP-002: keep the newest 7 of PLA's own backup files; nothing else in the folder is touched.
-    let mut backups: Vec<String> = std::fs::read_dir(&dir)?
-        .filter_map(|e| e.ok())
-        .map(|e| e.file_name().to_string_lossy().into_owned())
-        .filter(|n| is_backup_name(n))
-        .collect();
+    let names: Vec<String> = std::fs::read_dir(&dir)?.filter_map(|e| e.ok()).map(|e| e.file_name().to_string_lossy().into_owned()).collect();
+    for stale in names.iter().filter(|n| n.strip_suffix(".partial").is_some_and(is_backup_name)) {
+        let _ = std::fs::remove_file(dir.join(stale)); // an earlier run was interrupted
+    }
+    let mut backups: Vec<String> = names.into_iter().filter(|n| is_backup_name(n)).collect();
     backups.sort();
     let excess = backups.len().saturating_sub(KEEP_BACKUPS);
     for name in &backups[..excess] {
@@ -161,5 +161,19 @@ mod tests {
         let copy = rusqlite::Connection::open(&path).unwrap();
         let title: String = copy.query_row("SELECT title FROM task", [], |r| r.get(0)).unwrap();
         assert_eq!(title, "Yedekte olmalı");
+    }
+
+    #[test]
+    fn an_interrupted_backup_from_an_earlier_day_is_cleaned_up() {
+        // Final review M8
+        let tmp = tempfile::tempdir().unwrap();
+        let vault = tmp.path().join("kasa");
+        std::fs::create_dir_all(vault.join(".pla/backup")).unwrap();
+        std::fs::write(vault.join(".pla/backup/pla-2026-10-01.db.partial"), "yarım").unwrap();
+        std::fs::write(vault.join(".pla/backup/benim.db.partial"), "kullanıcının").unwrap();
+        let conn = open_databases(&tmp.path().join(".data")).unwrap().pla;
+        backup(&conn, &vault, d("2026-10-02")).unwrap();
+        assert!(!vault.join(".pla/backup/pla-2026-10-01.db.partial").exists());
+        assert!(vault.join(".pla/backup/benim.db.partial").exists(), "only PLA's own names");
     }
 }

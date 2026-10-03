@@ -39,6 +39,7 @@ export interface WorkerStatus {
 }
 
 export interface DueReminder { task_id: string; title: string; notify_at: string }
+export interface PendingReminders { due: DueReminder[]; missed: DueReminder[] }
 
 /** Inside the Tauri window; false in a plain browser (Vite dev server), where a mock backend answers. */
 export const inTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
@@ -83,6 +84,9 @@ export const api = {
   reminderDone: (id: string) => call<void>("reminder_done", { id }),
   reminderSnooze: (id: string) => call<void>("reminder_snooze", { id }),
   setPaused: (paused: boolean) => call<void>("set_paused", { paused }),
+  /** Reminders shown but not answered yet (kept by the app, so none is lost before the UI listens). */
+  pendingReminders: () => call<PendingReminders>("pending_reminders"),
+  dismissMissed: () => call<void>("dismiss_missed"),
   hideToTray: () => call<void>("hide_to_tray"),
   onReminderDue: (cb: (r: DueReminder) => void) => on<DueReminder>("reminder-due", cb),
   onMissedReminders: (cb: (list: DueReminder[]) => void) => on<DueReminder[]>("missed-reminders", cb),

@@ -67,7 +67,9 @@ fn app_id() -> &'static str {
 pub fn show_info(title: &str, body: &str) {
     #[cfg(windows)]
     {
-        let _ = tauri_winrt_notification::Toast::new(app_id()).title(title).text1(body).show();
+        if let Err(e) = tauri_winrt_notification::Toast::new(app_id()).title(title).text1(body).show() {
+            eprintln!("PLA: notification failed: {e}");
+        }
     }
 }
 
@@ -90,7 +92,8 @@ impl Notifier for AppNotifier {
             let s = strings();
             let tx = self.commands.lock().expect("commands lock").clone();
             let time = reminder.notify_at.get(11..16).unwrap_or_default().to_owned();
-            let _ = tauri_winrt_notification::Toast::new(app_id())
+            let shown = tauri_winrt_notification::Toast::new(app_id())
+                .scenario(tauri_winrt_notification::Scenario::Reminder) // stays until answered
                 .title(&reminder.title)
                 .text1(&format!("{} · {time}", s.reminder))
                 .add_button(s.done, &format!("done:{}", reminder.task_id))
@@ -108,6 +111,9 @@ impl Notifier for AppNotifier {
                     Ok(())
                 })
                 .show();
+            if let Err(e) = shown {
+                eprintln!("PLA: notification failed: {e}");
+            }
         }
     }
 

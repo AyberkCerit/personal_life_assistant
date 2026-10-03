@@ -31,9 +31,23 @@ pub fn due_reminders(conn: &Connection, now: DateTime<FixedOffset>) -> rusqlite:
     .collect()
 }
 
-pub fn mark_notified(conn: &Connection, task_id: &str, now: DateTime<FixedOffset>) -> rusqlite::Result<()> {
-    conn.execute("UPDATE task SET notified_at = ?1 WHERE task_id = ?2", params![local_minute(now), task_id])?;
+/// Marks the time that was shown; if the user moved it meanwhile, the new time still fires.
+pub fn mark_notified(conn: &Connection, task_id: &str, shown: &str, now: DateTime<FixedOffset>) -> rusqlite::Result<()> {
+    conn.execute(
+        "UPDATE task SET notified_at = ?1 WHERE task_id = ?2 AND notify_at = ?3",
+        params![local_minute(now), task_id, shown],
+    )?;
     Ok(())
+}
+
+/// Shown and not yet answered: still open, not snoozed, not moved to another time, not deleted.
+pub fn is_pending(conn: &Connection, reminder: &DueReminder) -> bool {
+    conn.query_row(
+        "SELECT 1 FROM task WHERE task_id = ?1 AND status = 'open' AND notify_at = ?2 AND notified_at IS NOT NULL",
+        params![reminder.task_id, reminder.notify_at],
+        |_| Ok(()),
+    )
+    .is_ok()
 }
 
 /// FR-TSK-013: show it again 10 minutes from now.
@@ -81,7 +95,7 @@ mod tests {
         assert!(due_reminders(&conn, at("2026-10-06T21:29:59+03:00")).unwrap().is_empty());
         let due = due_reminders(&conn, at("2026-10-06T21:30:00+03:00")).unwrap();
         assert_eq!(due, vec![DueReminder { task_id: id.clone(), title: "İlaç".into(), notify_at: "2026-10-06T21:30".into() }]);
-        mark_notified(&conn, &id, at("2026-10-06T21:30:00+03:00")).unwrap();
+        mark_notified(&conn, &id, "2026-10-06T21:30", at("2026-10-06T21:30:00+03:00")).unwrap();
         assert!(due_reminders(&conn, at("2026-10-06T23:00:00+03:00")).unwrap().is_empty());
     }
 
@@ -89,7 +103,7 @@ mod tests {
     fn snooze_brings_it_back_ten_minutes_later() {
         let (_t, conn) = setup();
         let id = reminder(&conn, "İlaç", "2026-10-06", Some("21:30"));
-        mark_notified(&conn, &id, at("2026-10-06T21:30:00+03:00")).unwrap();
+        mark_notified(&conn, &id, "2026-10-06T21:30", at("2026-10-06T21:30:00+03:00")).unwrap();
         snooze(&conn, &id, at("2026-10-06T21:31:00+03:00")).unwrap();
         assert!(due_reminders(&conn, at("2026-10-06T21:40:00+03:00")).unwrap().is_empty());
         let due = due_reminders(&conn, at("2026-10-06T21:41:00+03:00")).unwrap();
@@ -103,7 +117,7 @@ mod tests {
         // Review Focus 5
         let (_t, conn) = setup();
         let id = reminder(&conn, "Toplantı", "2026-10-06", Some("10:00"));
-        mark_notified(&conn, &id, at("2026-10-06T10:00:00+03:00")).unwrap();
+        mark_notified(&conn, &id, "2026-10-06T10:00", at("2026-10-06T10:00:00+03:00")).unwrap();
         let moved = TaskInput { title: "Toplantı".into(), date: Some("2026-10-06".into()), time: Some("15:00".into()), remind: None, ..Default::default() };
         edit_task(&conn, &id, &moved, at("2026-10-06T10:05:00+03:00")).unwrap();
         assert_eq!(due_reminders(&conn, at("2026-10-06T15:00:00+03:00")).unwrap().len(), 1);
@@ -130,6 +144,52 @@ mod tests {
         edit_task(&conn, &id, &off, at("2026-10-06T08:00:00+03:00")).unwrap();
         let t = list_tasks(&conn, TaskList::Upcoming, NaiveDate::from_ymd_opt(2026, 10, 6).unwrap()).unwrap();
         assert_eq!(t[0].notify_at, None);
+    }
+
+    #[test]
+    fn an_edit_between_the_query_and_the_mark_still_fires_at_the_new_time() {
+        // Final review M3
+        let (_t, conn) = setup();
+        let id = reminder(&conn, "Toplantı", "2026-10-06", Some("10:00"));
+        let shown = due_reminders(&conn, at("2026-10-06T10:00:00+03:00")).unwrap();
+        let moved = TaskInput { title: "Toplantı".into(), date: Some("2026-10-06".into()), time: Some("15:00".into()), ..Default::default() };
+        edit_task(&conn, &id, &moved, at("2026-10-06T10:00:10+03:00")).unwrap();
+        mark_notified(&conn, &id, &shown[0].notify_at, at("2026-10-06T10:00:20+03:00")).unwrap();
+        assert_eq!(due_reminders(&conn, at("2026-10-06T15:00:00+03:00")).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn editing_the_title_keeps_a_snoozed_time() {
+        // Final review I2: same day and time → the snooze stays, nothing fires again
+        let (_t, conn) = setup();
+        let id = reminder(&conn, "İlaç", "2026-10-06", Some("09:00"));
+        mark_notified(&conn, &id, "2026-10-06T09:00", at("2026-10-06T09:00:00+03:00")).unwrap();
+        snooze(&conn, &id, at("2026-10-06T09:01:00+03:00")).unwrap();
+        let renamed = TaskInput { title: "İlaç iç".into(), date: Some("2026-10-06".into()), time: Some("09:00".into()), ..Default::default() };
+        edit_task(&conn, &id, &renamed, at("2026-10-06T09:02:00+03:00")).unwrap();
+        assert!(due_reminders(&conn, at("2026-10-06T09:05:00+03:00")).unwrap().is_empty(), "snooze kept");
+        assert_eq!(due_reminders(&conn, at("2026-10-06T09:11:00+03:00")).unwrap()[0].notify_at, "2026-10-06T09:11");
+        mark_notified(&conn, &id, "2026-10-06T09:11", at("2026-10-06T09:11:00+03:00")).unwrap();
+        edit_task(&conn, &id, &renamed, at("2026-10-06T09:12:00+03:00")).unwrap();
+        assert!(due_reminders(&conn, at("2026-10-06T09:13:00+03:00")).unwrap().is_empty(), "not again after a title edit");
+    }
+
+    #[test]
+    fn answered_reminders_are_no_longer_pending() {
+        // Final review C1/M2: the banner drops what was answered elsewhere
+        let (_t, conn) = setup();
+        let a = reminder(&conn, "A", "2026-10-06", Some("09:00"));
+        let b = reminder(&conn, "B", "2026-10-06", Some("09:00"));
+        let c = reminder(&conn, "C", "2026-10-06", Some("09:00"));
+        let shown = due_reminders(&conn, at("2026-10-06T09:00:00+03:00")).unwrap();
+        for r in &shown {
+            mark_notified(&conn, &r.task_id, &r.notify_at, at("2026-10-06T09:00:00+03:00")).unwrap();
+        }
+        assert!(shown.iter().all(|r| is_pending(&conn, r)));
+        complete(&conn, &a, at("2026-10-06T09:01:00+03:00")).unwrap();
+        snooze(&conn, &b, at("2026-10-06T09:01:00+03:00")).unwrap();
+        let still: Vec<&str> = shown.iter().filter(|r| is_pending(&conn, r)).map(|r| r.task_id.as_str()).collect();
+        assert_eq!(still, vec![c.as_str()]);
     }
 
     #[test]

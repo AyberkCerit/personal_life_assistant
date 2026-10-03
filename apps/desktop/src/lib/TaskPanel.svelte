@@ -5,7 +5,11 @@
   import TaskRow from "./TaskRow.svelte";
   import { lang, t } from "./i18n";
 
-  let { version, onOpenSource }: { version: number; onOpenSource: (path: string, blockText: string | null) => void } = $props();
+  let {
+    version,
+    onOpenSource,
+    onChanged = () => {},
+  }: { version: number; onOpenSource: (path: string, blockText: string | null) => void; onChanged?: () => void } = $props();
 
   type Tab = TaskList | "review";
   const TABS: Tab[] = ["today", "upcoming", "completed", "review"];
@@ -27,6 +31,7 @@
     try {
       await action();
       error = null;
+      onChanged(); // e.g. a reminder ticked off here leaves the reminder banner
     } catch (e) {
       error = String(e);
     }
@@ -113,7 +118,7 @@
           <input type="date" bind:value={newDate} aria-label={t("tasks.date")} />
           <input type="time" bind:value={newTime} aria-label={t("tasks.time")} />
         </div>
-        <label class="check"><input type="checkbox" bind:checked={newRemind} /> {t("tasks.remind")}</label>
+        <label class="check" title={newDate ? undefined : t("tasks.remindNeedsDate")}><input type="checkbox" bind:checked={newRemind} disabled={!newDate} /> {t("tasks.remind")}</label>
       </form>
     {/if}
     {#each groups as group (group.key)}

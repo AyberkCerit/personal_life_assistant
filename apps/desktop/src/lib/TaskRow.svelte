@@ -82,7 +82,7 @@
         <input type="time" bind:value={form.time} aria-label={t("tasks.time")} />
       </div>
       <textarea bind:value={form.details} aria-label={t("tasks.details")} rows="2"></textarea>
-      <label class="check"><input type="checkbox" bind:checked={form.remind} /> {t("tasks.remind")}</label>
+      <label class="check"><input type="checkbox" bind:checked={form.remind} disabled={!form.date} /> {t("tasks.remind")}</label>
       <div class="actions">
         <button type="submit">{t("tasks.save")}</button>
         <button type="button" onclick={cancelEdit}>{t("tasks.cancel")}</button>
@@ -105,7 +105,7 @@
       <button class="title" bind:this={titleButton} onclick={startEdit} title={t("tasks.edit")}>{task.title}</button>
       <div class="meta">
         {#if task.time}<span>{task.time}</span>{/if}
-        {#if isReminder(task)}<span title={t("tasks.reminderLabel")} aria-label={t("tasks.reminderLabel")}>🔔</span>{/if}
+        {#if isReminder(task)}<span role="img" title={t("tasks.reminderLabel")} aria-label={t("tasks.reminderLabel")}>🔔</span>{/if}
         {#if isOverdue(task, today)}<span class="overdue">{t("tasks.overdue")}</span>{/if}
         {#if task.origin === "extracted"}
           <span class="badge" title={t("tasks.aiLabel")} aria-label={t("tasks.aiLabel")}>{t("tasks.ai")}</span>

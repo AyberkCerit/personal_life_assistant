@@ -3,19 +3,22 @@
 
 use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
+use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use chrono::{DateTime, FixedOffset, TimeDelta};
 use pla_core::jobs::{backup, maintenance_due, record_failure, record_success, DAILY, MAX_ATTEMPTS_PER_DAY};
-use pla_core::reminders::{complete, due_reminders, mark_notified, snooze, DueReminder};
+use pla_core::reminders::{complete, due_reminders, is_pending, local_minute, mark_notified, snooze, DueReminder};
 use rusqlite::Connection;
+use serde::Serialize;
 
 pub use crate::system::SystemProbe;
 
 const IDLE_FOR_MAINTENANCE_SECS: u64 = 300;
-/// Ticks further apart than this mean the computer slept (or the clock was changed).
-const JUMP_TICKS: i64 = 2;
+/// A reminder older than this when it is first seen was missed (PLA closed, the PC asleep, a past
+/// time, a catch-up extraction): it joins one list instead of popping up (decision 2, FR-TSK-016).
+const LATE_AFTER_MINUTES: i64 = 5;
 
 pub trait Notifier: Send {
     fn reminder(&self, reminder: &DueReminder);
@@ -34,39 +37,74 @@ pub enum SchedCommand {
 
 type Clock = Box<dyn Fn() -> DateTime<FixedOffset> + Send>;
 
+/// What the in-app banner lists (FR-TSK-015/016).
+#[derive(Debug, Default, Clone, PartialEq, Serialize)]
+pub struct PendingLists {
+    pub due: Vec<DueReminder>,
+    pub missed: Vec<DueReminder>,
+}
+
+/// Reminders shown but not answered yet. Kept here, not only sent as events, because the window
+/// may open (or the banner mount) after the scheduler's first tick (final review C1).
+#[derive(Default)]
+pub struct Pending(Mutex<PendingLists>);
+
+impl Pending {
+    fn add(&self, reminders: &[DueReminder], missed: bool) {
+        let mut lists = self.0.lock().expect("pending lock");
+        for r in reminders {
+            lists.due.retain(|x| x.task_id != r.task_id);
+            lists.missed.retain(|x| x.task_id != r.task_id);
+            if missed { lists.missed.push(r.clone()) } else { lists.due.push(r.clone()) }
+        }
+    }
+
+    /// Drops what was answered anywhere (done, snoozed, moved, deleted) and returns the rest.
+    pub fn current(&self, conn: &Connection) -> PendingLists {
+        let mut lists = self.0.lock().expect("pending lock");
+        lists.due.retain(|r| is_pending(conn, r));
+        lists.missed.retain(|r| is_pending(conn, r));
+        lists.clone()
+    }
+
+    pub fn dismiss_missed(&self) {
+        self.0.lock().expect("pending lock").missed.clear();
+    }
+}
+
 pub struct Scheduler {
     vault_root: PathBuf,
     pub(crate) conn: Connection,
     notifier: Box<dyn Notifier>,
     probe: Box<dyn SystemProbe>,
     clock: Clock,
-    last_tick: Option<DateTime<FixedOffset>>,
+    pending: Arc<Pending>,
     every: Duration,
 }
 
 impl Scheduler {
     pub fn new(vault_root: PathBuf, conn: Connection, notifier: Box<dyn Notifier>, probe: Box<dyn SystemProbe>, clock: Clock) -> Self {
-        Self { vault_root, conn, notifier, probe, clock, last_tick: None, every: Duration::from_secs(30) }
+        Self { vault_root, conn, notifier, probe, clock, pending: Arc::default(), every: Duration::from_secs(30) }
+    }
+
+    pub fn pending(&self) -> Arc<Pending> {
+        Arc::clone(&self.pending)
     }
 
     pub fn tick(&mut self) {
         let now = (self.clock)();
-        let resumed = match self.last_tick {
-            None => true,
-            Some(last) => now - last > TimeDelta::from_std(self.every * JUMP_TICKS as u32).unwrap_or(TimeDelta::MAX),
-        };
-        self.last_tick = Some(now);
-
         if let Ok(due) = due_reminders(&self.conn, now) {
-            if resumed && !due.is_empty() {
-                self.notifier.missed(&due); // decision 2: one list, not a burst of toasts
-            } else {
-                for r in &due {
-                    self.notifier.reminder(r);
-                }
+            let late = local_minute(now - TimeDelta::minutes(LATE_AFTER_MINUTES));
+            // Marked before anyone hears of it: the banner asks for the list as soon as the event comes.
+            let shown: Vec<DueReminder> = due.into_iter().filter(|r| mark_notified(&self.conn, &r.task_id, &r.notify_at, now).is_ok()).collect();
+            let (missed, on_time): (Vec<DueReminder>, Vec<DueReminder>) = shown.into_iter().partition(|r| r.notify_at < late);
+            if !missed.is_empty() {
+                self.pending.add(&missed, true);
+                self.notifier.missed(&missed);
             }
-            for r in &due {
-                let _ = mark_notified(&self.conn, &r.task_id, now);
+            for r in &on_time {
+                self.pending.add(std::slice::from_ref(r), false);
+                self.notifier.reminder(r);
             }
         }
 
@@ -117,11 +155,16 @@ impl Scheduler {
 
     fn run(mut self, rx: Receiver<SchedCommand>) {
         self.tick();
+        let mut next = Instant::now() + self.every;
         loop {
-            match rx.recv_timeout(self.every) {
+            // A deadline, so commands from the notifications do not postpone the next tick.
+            match rx.recv_timeout(next.saturating_duration_since(Instant::now())) {
                 Ok(SchedCommand::Shutdown) | Err(RecvTimeoutError::Disconnected) => break,
                 Ok(command) => self.handle(command),
-                Err(RecvTimeoutError::Timeout) => self.tick(),
+                Err(RecvTimeoutError::Timeout) => {
+                    self.tick();
+                    next = Instant::now() + self.every;
+                }
             }
         }
     }
@@ -261,6 +304,90 @@ mod tests {
         r.at("2026-10-06T12:00:30+03:00");
         r.at("2026-10-06T19:30:00+03:00"); // the laptop slept in between
         assert_eq!(r.seen(), vec!["missed 1"]);
+    }
+
+    #[test]
+    fn a_reminder_already_past_on_a_normal_tick_joins_the_missed_list() {
+        // Final review I1: a catch-up extraction or a past time must not pop up as a toast
+        let mut r = rig("2026-10-06T12:00:00+03:00");
+        r.at("2026-10-06T12:00:00+03:00");
+        r.remind("Sabah ilacı", "2026-10-06", "08:00");
+        r.walk("2026-10-06T12:00:30+03:00");
+        assert_eq!(r.seen(), vec!["missed 1"]);
+    }
+
+    #[test]
+    fn a_tick_delayed_by_a_slow_backup_still_shows_the_reminder() {
+        // Final review I1: a late tick is not a sleep
+        let mut r = rig("2026-10-06T22:00:00+03:00");
+        r.remind("Çöp", "2026-10-06", "22:01");
+        r.at("2026-10-06T22:00:00+03:00");
+        r.at("2026-10-06T22:03:00+03:00");
+        assert_eq!(r.seen(), vec!["reminder Çöp"]);
+    }
+
+    #[test]
+    fn shown_reminders_stay_listed_until_answered() {
+        // Final review C1: the window may open (or the banner mount) after the first tick
+        let mut r = rig("2026-10-06T12:00:00+03:00");
+        let a = r.remind("Sabah", "2026-10-06", "08:00");
+        r.remind("Öğlen", "2026-10-06", "11:00");
+        r.at("2026-10-06T12:00:00+03:00");
+        let pending = r.sched.pending();
+        assert_eq!(pending.current(&r.sched.conn).missed.len(), 2);
+        r.sched.handle(SchedCommand::Done(a));
+        assert_eq!(pending.current(&r.sched.conn).missed.len(), 1);
+        pending.dismiss_missed();
+        assert!(pending.current(&r.sched.conn).missed.is_empty());
+        let b = r.remind("Akşam", "2026-10-06", "12:01");
+        r.walk("2026-10-06T12:01:00+03:00");
+        assert_eq!(pending.current(&r.sched.conn).due.iter().map(|d| d.task_id.clone()).collect::<Vec<_>>(), vec![b.clone()]);
+        r.sched.handle(SchedCommand::Snooze(b));
+        assert!(pending.current(&r.sched.conn).due.is_empty(), "snoozed: gone until it fires again");
+    }
+
+    /// Asks for the pending list the moment it is notified, like the banner does.
+    struct Asks {
+        pending: Arc<Mutex<Option<Arc<Pending>>>>,
+        db: PathBuf,
+        got: Arc<Mutex<Vec<usize>>>,
+    }
+    impl Asks {
+        fn ask(&self) {
+            let conn = rusqlite::Connection::open(&self.db).unwrap();
+            let lists = self.pending.lock().unwrap().as_ref().unwrap().current(&conn);
+            self.got.lock().unwrap().push(lists.due.len() + lists.missed.len());
+        }
+    }
+    impl Notifier for Asks {
+        fn reminder(&self, _: &DueReminder) {
+            self.ask();
+        }
+        fn missed(&self, _: &[DueReminder]) {
+            self.ask();
+        }
+        fn problem(&self, _: &str) {}
+        fn tasks_changed(&self) {}
+    }
+
+    #[test]
+    fn the_list_is_ready_when_the_event_arrives() {
+        // Found in the real window: the banner asked before the reminder was marked and lost it
+        let tmp = tempfile::tempdir().unwrap();
+        let conn = open_databases(&tmp.path().join(".data")).unwrap().pla;
+        for (title, time) in [("Sabah", "08:00"), ("Öğlen", "12:00")] {
+            let input = TaskInput { title: title.into(), date: Some("2026-10-06".into()), time: Some(time.into()), remind: Some(true), ..Default::default() };
+            add_task(&conn, &input, at("2026-10-06T07:00:00+03:00")).unwrap();
+        }
+        let (slot, got) = (Arc::new(Mutex::new(None)), Arc::new(Mutex::new(Vec::new())));
+        let asks = Asks { pending: Arc::clone(&slot), db: tmp.path().join(".data/pla.db"), got: Arc::clone(&got) };
+        let clock = Arc::new(Mutex::new(at("2026-10-06T12:00:00+03:00")));
+        let c = Arc::clone(&clock);
+        let probe = Probe(Arc::new(Mutex::new((0, true))));
+        let mut sched = Scheduler::new(tmp.path().join("kasa"), conn, Box::new(asks), Box::new(probe), Box::new(move || *c.lock().unwrap()));
+        *slot.lock().unwrap() = Some(sched.pending());
+        sched.tick();
+        assert_eq!(*got.lock().unwrap(), vec![1, 2], "missed list, then the on-time one, each already listed");
     }
 
     #[test]

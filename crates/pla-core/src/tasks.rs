@@ -171,11 +171,18 @@ pub fn add_task(conn: &Connection, input: &TaskInput, now: DateTime<FixedOffset>
 
 pub fn edit_task(conn: &Connection, id: &str, input: &TaskInput, now: DateTime<FixedOffset>) -> Result<(), TaskError> {
     let c = clean(input)?;
-    let current: Option<Option<String>> =
-        conn.query_row("SELECT notify_at FROM task WHERE task_id = ?1", [id], |r| r.get(0)).optional()?;
-    let Some(notify_at) = current else { return Err(TaskError::NotFound) };
-    let is_reminder = c.remind.unwrap_or(notify_at.is_some());
-    let notify_at = if is_reminder { notify_for(&c.date, &c.time) } else { None };
+    type Stored = (Option<String>, Option<String>, Option<String>);
+    let current: Option<Stored> = conn
+        .query_row("SELECT notify_at, date, time FROM task WHERE task_id = ?1", [id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+        .optional()?;
+    let Some((stored, date, time)) = current else { return Err(TaskError::NotFound) };
+    let is_reminder = c.remind.unwrap_or(stored.is_some());
+    let notify_at = match stored {
+        _ if !is_reminder => None,
+        // Same day and time: keep the stored moment, which may be a snooze (final review I2).
+        Some(at) if date == c.date && time == c.time => Some(at),
+        _ => notify_for(&c.date, &c.time),
+    };
     conn.execute(
         "UPDATE task SET title = ?1, details = ?2, date = ?3, time = ?4,
                 notified_at = CASE WHEN notify_at IS ?5 THEN notified_at ELSE NULL END, notify_at = ?5, user_modified = 1, updated_at = ?6

@@ -2,11 +2,19 @@
 
 use tauri::menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Emitter, Manager, Wry};
 use tauri_plugin_autostart::ManagerExt;
 
-use crate::commands::AppState;
-use crate::worker::Command;
+/// Kept so a pause from the status bar also updates the tray check (final review I4).
+struct TrayItems {
+    pause: CheckMenuItem<Wry>,
+}
+
+pub fn set_pause_checked(app: &AppHandle, paused: bool) {
+    if let Some(items) = app.try_state::<TrayItems>() {
+        let _ = items.pause.set_checked(paused);
+    }
+}
 
 struct Labels {
     open: &'static str,
@@ -43,6 +51,7 @@ pub fn build(app: &AppHandle) -> tauri::Result<()> {
     let separator = PredefinedMenuItem::separator(app)?;
     let menu = Menu::with_items(app, &[&open, &new_note, &separator, &pause, &autostart, &separator, &quit])?;
 
+    app.manage(TrayItems { pause: pause.clone() });
     let pause_item = pause.clone();
     let autostart_item = autostart.clone();
     TrayIconBuilder::with_id("pla")
@@ -56,13 +65,7 @@ pub fn build(app: &AppHandle) -> tauri::Result<()> {
                 show_main(app);
                 let _ = app.emit("new-note", ());
             }
-            "pause" => {
-                let paused = pause_item.is_checked().unwrap_or(false);
-                if let Some(session) = app.state::<AppState>().session.lock().expect("session lock").as_ref() {
-                    session.worker.send(Command::Pause(paused));
-                }
-                let _ = app.emit("paused-changed", paused);
-            }
+            "pause" => crate::commands::apply_pause(app, pause_item.is_checked().unwrap_or(false)),
             "autostart" => {
                 let on = autostart_item.is_checked().unwrap_or(false);
                 let manager = app.autolaunch();

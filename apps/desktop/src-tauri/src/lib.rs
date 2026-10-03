@@ -10,6 +10,8 @@ pub mod worker;
 
 pub fn run() {
     let app = tauri::Builder::default()
+        // FR-VLT-020: a second launch (e.g. while PLA sits in the tray) shows the running window.
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| tray::show_main(app)))
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_autostart::init(tauri_plugin_autostart::MacosLauncher::LaunchAgent, Some(vec!["--hidden"])))
         .setup(|app| {
@@ -45,6 +47,8 @@ pub fn run() {
             commands::reminder_snooze,
             commands::backup_now,
             commands::set_paused,
+            commands::pending_reminders,
+            commands::dismiss_missed,
             commands::hide_to_tray,
         ])
         .build(tauri::generate_context!())

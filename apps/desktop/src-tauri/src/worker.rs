@@ -38,12 +38,19 @@ pub enum Command {
 pub struct WorkerHandle {
     tx: Sender<Command>,
     cancel: Arc<AtomicBool>,
+    pause: Arc<AtomicBool>,
     join: Option<JoinHandle<()>>,
 }
 
 impl WorkerHandle {
     pub fn send(&self, command: Command) {
         let _ = self.tx.send(command);
+    }
+
+    /// Pauses at once, also in the middle of a run (between two model calls), then tells the thread.
+    pub fn set_paused(&self, paused: bool) {
+        self.pause.store(paused, Ordering::SeqCst);
+        self.send(Command::Pause(paused));
     }
 
     pub fn sender(&self) -> Sender<Command> {
@@ -72,12 +79,16 @@ impl Drop for WorkerHandle {
 struct Cancellable<'a> {
     inner: &'a mut (dyn Extractor + Send),
     cancel: &'a AtomicBool,
+    pause: &'a AtomicBool,
 }
 
 impl Extractor for Cancellable<'_> {
     fn extract_raw(&mut self, reference: NaiveDate, text: &str) -> Result<String, LlmError> {
         if self.cancel.load(Ordering::SeqCst) {
             return Err(LlmError::Http("PLA is closing".into()));
+        }
+        if self.pause.load(Ordering::SeqCst) {
+            return Err(LlmError::Http("background AI is paused".into()));
         }
         self.inner.extract_raw(reference, text)
     }
@@ -124,6 +135,7 @@ pub struct Worker {
     later: HashMap<String, Instant>,
     status: WorkerStatus,
     cancel: Arc<AtomicBool>,
+    pause: Arc<AtomicBool>,
     on_added: Option<AddedListener>,
     /// Reads titles of added items while the main connection is busy in the pipeline.
     reader: Option<Connection>,
@@ -142,6 +154,7 @@ impl Worker {
             external_delay: EXTERNAL_DELAY,
             later: HashMap::new(),
             cancel: Arc::new(AtomicBool::new(false)),
+            pause: Arc::new(AtomicBool::new(false)),
             on_added: None,
             reader,
             status: WorkerStatus { queued: 0, model, busy: false, last_error: None, added: 0, paused: false },
@@ -165,9 +178,9 @@ impl Worker {
 
     pub fn spawn(self) -> WorkerHandle {
         let (tx, rx) = mpsc::channel();
-        let cancel = Arc::clone(&self.cancel);
+        let (cancel, pause) = (Arc::clone(&self.cancel), Arc::clone(&self.pause));
         let join = std::thread::Builder::new().name("pla-worker".into()).spawn(move || self.run(rx)).expect("spawn worker");
-        WorkerHandle { tx, cancel, join: Some(join) }
+        WorkerHandle { tx, cancel, pause, join: Some(join) }
     }
 
     fn run(mut self, rx: Receiver<Command>) {
@@ -188,6 +201,7 @@ impl Worker {
                     self.later.insert(note, Instant::now());
                 }
                 Ok(Command::Pause(paused)) => {
+                    self.pause.store(paused, Ordering::SeqCst);
                     self.status.paused = paused;
                     if !paused {
                         self.process();
@@ -251,7 +265,7 @@ impl Worker {
             self.status.queued = queued_notes(&self.conn).map_or(0, |q| q.len());
             (self.notify)(&self.status); // field borrows: the extractor stays borrowed
             let now = (self.clock)();
-            let mut guarded = Cancellable { inner: extractor.as_mut(), cancel: &self.cancel };
+            let mut guarded = Cancellable { inner: extractor.as_mut(), cancel: &self.cancel, pause: &self.pause };
             let (reader, listener, added) = (&self.reader, &self.on_added, &mut self.status.added);
             // Each note's additions are reported as soon as it is done (FR-EXT-015), not at the end of a long run.
             let mut on_note = |_: &str, outcomes: &[Outcome]| {
@@ -270,6 +284,10 @@ impl Worker {
             match process_queue_with(&self.vault, &mut self.conn, &mut guarded, &PipelineSettings::default(), now, &mut on_note) {
                 Ok(report) => self.status.last_error = report.model_error,
                 Err(e) => self.status.last_error = Some(e.to_string()),
+            }
+            if self.pause.load(Ordering::SeqCst) {
+                self.status.paused = true; // stopped by a pause, not by a failure
+                self.status.last_error = None;
             }
             self.status.busy = false;
         }
@@ -488,6 +506,29 @@ mod tests {
         assert!(reports[0], "the first report came while the run was still going");
         handle.shutdown();
     }
+    #[test]
+    fn pausing_stops_a_running_batch_between_notes() {
+        // Final review I3: the tray says "paused", so the CPU must stop too
+        let tmp = tempfile::tempdir().unwrap();
+        let vault = open_vault(tmp.path()).unwrap();
+        for name in ["a", "b", "c", "d"] {
+            std::fs::write(vault.root.join(format!("notes/{name}.md")), format!("Yarın {name}.")).unwrap();
+        }
+        let conn = open_databases(&tmp.path().join(".data")).unwrap().pla;
+        let statuses = Arc::new(Mutex::new(Vec::<WorkerStatus>::new()));
+        let sink = Arc::clone(&statuses);
+        let handle = Worker::new(vault, conn, Some(Box::new(SlowTask)), Box::new(move |s| sink.lock().unwrap().push(s.clone()))).spawn();
+        wait_for(&statuses, |s| s.busy);
+        handle.set_paused(true);
+        let s = wait_for(&statuses, |s| s.paused && !s.busy);
+        assert!(s.added < 4, "stopped early: {s:?}");
+        assert!(s.queued >= 1, "the rest waits: {s:?}");
+        assert_eq!(s.last_error, None, "a pause is not an error");
+        handle.set_paused(false);
+        wait_for(&statuses, |s| !s.paused && !s.busy && s.added == 4);
+        handle.shutdown();
+    }
+
     #[test]
     fn paused_work_waits_in_the_queue() {
         // FR-SCH-014 / FR-EXT-026
