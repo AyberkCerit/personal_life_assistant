@@ -1,6 +1,10 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { basicSetup } from "codemirror";
+  import CircleAlert from "@lucide/svelte/icons/circle-alert";
+  import Lock from "@lucide/svelte/icons/lock";
+  import { editorExtensions } from "./editorTheme";
+  import Banner from "./ui/Banner.svelte";
+  import Button from "./ui/Button.svelte";
   import { EditorState } from "@codemirror/state";
   import { EditorView } from "@codemirror/view";
   import { markdown } from "@codemirror/lang-markdown";
@@ -36,7 +40,7 @@
       state: EditorState.create({
         doc: note.text,
         extensions: [
-          basicSetup,
+          ...editorExtensions(),
           markdown(),
           EditorView.lineWrapping,
           EditorState.readOnly.of(note.read_only),
@@ -101,26 +105,27 @@
   });
 </script>
 
-{#if readOnly}<div class="banner">{t("editor.readOnly")}</div>{/if}
+{#if readOnly}<Banner kind="warning" icon={Lock}>{t("editor.readOnly")}</Banner>{/if}
 {#if problem === "conflict"}
-  <div class="banner danger" role="alert">
-    <span>{t("conflict.message")}</span>
-    <button onclick={takeExternal}>{t("conflict.takeExternal")}</button>
-    <button onclick={keepMineAsCopy}>{t("conflict.keepMine")}</button>
-  </div>
+  <Banner kind="danger" icon={CircleAlert} role="alert">
+    {t("conflict.message")}
+    {#snippet actions()}
+      <Button onclick={takeExternal}>{t("conflict.takeExternal")}</Button>
+      <Button variant="primary" onclick={keepMineAsCopy}>{t("conflict.keepMine")}</Button>
+    {/snippet}
+  </Banner>
 {:else if problem === "missing"}
-  <div class="banner danger" role="alert">
-    <span>{t("missing.message")}</span>
-    <button onclick={keepMineAsCopy}>{t("conflict.keepMine")}</button>
-  </div>
+  <Banner kind="danger" icon={CircleAlert} role="alert">
+    {t("missing.message")}
+    {#snippet actions()}
+      <Button variant="primary" onclick={keepMineAsCopy}>{t("conflict.keepMine")}</Button>
+    {/snippet}
+  </Banner>
 {/if}
-{#if error}<div class="banner danger" role="alert">{t("error.generic")}: {error}</div>{/if}
+{#if error}<Banner kind="danger" icon={CircleAlert} role="alert">{t("error.generic")}: {error}</Banner>{/if}
 <div class="editor" bind:this={host}></div>
 
 <style>
   .editor { flex: 1; overflow: auto; }
-  .editor :global(.cm-editor) { height: 100%; background: var(--bg); color: var(--text); }
-  .editor :global(.cm-content) { padding: 16px 24px; max-width: 760px; }
-  .editor :global(.cm-gutters) { background: var(--bg); border: 0; color: var(--muted); }
-  .banner button { background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 2px 8px; cursor: pointer; }
+  .editor :global(.cm-editor) { height: 100%; }
 </style>
