@@ -2,6 +2,14 @@
   import { onMount } from "svelte";
   import { api, type DueReminder } from "./api";
   import { t } from "./i18n";
+  import AlarmClock from "@lucide/svelte/icons/alarm-clock";
+  import Check from "@lucide/svelte/icons/check";
+  import Clock from "@lucide/svelte/icons/clock";
+  import History from "@lucide/svelte/icons/history";
+  import X from "@lucide/svelte/icons/x";
+  import Banner from "./ui/Banner.svelte";
+  import Button from "./ui/Button.svelte";
+  import IconButton from "./ui/IconButton.svelte";
 
   // `version` changes whenever tasks change in the panel, so answered reminders disappear here too.
   let { version, onChanged }: { version: number; onChanged: () => void } = $props();
@@ -41,31 +49,34 @@
 
 {#snippet item(r: DueReminder)}
   <li>
-    <span><span aria-hidden="true">⏰</span> <strong>{r.title}</strong> <span class="time">{r.notify_at.slice(11, 16)}</span></span>
-    <button onclick={() => void act(r.task_id, "done")} aria-label={`${t("reminder.done")}: ${r.title}`}>{t("reminder.done")}</button>
-    <button onclick={() => void act(r.task_id, "snooze")} aria-label={`${t("reminder.snooze")}: ${r.title}`}>{t("reminder.snooze")}</button>
+    <span class="what"><strong>{r.title}</strong> <span class="time">{r.notify_at.slice(11, 16)}</span></span>
+    <span class="acts">
+      <Button variant="primary" icon={Check} aria-label={`${t("reminder.done")}: ${r.title}`} onclick={() => void act(r.task_id, "done")}>{t("reminder.done")}</Button>
+      <Button icon={Clock} aria-label={`${t("reminder.snooze")}: ${r.title}`} onclick={() => void act(r.task_id, "snooze")}>{t("reminder.snooze")}</Button>
+    </span>
   </li>
 {/snippet}
 
 {#if due.length}
-  <section class="reminders" role="alert">
+  <Banner kind="reminder" icon={AlarmClock} role="alert">
     <ul>{#each due as r (r.task_id)}{@render item(r)}{/each}</ul>
-  </section>
+  </Banner>
 {/if}
 {#if missed.length}
-  <section class="reminders missed" aria-label={t("reminder.missed")}>
+  <Banner kind="reminder" icon={History} role="region" label={t("reminder.missed")}>
     <h3>{t("reminder.missed")} ({missed.length})</h3>
     <ul>{#each missed as r (r.task_id)}{@render item(r)}{/each}</ul>
-    <button class="close" onclick={() => void dismiss()}>{t("reminder.dismiss")}</button>
-  </section>
+    {#snippet actions()}
+      <IconButton icon={X} label={t("reminder.dismiss")} onclick={() => void dismiss()} />
+    {/snippet}
+  </Banner>
 {/if}
 
 <style>
-  .reminders { border-bottom: 1px solid var(--border); background: var(--panel); padding: 8px 12px; }
-  .missed h3 { margin: 0 0 4px; font-size: 13px; color: var(--muted); }
-  ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
-  li { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-  .time { color: var(--muted); font-size: 12px; }
-  button { background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 2px 8px; cursor: pointer; }
-  .close { margin-top: 6px; }
+  h3 { margin: 0 0 var(--space-1); font-size: var(--text-sm); font-weight: 600; color: var(--color-text-muted); }
+  ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--space-2); }
+  li { display: flex; gap: var(--space-2); align-items: center; flex-wrap: wrap; justify-content: space-between; }
+  .what { min-width: 0; overflow-wrap: anywhere; }
+  .time { color: var(--color-text-muted); font-size: var(--text-sm); }
+  .acts { display: flex; gap: var(--space-2); }
 </style>

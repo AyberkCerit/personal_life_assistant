@@ -8,9 +8,7 @@ const sources = import.meta.glob(["../**/*.svelte", "../**/*.css", "../**/*.ts",
 }) as Record<string, string>;
 
 /** Not migrated yet; each task removes the files it moves onto the tokens. Task 8 deletes this set. */
-export const PENDING = new Set([
-  "../lib/ReminderBanner.svelte",
-  "../lib/AddedToast.svelte",
+export const PENDING = new Set<string>([
 ]);
 
 const RULES: [string, RegExp][] = [
