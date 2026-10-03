@@ -114,6 +114,13 @@ mod tests {
     }
 
     #[test]
+    fn a_fresh_clone_has_the_llama_folder_tauri_build_needs() {
+        // Final review I2: tauri-build fails when a resource folder is missing; the binaries are
+        // git-ignored, the explaining README is not
+        assert!(include_str!("../llama/README.md").contains("npm run fetch-llama"));
+    }
+
+    #[test]
     fn the_bundled_llama_server_is_packaged() {
         // Model-manager spec § 5: src-tauri/llama/ ships as a resource
         let conf: serde_json::Value = serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();

@@ -50,6 +50,18 @@ pub struct AppState {
     pub paused: AtomicBool,
     /// The model download outlives vault switches (model-manager spec § 5).
     pub downloads: crate::model_download::ModelDownloads,
+    /// Held for every load-modify-save of settings.json, and while a vault opens, so a finished
+    /// download, a vault switch and the tray hint never overwrite each other (final review I5).
+    pub settings_lock: Mutex<()>,
+}
+
+/// Load, change and save settings.json under `lock`.
+fn update_settings(root: &Path, lock: &Mutex<()>, change: impl FnOnce(&mut AppSettings)) -> Result<AppSettings, String> {
+    let _guard = lock.lock().expect("settings lock");
+    let mut settings = load_settings(root).map_err(|e| e.to_string())?.settings;
+    change(&mut settings);
+    save_settings(root, &settings).map_err(|e| e.to_string())?;
+    Ok(settings)
 }
 
 #[derive(Serialize)]
@@ -150,6 +162,7 @@ fn with_vault<T>(state: &State<AppState>, f: impl FnOnce(&Vault) -> Result<T, Fi
 #[tauri::command]
 pub fn startup(app: AppHandle, state: State<AppState>) -> Result<StartupInfo, String> {
     let root = app_root()?;
+    let _settings_guard = state.settings_lock.lock().expect("settings lock");
     let loaded = load_settings(&root).map_err(|e| e.to_string())?;
     let theme = match loaded.settings.theme {
         Theme::Dark => "dark",
@@ -184,6 +197,7 @@ pub fn startup(app: AppHandle, state: State<AppState>) -> Result<StartupInfo, St
 #[tauri::command]
 pub fn open_vault(app: AppHandle, state: State<AppState>, path: String) -> Result<VaultInfo, String> {
     let root = app_root()?;
+    let _settings_guard = state.settings_lock.lock().expect("settings lock");
     let mut settings = load_settings(&root).map_err(|e| e.to_string())?.settings;
     // Stop the previous vault before opening the next, outside the lock: one writer per pla.db.
     let previous = state.session.lock().expect("session lock").take();
@@ -409,15 +423,16 @@ pub fn set_paused(app: AppHandle, paused: bool) -> Result<(), String> {
 
 /// FR-SCH-001: closing the window keeps PLA in the tray; the first time, say so.
 #[tauri::command]
-pub fn hide_to_tray(window: tauri::WebviewWindow) -> Result<(), String> {
+pub fn hide_to_tray(window: tauri::WebviewWindow, state: State<AppState>) -> Result<(), String> {
     window.hide().map_err(|e| e.to_string())?;
-    let root = app_root()?;
-    let mut settings = load_settings(&root).map_err(|e| e.to_string())?.settings;
-    if !settings.tray_hint_shown {
+    let mut first_time = false;
+    update_settings(&app_root()?, &state.settings_lock, |s| {
+        first_time = !s.tray_hint_shown;
+        s.tray_hint_shown = true;
+    })?;
+    if first_time {
         let s = strings();
         show_info(s.tray_title, s.tray_body);
-        settings.tray_hint_shown = true;
-        save_settings(&root, &settings).map_err(|e| e.to_string())?;
     }
     Ok(())
 }
@@ -455,6 +470,7 @@ fn apply_local_model(settings: &mut AppSettings, path: &Path) -> Result<Installe
     let model = local::validate_gguf(path).map_err(|e| match e {
         local::LocalModelError::NotFound(_) => "not_found".to_owned(),
         local::LocalModelError::NotGguf(_) => "not_gguf".to_owned(),
+        local::LocalModelError::Incomplete { .. } => "incomplete".to_owned(),
         local::LocalModelError::Io(e) => format!("io:{e}"),
     })?;
     settings.model_path = Some(model.path.clone());
@@ -463,9 +479,13 @@ fn apply_local_model(settings: &mut AppSettings, path: &Path) -> Result<Installe
 }
 
 /// Saves the model in the settings, hands it to the running worker and tells the UI.
-fn install_model(app: &AppHandle, settings: &AppSettings, installed: &InstalledModel) -> Result<(), String> {
-    save_settings(&app_root()?, settings).map_err(|e| e.to_string())?;
-    if let Some(cfg) = crate::model_paths::server_config(settings, &crate::model_paths::process_env, bundled_server(app)) {
+fn install_model(app: &AppHandle, model_path: &Path, model_id: Option<&str>, installed: &InstalledModel) -> Result<(), String> {
+    let state = app.state::<AppState>();
+    let settings = update_settings(&app_root()?, &state.settings_lock, |s| {
+        s.model_path = Some(model_path.to_path_buf());
+        s.model_id = model_id.map(str::to_owned);
+    })?;
+    if let Some(cfg) = crate::model_paths::server_config(&settings, &crate::model_paths::process_env, bundled_server(app)) {
         if let Some(session) = app.state::<AppState>().session.lock().expect("session lock").as_ref() {
             session.worker.send(Command::UseModel(cfg));
         }
@@ -486,32 +506,50 @@ pub fn model_status(state: State<AppState>) -> Result<ModelStatus, String> {
     })
 }
 
+/// The download source: the catalogue on Hugging Face, or, in debug builds only, the file at
+/// `PLA_DEV_MODEL_URL` on this PC, so pause/resume/quit can be checked without 2.4 GB from the
+/// internet (final review I6). Release builds ignore the variable.
+fn download_source() -> (&'static catalog::CatalogEntry, Box<dyn models::policy::UrlPolicy>) {
+    #[cfg(debug_assertions)]
+    if let Ok(url) = std::env::var("PLA_DEV_MODEL_URL") {
+        let entry = catalog::CatalogEntry { url: Box::leak(url.into_boxed_str()), ..catalog::recommended().clone() };
+        return (Box::leak(Box::new(entry)), Box::new(DevLocal));
+    }
+    (catalog::recommended(), Box::new(models::policy::HuggingFace))
+}
+
+/// Debug builds: the production allow-list plus `127.0.0.1`.
+#[cfg(debug_assertions)]
+struct DevLocal;
+
+#[cfg(debug_assertions)]
+impl models::policy::UrlPolicy for DevLocal {
+    fn allows(&self, url: &str) -> Result<(), models::policy::PolicyError> {
+        match models::policy::scheme_and_host(url)? {
+            (_, host) if host == "127.0.0.1" => Ok(()),
+            _ => models::policy::HuggingFace.allows(url),
+        }
+    }
+}
+
 #[tauri::command]
 pub fn model_download_start(app: AppHandle, state: State<AppState>) -> Result<(), String> {
     let dir = models::models_dir().ok_or("LOCALAPPDATA is not set; PLA cannot store the model.")?;
-    let entry = catalog::recommended();
+    let (entry, policy) = download_source();
     let (events, done_app) = (app.clone(), app.clone());
     state
         .downloads
         .start(
             move |cancel, report| {
-                let req = dl::Request { entry, dir: &dir, policy: &models::policy::HuggingFace, free_space: &dl::free_space, cancel, progress_every: Duration::from_secs(1) };
+                let req = dl::Request { entry, dir: &dir, policy: policy.as_ref(), free_space: &dl::free_space, cancel, progress_every: Duration::from_secs(1), stall_after: Duration::from_secs(60) };
                 dl::download(&req, report)
             },
             move |s| {
                 let _ = events.emit("model-download", s);
             },
             move |path| {
-                let root = match app_root() {
-                    Ok(r) => r,
-                    Err(_) => return,
-                };
-                let Ok(loaded) = load_settings(&root) else { return };
-                let mut settings = loaded.settings;
-                settings.model_path = Some(path.clone());
-                settings.model_id = Some(entry.id.to_owned());
                 if let Some(installed) = describe_model(&path, Some(entry.id)) {
-                    let _ = install_model(&done_app, &settings, &installed);
+                    let _ = install_model(&done_app, &path, Some(entry.id), &installed);
                     crate::notify::model_ready(&done_app);
                 }
             },
@@ -526,10 +564,11 @@ pub fn model_download_pause(state: State<AppState>) {
 
 #[tauri::command]
 pub fn model_use_local(app: AppHandle, path: String) -> Result<InstalledModel, String> {
-    let root = app_root()?;
-    let mut settings = load_settings(&root).map_err(|e| e.to_string())?.settings;
-    let installed = apply_local_model(&mut settings, Path::new(&path))?;
-    install_model(&app, &settings, &installed)?;
+    // Checked first, so a wrong file changes nothing (Review Focus 5).
+    let mut checked = AppSettings::default();
+    let installed = apply_local_model(&mut checked, Path::new(&path))?;
+    let model_path = checked.model_path.expect("set by apply_local_model");
+    install_model(&app, &model_path, None, &installed)?;
     Ok(installed)
 }
 
@@ -560,5 +599,36 @@ mod tests {
         assert_eq!((settings.model_path.as_deref(), settings.model_id.as_deref()), (Some(p.as_path()), None));
         assert!(installed.local);
         assert_eq!(installed.size, 8);
+    }
+
+    #[test]
+    fn settings_written_from_two_places_keep_both_changes() {
+        // Final review I5: a vault switch and a finished download must not overwrite each other
+        let tmp = tempfile::tempdir().unwrap();
+        let lock = Mutex::new(());
+        std::thread::scope(|scope| {
+            scope.spawn(|| {
+                for i in 0..30 {
+                    update_settings(tmp.path(), &lock, |s| s.vault_path = Some(format!("C:/v{i}").into())).unwrap();
+                }
+            });
+            scope.spawn(|| {
+                for i in 0..30 {
+                    update_settings(tmp.path(), &lock, |s| s.model_path = Some(format!("C:/m{i}.gguf").into())).unwrap();
+                }
+            });
+        });
+        let s = load_settings(tmp.path()).unwrap().settings;
+        assert_eq!((s.vault_path, s.model_path), (Some("C:/v29".into()), Some("C:/m29.gguf".into())));
+    }
+
+    #[test]
+    fn the_debug_download_hook_reaches_only_this_pc() {
+        // Final review I6: lets the end-to-end checks use a local server instead of 2.4 GB from HF
+        use pla_core::models::policy::{PolicyError, UrlPolicy};
+        assert_eq!(DevLocal.allows("http://127.0.0.1:8765/model.gguf"), Ok(()));
+        assert_eq!(DevLocal.allows("https://huggingface.co/x"), Ok(()));
+        assert_eq!(DevLocal.allows("http://example.com/x"), Err(PolicyError::NotHttps));
+        assert!(matches!(DevLocal.allows("https://evil.com/x"), Err(PolicyError::HostNotAllowed(_))));
     }
 }

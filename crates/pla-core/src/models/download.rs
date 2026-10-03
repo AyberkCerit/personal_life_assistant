@@ -5,6 +5,7 @@ use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 use serde::Serialize;
@@ -68,6 +69,9 @@ pub struct Request<'a> {
     pub cancel: &'a AtomicBool,
     /// How often progress is reported (1 s in the app).
     pub progress_every: Duration,
+    /// Give up (keeping the part) when no data arrives for this long: a dropped Wi-Fi or a stalled
+    /// CDN may never close the connection (final review C1). 60 s in the app.
+    pub stall_after: Duration,
 }
 
 pub fn part_path(dir: &Path, entry: &CatalogEntry) -> PathBuf {
@@ -90,9 +94,14 @@ pub fn download(req: &Request, progress: &mut dyn FnMut(Progress)) -> Result<Pat
     if available < needed {
         return Err(DownloadError::InsufficientSpace { needed, available });
     }
+    // Shows where a resume starts before the (possibly slow) re-hash and the first answer.
+    progress(Progress { received: have, total: size, bytes_per_sec: 0, eta_secs: None });
     let mut hasher = Sha256::new();
     if have > 0 {
-        hash_file(&part, &mut hasher)?;
+        hash_file(&part, &mut hasher, req.cancel)?;
+    }
+    if req.cancel.load(Ordering::SeqCst) {
+        return Err(DownloadError::Paused);
     }
     if have < size {
         let response = open(req, have)?;
@@ -105,23 +114,38 @@ pub fn download(req: &Request, progress: &mut dyn FnMut(Progress)) -> Result<Pat
             }
             code => return Err(DownloadError::Network(format!("the server answered HTTP {code}"))),
         };
-        let mut reader = response.into_body().into_reader();
-        let mut buf = vec![0u8; CHUNK];
+        let chunks = read_in_background(response.into_body().into_reader());
         let started = Instant::now();
         let start_bytes = have;
         let mut last_report: Option<Instant> = None;
+        let mut last_data = Instant::now();
         loop {
             if req.cancel.load(Ordering::SeqCst) {
                 file.flush()?;
                 return Err(DownloadError::Paused);
             }
-            let n = reader.read(&mut buf).map_err(|e| DownloadError::Network(e.to_string()))?;
-            if n == 0 {
+            let chunk = match chunks.recv_timeout(Duration::from_millis(100)) {
+                Ok(Ok(chunk)) => chunk,
+                Ok(Err(e)) => {
+                    file.flush()?;
+                    return Err(DownloadError::Network(e));
+                }
+                Err(mpsc::RecvTimeoutError::Timeout) => {
+                    if last_data.elapsed() >= req.stall_after {
+                        file.flush()?;
+                        return Err(DownloadError::Network(format!("no data for {} s", req.stall_after.as_secs())));
+                    }
+                    continue;
+                }
+                Err(mpsc::RecvTimeoutError::Disconnected) => break,
+            };
+            if chunk.is_empty() {
                 break;
             }
-            file.write_all(&buf[..n])?;
-            hasher.update(&buf[..n]);
-            have += n as u64;
+            last_data = Instant::now();
+            file.write_all(&chunk)?;
+            hasher.update(&chunk);
+            have += chunk.len() as u64;
             if last_report.is_none_or(|t| t.elapsed() >= req.progress_every) || have == size {
                 last_report = Some(Instant::now());
                 let secs = started.elapsed().as_secs_f64().max(0.001);
@@ -190,10 +214,40 @@ fn absolute(base: &str, location: &str) -> Result<String, DownloadError> {
     }
 }
 
-fn hash_file(path: &Path, hasher: &mut Sha256) -> Result<(), DownloadError> {
+/// Reads the body on its own thread, so a silent connection cannot block pause or the stall
+/// timeout. An empty chunk means the body ended; a reader stuck on a dead socket is left behind.
+fn read_in_background(mut reader: impl Read + Send + 'static) -> mpsc::Receiver<Result<Vec<u8>, String>> {
+    let (tx, rx) = mpsc::sync_channel(8);
+    std::thread::spawn(move || {
+        let mut buf = vec![0u8; CHUNK];
+        loop {
+            match reader.read(&mut buf) {
+                Ok(0) => {
+                    let _ = tx.send(Ok(Vec::new()));
+                    return;
+                }
+                Ok(n) => {
+                    if tx.send(Ok(buf[..n].to_vec())).is_err() {
+                        return;
+                    }
+                }
+                Err(e) => {
+                    let _ = tx.send(Err(e.to_string()));
+                    return;
+                }
+            }
+        }
+    });
+    rx
+}
+
+fn hash_file(path: &Path, hasher: &mut Sha256, cancel: &AtomicBool) -> Result<(), DownloadError> {
     let mut file = File::open(path)?;
     let mut buf = vec![0u8; CHUNK];
     loop {
+        if cancel.load(Ordering::SeqCst) {
+            return Err(DownloadError::Paused);
+        }
         let n = file.read(&mut buf)?;
         if n == 0 {
             return Ok(());
@@ -247,6 +301,8 @@ mod tests {
         IgnoreRange,
         /// The first response announces the whole body but stops after this many bytes.
         DropFirstAfter(usize),
+        /// The first response sends this many bytes, then goes silent for 5 s without closing.
+        StallFirstAfter(usize),
         RedirectTo(String),
         Corrupt,
     }
@@ -290,6 +346,11 @@ mod tests {
                 let status = if honour_range { "206 Partial Content" } else { "200 OK" };
                 write!(stream, "HTTP/1.1 {status}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", part.len()).unwrap();
                 match mode {
+                    Mode::StallFirstAfter(k) if n == 0 => {
+                        let _ = stream.write_all(&part[..k]);
+                        let _ = stream.flush();
+                        std::thread::sleep(Duration::from_secs(5));
+                    }
                     Mode::DropFirstAfter(k) if n == 0 => {
                         let _ = stream.write_all(&part[..k]);
                     }
@@ -337,7 +398,7 @@ mod tests {
     }
 
     fn run(e: &CatalogEntry, dir: &Path, cancel: &AtomicBool, progress: &mut dyn FnMut(Progress)) -> Result<PathBuf, DownloadError> {
-        let req = Request { entry: e, dir, policy: &LocalOnly, free_space: &plenty, cancel, progress_every: Duration::ZERO };
+        let req = Request { entry: e, dir, policy: &LocalOnly, free_space: &plenty, cancel, progress_every: Duration::ZERO, stall_after: Duration::from_millis(400) };
         download(&req, progress)
     }
 
@@ -423,7 +484,7 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let e = entry(&url, &data);
         let small = |_: &Path| 10u64;
-        let req = Request { entry: &e, dir: tmp.path(), policy: &LocalOnly, free_space: &small, cancel: &AtomicBool::new(false), progress_every: Duration::ZERO };
+        let req = Request { entry: &e, dir: tmp.path(), policy: &LocalOnly, free_space: &small, cancel: &AtomicBool::new(false), progress_every: Duration::ZERO, stall_after: Duration::from_millis(400) };
         assert_eq!(download(&req, &mut |_| {}), Err(DownloadError::InsufficientSpace { needed: 300_000 + SPARE_BYTES, available: 10 }));
         assert!(seen.lock().unwrap().is_empty());
     }
@@ -435,7 +496,15 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let e = entry(&url, &data);
         let cancel = AtomicBool::new(false);
-        assert_eq!(run(&e, tmp.path(), &cancel, &mut |_| cancel.store(true, Ordering::SeqCst)), Err(DownloadError::Paused));
+        // pause once data has arrived (the first report, before any request, has 0 bytes)
+        assert_eq!(
+            run(&e, tmp.path(), &cancel, &mut |p| {
+                if p.received > 0 {
+                    cancel.store(true, Ordering::SeqCst)
+                }
+            }),
+            Err(DownloadError::Paused)
+        );
         assert!(std::fs::metadata(part_path(tmp.path(), &e)).unwrap().len() > 0);
         cancel.store(false, Ordering::SeqCst);
         assert_eq!(std::fs::read(run(&e, tmp.path(), &cancel, &mut |_| {}).unwrap()).unwrap(), data);
@@ -445,5 +514,64 @@ mod tests {
     fn reads_the_free_space_of_a_real_disk() {
         let tmp = tempfile::tempdir().unwrap();
         assert!(free_space(tmp.path()) > 0);
+    }
+
+    #[test]
+    fn a_silent_connection_fails_as_a_network_error_and_keeps_the_part() {
+        // Final review C1: no FIN/RST, the data just stops (Wi-Fi gone, stalled CDN)
+        let data = body();
+        let (url, seen) = serve(data.clone(), Mode::StallFirstAfter(100_000));
+        let tmp = tempfile::tempdir().unwrap();
+        let e = entry(&url, &data);
+        let started = std::time::Instant::now();
+        assert!(matches!(run(&e, tmp.path(), &AtomicBool::new(false), &mut |_| {}), Err(DownloadError::Network(_))));
+        assert!(started.elapsed() < Duration::from_secs(3), "gave up after {:?}", started.elapsed());
+        assert_eq!(std::fs::metadata(part_path(tmp.path(), &e)).unwrap().len(), 100_000);
+        let path = run(&e, tmp.path(), &AtomicBool::new(false), &mut |_| {}).unwrap();
+        assert_eq!(std::fs::read(path).unwrap(), data);
+        assert_eq!(seen.lock().unwrap().last().unwrap(), "/model from=100000");
+    }
+
+    #[test]
+    fn pause_answers_at_once_while_the_connection_is_silent() {
+        let data = body();
+        let (url, _) = serve(data.clone(), Mode::StallFirstAfter(100_000));
+        let tmp = tempfile::tempdir().unwrap();
+        let e = entry(&url, &data);
+        let cancel = AtomicBool::new(false);
+        let started = std::time::Instant::now();
+        let req = Request { entry: &e, dir: tmp.path(), policy: &LocalOnly, free_space: &plenty, cancel: &cancel, progress_every: Duration::ZERO, stall_after: Duration::from_secs(30) };
+        let result = std::thread::scope(|scope| {
+            scope.spawn(|| {
+                std::thread::sleep(Duration::from_millis(300));
+                cancel.store(true, Ordering::SeqCst);
+            });
+            download(&req, &mut |_| {})
+        });
+        assert_eq!(result, Err(DownloadError::Paused));
+        assert!(started.elapsed() < Duration::from_secs(2), "paused after {:?}", started.elapsed());
+    }
+
+    #[test]
+    fn reports_the_bytes_already_on_disk_before_any_request() {
+        // Final review I4: the card shows where a resume starts, even before the server answers
+        let data = body();
+        let tmp = tempfile::tempdir().unwrap();
+        let e = entry("http://127.0.0.1:9/never", &data);
+        std::fs::write(part_path(tmp.path(), &e), &data[..1000]).unwrap();
+        let mut first = None;
+        let _ = run(&e, tmp.path(), &AtomicBool::new(false), &mut |p| {
+            first.get_or_insert(p);
+        });
+        assert_eq!(first.map(|p| (p.received, p.total)), Some((1000, 300_000)));
+    }
+
+    #[test]
+    fn pausing_while_the_part_is_rehashed_stops_before_any_request() {
+        let data = body();
+        let tmp = tempfile::tempdir().unwrap();
+        let e = entry("http://127.0.0.1:9/never", &data);
+        std::fs::write(part_path(tmp.path(), &e), &data[..1000]).unwrap();
+        assert_eq!(run(&e, tmp.path(), &AtomicBool::new(true), &mut |_| {}), Err(DownloadError::Paused));
     }
 }

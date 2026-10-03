@@ -33,7 +33,11 @@
   async function start() {
     confirming = false;
     localError = null;
-    await api.modelDownloadStart();
+    try {
+      await api.modelDownloadStart();
+    } catch (e) {
+      localError = String(e); // e.g. "already running" (final review I4)
+    }
   }
 
   async function chooseFile() {
@@ -44,7 +48,8 @@
       await api.modelUseLocal(picked);
       onDone();
     } catch (e) {
-      const code = String(e).includes("not_found") ? "not_found" : "not_gguf";
+      const text = String(e);
+      const code = text.includes("not_found") ? "not_found" : text.includes("incomplete") ? "incomplete" : "not_gguf";
       localError = t(`model.error.${code}` as Key);
     }
   }

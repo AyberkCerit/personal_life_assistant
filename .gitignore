@@ -23,7 +23,8 @@ pnpm-debug.log*
 *.safetensors
 models/
 !crates/pla-core/src/models/
-apps/desktop/src-tauri/llama/
+apps/desktop/src-tauri/llama/*
+!apps/desktop/src-tauri/llama/README.md
 
 # Local databases and test vaults
 *.db

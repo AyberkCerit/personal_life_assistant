@@ -18,6 +18,8 @@ pub enum LocalModelError {
     NotFound(PathBuf),
     #[error("not a GGUF model file: {0}")]
     NotGguf(PathBuf),
+    #[error("the file is incomplete: {actual} of {expected} bytes")]
+    Incomplete { expected: u64, actual: u64 },
     #[error(transparent)]
     Io(#[from] std::io::Error),
 }
@@ -40,6 +42,14 @@ pub fn validate_gguf(path: &Path) -> Result<LocalModel, LocalModelError> {
     let version = u32::from_le_bytes([head[4], head[5], head[6], head[7]]);
     if &head[..4] != b"GGUF" || !(2..=3).contains(&version) {
         return Err(LocalModelError::NotGguf(path.to_path_buf()));
+    }
+    // A catalogue model under its own name must be whole (a renamed, unfinished download is not;
+    // final review I3). Other files are checked by llama-server when it loads them.
+    let name = path.file_name().map(|n| n.to_string_lossy().to_ascii_lowercase());
+    if let Some(entry) = name.and_then(|n| crate::models::catalog::by_file_name(&n)) {
+        if meta.len() != entry.size {
+            return Err(LocalModelError::Incomplete { expected: entry.size, actual: meta.len() });
+        }
     }
     Ok(LocalModel { path: path.to_path_buf(), size: meta.len() })
 }
@@ -77,5 +87,19 @@ mod tests {
         assert!(matches!(validate_gguf(&future), Err(LocalModelError::NotGguf(_))));
         assert!(matches!(validate_gguf(&tmp.path().join("missing.gguf")), Err(LocalModelError::NotFound(_))));
         assert!(matches!(validate_gguf(tmp.path()), Err(LocalModelError::NotGguf(_) | LocalModelError::Io(_))), "a folder is not a model");
+    }
+
+    #[test]
+    fn a_truncated_copy_of_the_catalogue_model_is_refused() {
+        // Final review I3: a renamed .part has the right header but not the whole file
+        let tmp = tempfile::tempdir().unwrap();
+        let mut bytes = b"GGUF".to_vec();
+        bytes.extend_from_slice(&3u32.to_le_bytes());
+        bytes.extend_from_slice(&[0u8; 1000]);
+        let p = write(tmp.path(), crate::models::catalog::recommended().file_name, &bytes);
+        match validate_gguf(&p) {
+            Err(LocalModelError::Incomplete { expected, actual }) => assert_eq!((expected, actual), (2_536_786_016, 1008)),
+            other => panic!("{other:?}"),
+        }
     }
 }

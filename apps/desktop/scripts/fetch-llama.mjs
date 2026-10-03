@@ -18,8 +18,9 @@ if (!existsSync(join(source, "llama-server.exe"))) {
   console.error(`No llama-server.exe in ${source}. Pass --from <folder> with llama.cpp b${BUILD} (Windows x64, CPU).`);
   process.exit(1);
 }
-rmSync(target, { recursive: true, force: true });
 mkdirSync(target, { recursive: true });
+// Keep the committed README; replace everything else.
+for (const f of readdirSync(target)) if (f !== "README.md") rmSync(join(target, f), { recursive: true, force: true });
 const cpu = readdirSync(source).filter((f) => /^ggml-cpu-.*\.dll$/.test(f));
 for (const f of [...FILES, ...cpu]) copyFileSync(join(source, f), join(target, f));
 for (const f of readdirSync(join(desktop, "src-tauri", "llama-licenses"))) copyFileSync(join(desktop, "src-tauri", "llama-licenses", f), join(target, f));
@@ -35,6 +36,6 @@ const devDir = resolve(desktop, "../../target/debug");
 if (existsSync(devDir)) {
   rmSync(join(devDir, "llama"), { recursive: true, force: true });
   mkdirSync(join(devDir, "llama"), { recursive: true });
-  for (const f of readdirSync(target)) copyFileSync(join(target, f), join(devDir, "llama", f));
+  for (const f of readdirSync(target)) if (f !== "README.md") copyFileSync(join(target, f), join(devDir, "llama", f));
 }
 console.log(`llama-server b${BUILD}: ${FILES.length + cpu.length} files in ${target}`);

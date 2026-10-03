@@ -36,6 +36,11 @@ pub fn by_id(id: &str) -> Option<&'static CatalogEntry> {
     (RECOMMENDED.id == id).then_some(&RECOMMENDED)
 }
 
+/// The catalogue entry whose file has this (lower-case) name.
+pub fn by_file_name(name: &str) -> Option<&'static CatalogEntry> {
+    (RECOMMENDED.file_name.eq_ignore_ascii_case(name)).then_some(&RECOMMENDED)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
