@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { dayLabel, filterByOrigin, groupTasks, isOverdue, isReminder, msUntilNextDay, revealRange, todayIso, type Labels, type Task } from "./tasks";
+import { aiMark, dayLabel, filterByOrigin, groupTasks, isOverdue, isReminder, msUntilNextDay, revealRange, todayIso, type Labels, type Task } from "./tasks";
 
 const L: Labels = { today: "Bugün", tomorrow: "Yarın", noDate: "Tarihsiz", overdue: "Gecikmiş" };
 const TODAY = "2026-10-06";
@@ -12,6 +12,12 @@ function task(title: string, date: string | null, extra: Partial<Task> = {}): Ta
 }
 
 describe("tasks", () => {
+  it("marks AI items with a badge until the user edits them (IR-UI-007)", () => {
+    expect(aiMark(task("a", null, { origin: "extracted" }))).toBe("ai");
+    expect(aiMark(task("b", null, { origin: "extracted", user_modified: true }))).toBe("edited");
+    expect(aiMark(task("c", null, { origin: "manual", user_modified: true }))).toBeNull();
+  });
+
   it("knows today's date in local time", () => {
     expect(todayIso(new Date(2026, 9, 6, 23, 59))).toBe("2026-10-06");
   });

@@ -101,3 +101,9 @@ export function revealRange(fileText: string, block: string): { anchor: number; 
 export function isReminder(task: Task): boolean {
   return task.notify_at !== null;
 }
+
+/** How an item's AI origin shows (IR-UI-007): a badge until the user edits it, then a quiet note. */
+export function aiMark(task: Pick<Task, "origin" | "user_modified">): "ai" | "edited" | null {
+  if (task.origin !== "extracted") return null;
+  return task.user_modified ? "edited" : "ai";
+}

@@ -9,8 +9,6 @@ const sources = import.meta.glob(["../**/*.svelte", "../**/*.css", "../**/*.ts",
 
 /** Not migrated yet; each task removes the files it moves onto the tokens. Task 8 deletes this set. */
 export const PENDING = new Set([
-  "../lib/TaskPanel.svelte",
-  "../lib/TaskRow.svelte",
   "../lib/ReminderBanner.svelte",
   "../lib/AddedToast.svelte",
 ]);

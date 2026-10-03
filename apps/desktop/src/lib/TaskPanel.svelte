@@ -4,6 +4,26 @@
   import { filterByOrigin, groupTasks, msUntilNextDay, todayIso, type OriginFilter, type TaskList } from "./tasks";
   import TaskRow from "./TaskRow.svelte";
   import { lang, t } from "./i18n";
+  import CalendarCheck from "@lucide/svelte/icons/calendar-check";
+  import CircleAlert from "@lucide/svelte/icons/circle-alert";
+  import CircleCheck from "@lucide/svelte/icons/circle-check";
+  import Inbox from "@lucide/svelte/icons/inbox";
+  import Sparkles from "@lucide/svelte/icons/sparkles";
+  import Banner from "./ui/Banner.svelte";
+  import Button from "./ui/Button.svelte";
+  import Checkbox from "./ui/Checkbox.svelte";
+  import EmptyState from "./ui/EmptyState.svelte";
+  import Icon from "./ui/Icon.svelte";
+
+  let tabsEl: HTMLDivElement | undefined = $state();
+  let indicator = $state({ x: 0, w: 0 });
+
+  // The accent underline slides to the selected tab (spec § 6).
+  $effect(() => {
+    void tab;
+    const el = tabsEl?.querySelector<HTMLElement>('[aria-selected="true"]');
+    if (el) indicator = { x: el.offsetLeft, w: el.offsetWidth };
+  });
 
   let {
     version,
@@ -90,15 +110,16 @@
 </script>
 
 <section class="panel" aria-label={t("tasks.today")}>
-  <div class="tabs" role="tablist" tabindex="-1" onkeydown={onTabKey}>
+  <div class="tabs" role="tablist" tabindex="-1" onkeydown={onTabKey} bind:this={tabsEl}>
     {#each TABS as name (name)}
       <button role="tab" aria-selected={tab === name} tabindex={tab === name ? 0 : -1} onclick={() => (tab = name)}>
         {t(`tasks.${name}` as const)}
       </button>
     {/each}
+    <span class="indicator" aria-hidden="true" style:transform={`translateX(${indicator.x}px)`} style:width={`${indicator.w}px`}></span>
   </div>
 
-  {#if error}<div class="banner danger" role="alert">{t("error.generic")}: {error}</div>{/if}
+  {#if error}<Banner kind="danger" icon={CircleAlert} role="alert">{t("error.generic")}: {error}</Banner>{/if}
 
   {#if tab !== "review"}
     <div class="tools">
@@ -118,7 +139,9 @@
           <input type="date" bind:value={newDate} aria-label={t("tasks.date")} />
           <input type="time" bind:value={newTime} aria-label={t("tasks.time")} />
         </div>
-        <label class="check" title={newDate ? undefined : t("tasks.remindNeedsDate")}><input type="checkbox" bind:checked={newRemind} disabled={!newDate} /> {t("tasks.remind")}</label>
+        <span title={newDate ? undefined : t("tasks.remindNeedsDate")}>
+          <Checkbox bind:checked={newRemind} label={t("tasks.remind")} disabled={!newDate} />
+        </span>
       </form>
     {/if}
     {#each groups as group (group.key)}
@@ -136,13 +159,17 @@
         {/each}
       </ul>
     {:else}
-      <p class="empty-list">{t("tasks.empty")}</p>
+      {#if tab === "completed"}
+        <EmptyState icon={CircleCheck} title={t("tasks.empty")} />
+      {:else}
+        <EmptyState icon={CalendarCheck} title={t("tasks.empty")} hint={t("tasks.emptyHint")} />
+      {/if}
     {/each}
   {:else}
-    <ul>
+    <ul class="cards">
       {#each review as item (item.review_id)}
-        <li class="review">
-          <div class="reason">{item.reason}</div>
+        <li class="card">
+          <p class="reason"><Icon icon={Sparkles} size="sm" />{item.reason}</p>
           {#if item.block_text}<blockquote>{item.block_text}</blockquote>{/if}
           {#if item.is_action}
             <form
@@ -157,44 +184,54 @@
                 <input type="time" bind:value={reviewForms[item.review_id].time} aria-label={t("tasks.time")} />
               </div>
               <div class="actions">
-                <button type="submit">{t("review.accept")}</button>
-                <button type="button" onclick={() => void run(() => api.rejectReview(item.review_id))}>{t("review.reject")}</button>
+                <Button type="submit" variant="primary">{t("review.accept")}</Button>
+                <Button variant="quiet" onclick={() => void run(() => api.rejectReview(item.review_id))}>{t("review.reject")}</Button>
               </div>
             </form>
           {:else}
             <p class="hint">{t("review.metricHint")}</p>
-            <button onclick={() => void run(() => api.rejectReview(item.review_id))}>{t("review.reject")}</button>
+            <div class="actions"><Button variant="quiet" onclick={() => void run(() => api.rejectReview(item.review_id))}>{t("review.reject")}</Button></div>
           {/if}
           {#if item.note_path}
             <button class="link" onclick={() => onOpenSource(item.note_path!, item.block_text)}>{t("tasks.source")}</button>
           {/if}
         </li>
       {:else}
-        <p class="empty-list">{t("review.empty")}</p>
+        <EmptyState icon={Inbox} title={t("review.empty")} />
       {/each}
     </ul>
   {/if}
 </section>
 
 <style>
-  .panel { display: flex; flex-direction: column; gap: 8px; }
-  .tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--border); }
-  .tabs button { background: none; border: 0; padding: 6px 8px; cursor: pointer; color: var(--muted); border-bottom: 2px solid transparent; }
-  .tabs button[aria-selected="true"] { color: var(--text); border-bottom-color: var(--accent); }
-  .tools { display: flex; justify-content: flex-end; font-size: 12px; color: var(--muted); }
-  .tools select { background: var(--bg); border: 1px solid var(--border); border-radius: 6px; margin-left: 6px; }
-  .add { display: flex; flex-direction: column; gap: 4px; }
-  .when, .actions { display: flex; gap: 6px; }
-  .check { display: flex; gap: 6px; align-items: center; font-size: 13px; color: var(--muted); }
-  input, select { background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 4px 6px; min-width: 0; }
+  .panel { display: flex; flex-direction: column; gap: var(--space-2); min-width: 0; }
+  .tabs { position: relative; display: flex; gap: 0.125rem; border-bottom: 1px solid var(--color-border); }
+  .tabs button {
+    background: none; border: 0; padding: var(--space-2) var(--space-2); cursor: pointer;
+    color: var(--color-text-muted); font-size: var(--text-md);
+    transition: color var(--duration-fast) var(--ease-standard);
+  }
+  .tabs button:hover, .tabs button[aria-selected="true"] { color: var(--color-text); }
+  .indicator {
+    position: absolute; left: 0; bottom: -1px; height: 2px; background: var(--color-accent); border-radius: var(--radius-full);
+    transition: transform var(--duration-base) var(--ease-standard), width var(--duration-base) var(--ease-standard);
+  }
+  .tools { display: flex; justify-content: flex-end; font-size: var(--text-sm); color: var(--color-text-muted); }
+  .tools select { margin-left: var(--space-2); }
+  .add { display: flex; flex-direction: column; gap: var(--space-2); }
+  .when, .actions { display: flex; gap: var(--space-2); }
+  .when input { flex: 1; }
   ul { list-style: none; margin: 0; padding: 0; }
-  h3 { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 10px 0 2px; }
-  h3.overdue { color: var(--danger); }
-  .empty-list, .hint { color: var(--muted); font-size: 13px; }
-  .review { border-bottom: 1px solid var(--border); padding: 8px 0; display: flex; flex-direction: column; gap: 6px; }
-  .reason { color: var(--danger); font-size: 12px; }
-  blockquote { margin: 0; padding-left: 8px; border-left: 2px solid var(--border); color: var(--muted); }
-  .review form { display: flex; flex-direction: column; gap: 6px; }
-  .review button, .actions button { background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 2px 8px; cursor: pointer; align-self: flex-start; }
-  .link { background: none !important; border: 0 !important; padding: 0 !important; color: var(--accent); cursor: pointer; font-size: 12px; }
+  h3 { font-size: var(--text-xs); text-transform: uppercase; letter-spacing: 0.06em; color: var(--color-text-muted); margin: var(--space-3) 0 var(--space-1); }
+  h3.overdue { color: var(--color-danger); }
+  .hint { color: var(--color-text-muted); font-size: var(--text-sm); margin: 0; }
+  .cards { display: flex; flex-direction: column; gap: var(--space-2); }
+  .card {
+    display: flex; flex-direction: column; gap: var(--space-2); padding: var(--space-3);
+    background: var(--color-surface-raised); border: 1px solid var(--color-border); border-radius: var(--radius-lg);
+  }
+  .card form { display: flex; flex-direction: column; gap: var(--space-2); }
+  .reason { display: flex; gap: var(--space-1); align-items: center; margin: 0; color: var(--color-ai); font-size: var(--text-sm); font-weight: 600; }
+  blockquote { margin: 0; padding-left: var(--space-2); border-left: 2px solid var(--color-border-strong); color: var(--color-text-muted); overflow-wrap: anywhere; }
+  .link { align-self: flex-start; background: none; border: 0; padding: 0; color: var(--color-link); cursor: pointer; font-size: var(--text-sm); }
 </style>
