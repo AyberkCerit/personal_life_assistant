@@ -24,3 +24,6 @@ tempfile = "3.27.0"
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
+
+[target."cfg(windows)".dependencies]
+windows-sys = { version = "0.61.2", features = ["Win32_UI_Input_KeyboardAndMouse", "Win32_System_SystemInformation", "Win32_System_Power"] }

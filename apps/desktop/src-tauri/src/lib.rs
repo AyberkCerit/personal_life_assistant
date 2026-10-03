@@ -1,6 +1,8 @@
 //! PLA desktop app: Tauri shell around pla-core.
 
 mod commands;
+pub mod scheduler;
+pub mod system;
 pub mod watcher;
 pub mod worker;
 
