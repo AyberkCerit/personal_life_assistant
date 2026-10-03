@@ -2,6 +2,7 @@
 //! download allow-list, downloads and local files.
 
 pub mod catalog;
+pub mod download;
 pub mod local;
 pub mod policy;
 
