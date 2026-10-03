@@ -22,6 +22,7 @@ pnpm-debug.log*
 *.gguf
 *.safetensors
 models/
+!crates/pla-core/src/models/
 
 # Local databases and test vaults
 *.db

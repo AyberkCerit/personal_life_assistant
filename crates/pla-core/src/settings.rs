@@ -27,6 +27,8 @@ pub struct AppSettings {
     pub theme: Theme,
     pub llama_server: Option<PathBuf>,
     pub model_path: Option<PathBuf>,
+    /// The catalogue id of the installed model; `None` for a file the user chose (FR-MDL-008).
+    pub model_id: Option<String>,
     /// The "PLA keeps running in the tray" hint was shown once (FR-SCH-001).
     pub tray_hint_shown: bool,
 }
@@ -96,5 +98,15 @@ mod tests {
         assert_eq!(loaded.settings, AppSettings::default());
         assert!(!tmp.path().join("settings.json").exists());
         assert_eq!(std::fs::read_to_string(tmp.path().join("settings.broken.json")).unwrap(), "{ bozuk");
+    }
+
+    #[test]
+    fn remembers_which_catalogue_model_is_installed() {
+        let tmp = tempfile::tempdir().unwrap();
+        let s = AppSettings { model_path: Some("C:/m.gguf".into()), model_id: Some("gemma-4-e2b-it-q3km".into()), ..AppSettings::default() };
+        save_settings(tmp.path(), &s).unwrap();
+        assert_eq!(load_settings(tmp.path()).unwrap().settings.model_id.as_deref(), Some("gemma-4-e2b-it-q3km"));
+        std::fs::write(tmp.path().join("settings.json"), r#"{ "theme": "dark" }"#).unwrap();
+        assert_eq!(load_settings(tmp.path()).unwrap().settings.model_id, None, "older files still load");
     }
 }
