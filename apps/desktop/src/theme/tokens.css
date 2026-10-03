@@ -1,0 +1,92 @@
+/* PLA design tokens (spec § 3, DESIGN.md). Components use only these. */
+
+:root,
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --color-surface-reading: #1f2228;
+  --color-surface-panel: #1a1d22;
+  --color-surface-raised: #282b33;
+  --color-surface-hover: #23262d;
+  --color-surface-selected: #262a32;
+  --color-border: #2d3139;
+  --color-border-strong: #3a3f4a;
+  --color-text: #d2d6de;
+  --color-text-muted: #9199a7;
+  --color-accent: #5fbea1;
+  --color-on-accent: #0b1712;
+  --color-accent-subtle: #243c3c;
+  --color-link: #78c8b0;
+  --color-link-underline: #375a52;
+  --color-ai: #94d4c0;
+  --color-ai-subtle: #213c36;
+  --color-warning: #d9a65a;
+  --color-warning-subtle: #2e2a22;
+  --color-danger: #ec8f9a;
+  --color-danger-subtle: #3a252a;
+  --color-banner: #212a2c;
+  --color-banner-border: #334c46;
+  --shadow-color: rgb(0 0 0 / 0.35);
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+  --color-surface-reading: #fbfbfc;
+  --color-surface-panel: #f3f4f7;
+  --color-surface-raised: #ffffff;
+  --color-surface-hover: #eceef2;
+  --color-surface-selected: #e6e9ee;
+  --color-border: #dde0e6;
+  --color-border-strong: #c5cad3;
+  --color-text: #2a2e37;
+  --color-text-muted: #5d6472;
+  --color-accent: #0f7a63;
+  --color-on-accent: #ffffff;
+  --color-accent-subtle: #d2f1e7;
+  --color-link: #0f7a63;
+  --color-link-underline: #a8dccb;
+  --color-ai: #0b5e4c;
+  --color-ai-subtle: #d6f3ea;
+  --color-warning: #8f5c00;
+  --color-warning-subtle: #fbf1dc;
+  --color-danger: #b4233f;
+  --color-danger-subtle: #fbe4e8;
+  --color-banner: #eef8f4;
+  --color-banner-border: #bfe5d8;
+  --shadow-color: rgb(20 30 50 / 0.12);
+}
+
+:root {
+  --font-ui: "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+  --font-mono: "Cascadia Mono", Consolas, monospace;
+  --text-xs: 0.6875rem;
+  --text-sm: 0.75rem;
+  --text-md: 0.8125rem;
+  --text-lg: 0.9375rem;
+  --text-xl: 1.0625rem;
+  --text-2xl: 1.25rem;
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.25rem;
+  --space-6: 1.5rem;
+  --space-8: 2rem;
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-full: 999px;
+  --shadow-raised: 0 6px 20px var(--shadow-color);
+  --duration-fast: 120ms;
+  --duration-base: 200ms;
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --duration-fast: 0ms;
+    --duration-base: 0ms;
+  }
+  *, *::before, *::after {
+    animation: none !important;
+  }
+}
