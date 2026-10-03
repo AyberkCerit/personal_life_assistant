@@ -1,6 +1,7 @@
 //! PLA desktop app: Tauri shell around pla-core.
 
 mod commands;
+pub mod model_download;
 pub mod model_paths;
 mod notify;
 mod tray;
@@ -50,6 +51,10 @@ pub fn run() {
             commands::set_paused,
             commands::pending_reminders,
             commands::dismiss_missed,
+            commands::model_status,
+            commands::model_download_start,
+            commands::model_download_pause,
+            commands::model_use_local,
             commands::hide_to_tray,
         ])
         .build(tauri::generate_context!())
@@ -59,6 +64,7 @@ pub fn run() {
             // Tauri ends the process without running destructors: stop the worker (and with it the
             // model) explicitly. The job object in pla-core is the backstop for crashes.
             use tauri::Manager;
+            handle.state::<commands::AppState>().downloads.shutdown(std::time::Duration::from_secs(2));
             let session = handle.state::<commands::AppState>().session.lock().expect("session lock").take();
             drop(session);
         }

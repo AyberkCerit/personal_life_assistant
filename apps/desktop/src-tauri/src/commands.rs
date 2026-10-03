@@ -15,6 +15,7 @@ use chrono::Local;
 use pla_core::db::connect;
 use pla_core::pipeline::items::{reject_item, ItemRef};
 use pla_core::reminders;
+use pla_core::models::{self, catalog, download as dl, local};
 use pla_core::pipeline::write_tx;
 use pla_core::tasks::{self, ReviewView, TaskInput, TaskList, TaskView};
 use rusqlite::Connection;
@@ -47,6 +48,8 @@ pub struct AppState {
     pub self_writes: Arc<SelfWrites>,
     /// Background AI paused (FR-SCH-014); kept across vault switches.
     pub paused: AtomicBool,
+    /// The model download outlives vault switches (model-manager spec § 5).
+    pub downloads: crate::model_download::ModelDownloads,
 }
 
 #[derive(Serialize)]
@@ -417,4 +420,145 @@ pub fn hide_to_tray(window: tauri::WebviewWindow) -> Result<(), String> {
         save_settings(&root, &settings).map_err(|e| e.to_string())?;
     }
     Ok(())
+}
+
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct InstalledModel {
+    name: String,
+    size: u64,
+    path: String,
+    local: bool,
+}
+
+#[derive(Serialize)]
+pub struct ModelStatus {
+    installed: Option<InstalledModel>,
+    recommended: &'static catalog::CatalogEntry,
+    download: Option<crate::model_download::DownloadState>,
+    models_dir: Option<String>,
+}
+
+fn describe_model(path: &Path, id: Option<&str>) -> Option<InstalledModel> {
+    let size = std::fs::metadata(path).ok().filter(|m| m.is_file())?.len();
+    let entry = id.and_then(catalog::by_id);
+    Some(InstalledModel {
+        name: entry.map_or_else(|| path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(), |e| e.name.to_owned()),
+        size,
+        path: path.to_string_lossy().into_owned(),
+        local: entry.is_none(),
+    })
+}
+
+/// FR-MDL-008: a checked GGUF file becomes the active model, used where it is.
+fn apply_local_model(settings: &mut AppSettings, path: &Path) -> Result<InstalledModel, String> {
+    let model = local::validate_gguf(path).map_err(|e| match e {
+        local::LocalModelError::NotFound(_) => "not_found".to_owned(),
+        local::LocalModelError::NotGguf(_) => "not_gguf".to_owned(),
+        local::LocalModelError::Io(e) => format!("io:{e}"),
+    })?;
+    settings.model_path = Some(model.path.clone());
+    settings.model_id = None;
+    describe_model(&model.path, None).ok_or_else(|| "not_found".to_owned())
+}
+
+/// Saves the model in the settings, hands it to the running worker and tells the UI.
+fn install_model(app: &AppHandle, settings: &AppSettings, installed: &InstalledModel) -> Result<(), String> {
+    save_settings(&app_root()?, settings).map_err(|e| e.to_string())?;
+    if let Some(cfg) = crate::model_paths::server_config(settings, &crate::model_paths::process_env, bundled_server(app)) {
+        if let Some(session) = app.state::<AppState>().session.lock().expect("session lock").as_ref() {
+            session.worker.send(Command::UseModel(cfg));
+        }
+    }
+    let _ = app.emit("model-changed", installed);
+    Ok(())
+}
+
+#[tauri::command]
+pub fn model_status(state: State<AppState>) -> Result<ModelStatus, String> {
+    let settings = load_settings(&app_root()?).map_err(|e| e.to_string())?.settings;
+    let path = crate::model_paths::first_existing([settings.model_path.clone(), crate::model_paths::process_env("PLA_MODEL")]);
+    Ok(ModelStatus {
+        installed: path.as_deref().and_then(|p| describe_model(p, settings.model_id.as_deref())),
+        recommended: catalog::recommended(),
+        download: state.downloads.current(),
+        models_dir: models::models_dir().map(|d| d.to_string_lossy().into_owned()),
+    })
+}
+
+#[tauri::command]
+pub fn model_download_start(app: AppHandle, state: State<AppState>) -> Result<(), String> {
+    let dir = models::models_dir().ok_or("LOCALAPPDATA is not set; PLA cannot store the model.")?;
+    let entry = catalog::recommended();
+    let (events, done_app) = (app.clone(), app.clone());
+    state
+        .downloads
+        .start(
+            move |cancel, report| {
+                let req = dl::Request { entry, dir: &dir, policy: &models::policy::HuggingFace, free_space: &dl::free_space, cancel, progress_every: Duration::from_secs(1) };
+                dl::download(&req, report)
+            },
+            move |s| {
+                let _ = events.emit("model-download", s);
+            },
+            move |path| {
+                let root = match app_root() {
+                    Ok(r) => r,
+                    Err(_) => return,
+                };
+                let Ok(loaded) = load_settings(&root) else { return };
+                let mut settings = loaded.settings;
+                settings.model_path = Some(path.clone());
+                settings.model_id = Some(entry.id.to_owned());
+                if let Some(installed) = describe_model(&path, Some(entry.id)) {
+                    let _ = install_model(&done_app, &settings, &installed);
+                    crate::notify::model_ready(&done_app);
+                }
+            },
+        )
+        .map_err(|_| "A model download is already running.".to_owned())
+}
+
+#[tauri::command]
+pub fn model_download_pause(state: State<AppState>) {
+    state.downloads.pause();
+}
+
+#[tauri::command]
+pub fn model_use_local(app: AppHandle, path: String) -> Result<InstalledModel, String> {
+    let root = app_root()?;
+    let mut settings = load_settings(&root).map_err(|e| e.to_string())?.settings;
+    let installed = apply_local_model(&mut settings, Path::new(&path))?;
+    install_model(&app, &settings, &installed)?;
+    Ok(installed)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn using_a_non_gguf_file_changes_nothing() {
+        // Review Focus 5
+        let tmp = tempfile::tempdir().unwrap();
+        let txt = tmp.path().join("notes.gguf");
+        std::fs::write(&txt, "not a model").unwrap();
+        let mut settings = AppSettings::default();
+        assert!(apply_local_model(&mut settings, &txt).is_err());
+        assert_eq!(settings, AppSettings::default());
+    }
+
+    #[test]
+    fn a_valid_local_file_becomes_the_active_model() {
+        let tmp = tempfile::tempdir().unwrap();
+        let p = tmp.path().join("m.gguf");
+        let mut bytes = b"GGUF".to_vec();
+        bytes.extend_from_slice(&3u32.to_le_bytes());
+        std::fs::write(&p, &bytes).unwrap();
+        let mut settings = AppSettings { model_id: Some("gemma-4-e2b-it-q3km".into()), ..AppSettings::default() };
+        let installed = apply_local_model(&mut settings, &p).unwrap();
+        assert_eq!((settings.model_path.as_deref(), settings.model_id.as_deref()), (Some(p.as_path()), None));
+        assert!(installed.local);
+        assert_eq!(installed.size, 8);
+    }
 }

@@ -18,6 +18,8 @@ pub struct Strings {
     pub problem_title: &'static str,
     pub tray_title: &'static str,
     pub tray_body: &'static str,
+    pub model_ready_title: &'static str,
+    pub model_ready_body: &'static str,
 }
 
 const TR: Strings = Strings {
@@ -29,6 +31,8 @@ const TR: Strings = Strings {
     problem_title: "PLA arka plan işi başarısız oldu",
     tray_title: "PLA çalışmaya devam ediyor",
     tray_body: "Pencere kapandı ama hatırlatıcılar çalışıyor. Tamamen kapatmak için tepsi simgesinden Çık'ı seç.",
+    model_ready_title: "PLA: model hazır",
+    model_ready_body: "Yapay zekâ özellikleri açıldı; bekleyen notlar işleniyor.",
 };
 
 const EN: Strings = Strings {
@@ -40,6 +44,8 @@ const EN: Strings = Strings {
     problem_title: "A PLA background job failed",
     tray_title: "PLA keeps running",
     tray_body: "The window is closed but reminders still work. To quit, choose Quit from the tray icon.",
+    model_ready_title: "PLA: model ready",
+    model_ready_body: "AI features are on; waiting notes are being processed.",
 };
 
 /// Turkish when the Windows UI language is Turkish, otherwise English (as FR-SET-003).
@@ -130,5 +136,15 @@ impl Notifier for AppNotifier {
 
     fn tasks_changed(&self) {
         let _ = self.app.emit("tasks-changed", ());
+    }
+}
+
+/// Tells the user the model is ready when they cannot see the window (model-manager spec § 5).
+pub fn model_ready(app: &AppHandle) {
+    use tauri::Manager;
+    let hidden = app.get_webview_window("main").is_none_or(|w| !w.is_visible().unwrap_or(false));
+    if hidden {
+        let s = strings();
+        show_info(s.model_ready_title, s.model_ready_body);
     }
 }
