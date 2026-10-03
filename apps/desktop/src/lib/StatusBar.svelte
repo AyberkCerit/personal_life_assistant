@@ -1,21 +1,39 @@
 <script lang="ts">
+  import CircleAlert from "@lucide/svelte/icons/circle-alert";
+  import Play from "@lucide/svelte/icons/play";
   import type { WorkerStatus } from "./api";
   import { t, type Key } from "./i18n";
+  import Badge from "./ui/Badge.svelte";
+  import Button from "./ui/Button.svelte";
+  import Icon from "./ui/Icon.svelte";
 
   let { status, onResume }: { status: WorkerStatus; onResume: () => void } = $props();
 </script>
 
 <footer class="status" role="status" aria-live="polite">
-  <span>{t(`status.model.${status.model}` as Key)}</span>
-  {#if status.paused}<span>{t("status.paused")}</span> <button class="resume" onclick={onResume}>{t("status.resume")}</button>{/if}
+  <span class="model {status.model}"><span class="dot" aria-hidden="true"></span>{t(`status.model.${status.model}` as Key)}</span>
+  {#if status.paused}
+    <Badge kind="warning">{t("status.paused")}</Badge>
+    <Button variant="quiet" icon={Play} onclick={onResume}>{t("status.resume")}</Button>
+  {/if}
   {#if status.busy}<span>{t("status.busy")}</span>{/if}
   <span>{status.queued} {t("status.queued")}</span>
   <span>{status.added} {t("status.added")}</span>
-  {#if status.last_error}<span class="error" title={status.last_error}>⚠ {status.last_error}</span>{/if}
+  {#if status.last_error}
+    <span class="error" title={status.last_error}><Icon icon={CircleAlert} size="sm" />{status.last_error}</span>
+  {/if}
 </footer>
 
 <style>
-  .status { grid-column: 1 / -1; display: flex; gap: 16px; align-items: center; padding: 0 12px; font-size: 12px; color: var(--muted); border-top: 1px solid var(--border); background: var(--panel); }
-  .resume { background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 0 6px; cursor: pointer; font-size: 12px; }
-  .error { color: var(--danger); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .status {
+    grid-column: 1 / -1; display: flex; gap: var(--space-4); align-items: center;
+    padding: 0 var(--space-3); font-size: var(--text-sm); color: var(--color-text-muted);
+    border-top: 1px solid var(--color-border); background: var(--color-surface-panel); min-width: 0;
+  }
+  .status :global(.btn) { padding-block: 0; }
+  .model { display: inline-flex; align-items: center; gap: var(--space-2); white-space: nowrap; }
+  .dot { width: 0.5rem; height: 0.5rem; border-radius: var(--radius-full); background: var(--color-text-muted); }
+  .running .dot { background: var(--color-accent); animation: pulse 1.6s var(--ease-standard) infinite; }
+  .error { display: inline-flex; gap: var(--space-1); align-items: center; color: var(--color-danger); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  @keyframes pulse { 50% { opacity: 0.35; } }
 </style>

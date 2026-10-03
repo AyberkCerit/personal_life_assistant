@@ -46,8 +46,5 @@ svg.lucide { flex: none; }
   --accent: var(--color-accent);
   --danger: var(--color-danger);
 }
-.empty { margin: auto; color: var(--color-text-muted); }
 .banner { padding: 8px 12px; border-bottom: 1px solid var(--color-border); background: var(--color-surface-panel); display: flex; gap: 8px; align-items: center; }
 .banner.danger { color: var(--color-danger); }
-.welcome { margin: auto; max-width: 26rem; text-align: center; }
-.primary { background: var(--color-accent); color: var(--color-on-accent); border: 0; border-radius: var(--radius-md); padding: 8px 14px; cursor: pointer; }

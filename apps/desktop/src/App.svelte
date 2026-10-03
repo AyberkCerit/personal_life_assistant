@@ -2,6 +2,13 @@
   import { onMount, tick } from "svelte";
   import AddedToast from "./lib/AddedToast.svelte";
   import ReminderBanner from "./lib/ReminderBanner.svelte";
+  import CircleAlert from "@lucide/svelte/icons/circle-alert";
+  import FileText from "@lucide/svelte/icons/file-text";
+  import FolderOpen from "@lucide/svelte/icons/folder-open";
+  import Logo from "./lib/ui/Logo.svelte";
+  import Button from "./lib/ui/Button.svelte";
+  import Banner from "./lib/ui/Banner.svelte";
+  import EmptyState from "./lib/ui/EmptyState.svelte";
   import { open } from "@tauri-apps/plugin-dialog";
   import { api, inTauri, type TreeEntry, type WorkerStatus } from "./lib/api";
   import FileTree from "./lib/FileTree.svelte";
@@ -115,10 +122,12 @@
 
 {#if vaultPath === null}
   <main class="welcome">
+    <Logo size={64} />
     <h1>{t("welcome.title")}</h1>
-    <p>{t("welcome.body")}</p>
-    {#if error}<p class="banner danger" role="alert">{error}</p>{/if}
-    <button class="primary" onclick={chooseVault}>{t("welcome.open")}</button>
+    <p class="pitch">{t("welcome.pitch")}</p>
+    <p class="body">{t("welcome.body")}</p>
+    {#if error}<Banner kind="danger" icon={CircleAlert} role="alert">{error}</Banner>{/if}
+    <Button variant="primary" icon={FolderOpen} onclick={chooseVault}>{t("welcome.open")}</Button>
   </main>
 {:else}
   <div class="layout">
@@ -127,13 +136,13 @@
     </aside>
     <section class="main">
       <ReminderBanner version={tasksVersion + panelEdits} onChanged={() => tasksVersion++} />
-      {#if error}<div class="banner danger" role="alert">{t("error.generic")}: {error}</div>{/if}
+      {#if error}<Banner kind="danger" icon={CircleAlert} role="alert">{t("error.generic")}: {error}</Banner>{/if}
       {#if current}
         {#key current}
           <Editor bind:this={editor} path={current} {reveal} onSavedCopy={() => void refresh()} />
         {/key}
       {:else}
-        <p class="empty">{t("editor.empty")}</p>
+        <EmptyState icon={FileText} title={t("editor.empty")} />
       {/if}
     </section>
     <aside class="side-panel">
@@ -143,3 +152,11 @@
     <AddedToast onChanged={() => tasksVersion++} />
   </div>
 {/if}
+
+<style>
+  .welcome { margin: auto; max-width: 26rem; padding: var(--space-8) var(--space-4); display: flex; flex-direction: column; align-items: center; gap: var(--space-3); text-align: center; }
+  h1 { margin: var(--space-2) 0 0; font-size: var(--text-2xl); font-weight: 600; }
+  p { margin: 0; }
+  .pitch { font-size: var(--text-lg); color: var(--color-text); }
+  .body { color: var(--color-text-muted); }
+</style>

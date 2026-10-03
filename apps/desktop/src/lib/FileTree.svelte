@@ -1,6 +1,9 @@
 <script lang="ts">
+  import FileText from "@lucide/svelte/icons/file-text";
+  import Folder from "@lucide/svelte/icons/folder";
   import type { TreeEntry } from "./api";
   import { t } from "./i18n";
+  import Icon from "./ui/Icon.svelte";
 
   let {
     entries,
@@ -27,12 +30,19 @@
   </form>
   <ul>
     {#each entries as entry (entry.path)}
-      <li style:padding-left="{entry.depth * 14 + 8}px">
+      <li style:padding-left={`calc(${entry.depth} * var(--space-4))`}>
         {#if entry.is_dir}
-          <span class="dir">{entry.name}</span>
+          <span class="row dir"><Icon icon={Folder} size="sm" /><span class="name">{entry.name}</span></span>
         {:else}
-          <button class:active={entry.path === selected} onclick={() => onOpen(entry.path)}>
-            {entry.name.replace(/\.md$/i, "")}
+          {@const name = entry.name.replace(/\.md$/i, "")}
+          <button
+            class="row"
+            class:active={entry.path === selected}
+            aria-current={entry.path === selected ? "page" : undefined}
+            title={name}
+            onclick={() => onOpen(entry.path)}
+          >
+            <Icon icon={FileText} size="sm" /><span class="name">{name}</span>
           </button>
         {/if}
       </li>
@@ -41,12 +51,19 @@
 </nav>
 
 <style>
-  .tree { padding: 8px 0; }
-  form { padding: 0 8px 8px; }
-  input { width: 100%; box-sizing: border-box; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 4px 8px; }
-  ul { list-style: none; margin: 0; padding: 0; }
-  li { line-height: 26px; }
-  .dir { color: var(--muted); font-weight: 600; }
-  button { background: none; border: 0; padding: 0 6px; cursor: pointer; text-align: left; width: 100%; border-radius: 4px; }
-  button:hover, button.active { background: var(--border); }
+  .tree { padding: var(--space-2) 0; }
+  form { padding: 0 var(--space-2) var(--space-2); }
+  input { width: 100%; box-sizing: border-box; }
+  ul { list-style: none; margin: 0; padding: 0 var(--space-1); }
+  .row { display: flex; align-items: center; gap: var(--space-2); min-height: 1.75rem; padding: 0 var(--space-2); box-sizing: border-box; }
+  .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .dir { color: var(--color-text-muted); font-weight: 600; }
+  button {
+    width: 100%; background: none; border: 0; text-align: left; cursor: pointer;
+    border-radius: var(--radius-md); color: var(--color-text-muted);
+    box-shadow: inset 2px 0 0 transparent;
+    transition: background-color var(--duration-fast) var(--ease-standard), color var(--duration-fast) var(--ease-standard);
+  }
+  button:hover { background: var(--color-surface-hover); color: var(--color-text); }
+  button.active { background: var(--color-surface-selected); color: var(--color-text); box-shadow: inset 2px 0 0 var(--color-accent); }
 </style>
