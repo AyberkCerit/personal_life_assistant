@@ -27,6 +27,8 @@ pub struct AppSettings {
     pub theme: Theme,
     pub llama_server: Option<PathBuf>,
     pub model_path: Option<PathBuf>,
+    /// The "PLA keeps running in the tray" hint was shown once (FR-SCH-001).
+    pub tray_hint_shown: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]

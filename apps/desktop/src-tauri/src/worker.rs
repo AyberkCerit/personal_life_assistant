@@ -28,6 +28,8 @@ pub enum Command {
     EnqueueLater(String),
     /// A folder changed outside PLA: queue every note again (and the ones that vanished).
     Rescan,
+    /// FR-SCH-014 / FR-EXT-026: stop processing (notes still queue) until resumed.
+    Pause(bool),
     Shutdown,
 }
 
@@ -97,6 +99,7 @@ pub struct WorkerStatus {
     pub last_error: Option<String>,
     /// Items added since the app started (the task panel arrives in F4b).
     pub added: usize,
+    pub paused: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -141,7 +144,7 @@ impl Worker {
             cancel: Arc::new(AtomicBool::new(false)),
             on_added: None,
             reader,
-            status: WorkerStatus { queued: 0, model, busy: false, last_error: None, added: 0 },
+            status: WorkerStatus { queued: 0, model, busy: false, last_error: None, added: 0, paused: false },
         }
     }
 
@@ -183,6 +186,14 @@ impl Worker {
                 }
                 Ok(Command::EnqueueLater(note)) => {
                     self.later.insert(note, Instant::now());
+                }
+                Ok(Command::Pause(paused)) => {
+                    self.status.paused = paused;
+                    if !paused {
+                        self.process();
+                    } else {
+                        self.publish();
+                    }
                 }
                 Ok(Command::Rescan) => {
                     if let Err(e) = enqueue_all(&self.vault, &self.conn, (self.clock)()) {
@@ -230,6 +241,11 @@ impl Worker {
     }
 
     fn process(&mut self) {
+        if self.status.paused {
+            self.status.queued = queued_notes(&self.conn).map_or(0, |q| q.len());
+            self.publish();
+            return; // FR-EXT-026: keep queuing, do not process
+        }
         if let Some(extractor) = self.extractor.as_mut() {
             self.status.busy = true;
             self.status.queued = queued_notes(&self.conn).map_or(0, |q| q.len());
@@ -471,5 +487,20 @@ mod tests {
         assert_eq!(reports.len(), 3, "one report per note: {reports:?}");
         assert!(reports[0], "the first report came while the run was still going");
         handle.shutdown();
+    }
+    #[test]
+    fn paused_work_waits_in_the_queue() {
+        // FR-SCH-014 / FR-EXT-026
+        let (tmp, tx, statuses, data) = setup(Some(Box::new(Fixed(TASK))));
+        wait_for(&statuses, |s| !s.busy && s.added == 1);
+        tx.send(Command::Pause(true));
+        std::fs::write(tmp.path().join("notes/ikinci.md"), "Cuma fatura.").unwrap();
+        tx.send(Command::Rescan);
+        let s = wait_for(&statuses, |s| s.paused && s.queued >= 1);
+        assert_eq!(s.added, 1);
+        tx.send(Command::Pause(false));
+        wait_for(&statuses, |s| !s.paused && !s.busy && s.added == 2);
+        assert_eq!(task_count(&data), 2);
+        tx.shutdown();
     }
 }

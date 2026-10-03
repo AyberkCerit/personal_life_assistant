@@ -1,6 +1,7 @@
 //! PLA desktop app: Tauri shell around pla-core.
 
 mod commands;
+mod notify;
 pub mod scheduler;
 pub mod system;
 pub mod watcher;
@@ -30,6 +31,11 @@ pub fn run() {
             commands::list_review,
             commands::accept_review,
             commands::reject_review,
+            commands::reminder_done,
+            commands::reminder_snooze,
+            commands::backup_now,
+            commands::set_paused,
+            commands::hide_to_tray,
         ])
         .build(tauri::generate_context!())
         .expect("error while building PLA");

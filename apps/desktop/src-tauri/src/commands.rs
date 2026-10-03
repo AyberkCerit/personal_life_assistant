@@ -13,6 +13,7 @@ use pla_core::vault::{default_app_root, open_vault as open_vault_dir, resolve_da
 use chrono::Local;
 use pla_core::db::connect;
 use pla_core::pipeline::items::{reject_item, ItemRef};
+use pla_core::reminders;
 use pla_core::pipeline::write_tx;
 use pla_core::tasks::{self, ReviewView, TaskInput, TaskList, TaskView};
 use rusqlite::Connection;
@@ -21,12 +22,17 @@ use crate::worker::{AddedItem, WorkerStatus};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, State};
 
+use crate::notify::{show_info, strings, AppNotifier};
+use crate::scheduler::{SchedCommand, Scheduler, SchedulerHandle};
+use crate::system::WindowsProbe;
 use crate::watcher::{watch, SelfWrites, WatchHandle};
 use crate::worker::{Command, Worker, WorkerHandle};
 
 /// One open vault. Dropping it stops the watcher first, then the worker (which ends the model).
 pub struct Session {
     pub vault: Vault,
+    /// Declared first after the vault: fields drop in order, so the scheduler stops before the worker.
+    pub scheduler: SchedulerHandle,
     pub db: Mutex<Connection>,
     pub status: Arc<Mutex<WorkerStatus>>,
     pub _watch: Option<WatchHandle>,
@@ -84,7 +90,7 @@ fn start_session(app: &AppHandle, root: &Path, settings: &AppSettings, own: Arc<
     let dir = resolve_data_dir(&app_root()?, &mut vault).map_err(|e| e.to_string())?;
     let dbs = open_databases(&dir).map_err(|e| e.to_string())?;
     let ui_db = connect(&dir.join("pla.db")).map_err(|e| e.to_string())?;
-    let status = Arc::new(Mutex::new(WorkerStatus { queued: 0, model: crate::worker::ModelState::Off, busy: false, last_error: None, added: 0 }));
+    let status = Arc::new(Mutex::new(WorkerStatus { queued: 0, model: crate::worker::ModelState::Off, busy: false, last_error: None, added: 0, paused: false }));
     let (status_app, status_copy) = (app.clone(), Arc::clone(&status));
     let added_app = app.clone();
     let worker = Worker::new(
@@ -101,7 +107,21 @@ fn start_session(app: &AppHandle, root: &Path, settings: &AppSettings, own: Arc<
     }));
     let handle = worker.spawn();
     let watch_handle = watch(vault.clone(), own, handle.sender(), app.clone()).ok();
-    Ok(Session { vault, db: Mutex::new(ui_db), status, _watch: watch_handle, worker: handle })
+    let sched_db = connect(&dir.join("pla.db")).map_err(|e| e.to_string())?;
+    let (cmd_tx, cmd_rx) = std::sync::mpsc::channel::<SchedCommand>();
+    let notifier = AppNotifier::new(app.clone(), cmd_tx.clone());
+    let scheduler = Scheduler::new(vault.root.clone(), sched_db, Box::new(notifier), Box::new(WindowsProbe), Box::new(|| Local::now().fixed_offset()))
+        .spawn(std::time::Duration::from_secs(30));
+    // Toast buttons send to `cmd_tx`; forward them to the scheduler thread.
+    let forward = scheduler.sender();
+    std::thread::spawn(move || {
+        for command in cmd_rx {
+            if forward.send(command).is_err() {
+                break;
+            }
+        }
+    });
+    Ok(Session { vault, scheduler, db: Mutex::new(ui_db), status, _watch: watch_handle, worker: handle })
 }
 
 fn with_vault<T>(state: &State<AppState>, f: impl FnOnce(&Vault) -> Result<T, FileError>) -> Result<T, String> {
@@ -311,4 +331,47 @@ pub fn accept_review(state: State<AppState>, id: String, input: TaskInput) -> Re
 #[tauri::command]
 pub fn reject_review(state: State<AppState>, id: String) -> Result<(), String> {
     with_db(&state, |db| tasks::reject_review(db, &id))
+}
+
+#[tauri::command]
+pub fn reminder_done(app: AppHandle, state: State<AppState>, id: String) -> Result<(), String> {
+    with_db(&state, |db| reminders::complete(db, &id, now()))?;
+    let _ = app.emit("tasks-changed", ());
+    Ok(())
+}
+
+#[tauri::command]
+pub fn reminder_snooze(app: AppHandle, state: State<AppState>, id: String) -> Result<(), String> {
+    with_db(&state, |db| reminders::snooze(db, &id, now()))?;
+    let _ = app.emit("tasks-changed", ());
+    Ok(())
+}
+
+#[tauri::command]
+pub fn backup_now(state: State<AppState>) -> Result<(), String> {
+    let guard = state.session.lock().expect("session lock");
+    guard.as_ref().ok_or("No vault is open.")?.scheduler.send(SchedCommand::BackupNow);
+    Ok(())
+}
+
+#[tauri::command]
+pub fn set_paused(state: State<AppState>, paused: bool) -> Result<(), String> {
+    let guard = state.session.lock().expect("session lock");
+    guard.as_ref().ok_or("No vault is open.")?.worker.send(Command::Pause(paused));
+    Ok(())
+}
+
+/// FR-SCH-001: closing the window keeps PLA in the tray; the first time, say so.
+#[tauri::command]
+pub fn hide_to_tray(window: tauri::WebviewWindow) -> Result<(), String> {
+    window.hide().map_err(|e| e.to_string())?;
+    let root = app_root()?;
+    let mut settings = load_settings(&root).map_err(|e| e.to_string())?.settings;
+    if !settings.tray_hint_shown {
+        let s = strings();
+        show_info(s.tray_title, s.tray_body);
+        settings.tray_hint_shown = true;
+        save_settings(&root, &settings).map_err(|e| e.to_string())?;
+    }
+    Ok(())
 }
