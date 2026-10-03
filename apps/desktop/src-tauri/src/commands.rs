@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use pla_core::db::open_databases;
 use pla_core::files::{self, FileError, NoteFile, TreeEntry};
-use pla_core::llm::{ModelHost, ServerConfig};
+use pla_core::llm::ModelHost;
 use pla_core::pipeline::Extractor;
 use pla_core::settings::{load_settings, save_settings, AppSettings, Theme};
 use pla_core::vault::{default_app_root, open_vault as open_vault_dir, resolve_data_dir, Vault};
@@ -81,12 +81,18 @@ fn app_root() -> Result<PathBuf, String> {
     default_app_root().ok_or_else(|| "APPDATA is not set; PLA cannot store its data.".to_owned())
 }
 
-/// Model paths from settings, else from the developer environment (decision 6).
-fn extractor(settings: &AppSettings) -> Option<Box<dyn Extractor + Send>> {
-    let bin = settings.llama_server.clone().or_else(|| std::env::var_os("PLA_LLAMA_SERVER").map(PathBuf::from))?;
-    let model = settings.model_path.clone().or_else(|| std::env::var_os("PLA_MODEL").map(PathBuf::from))?;
-    (bin.is_file() && model.is_file())
-        .then(|| Box::new(ModelHost::new(ServerConfig::new(bin, model), Duration::from_secs(60))) as Box<dyn Extractor + Send>)
+/// The llama-server shipped next to PLA (tauri.conf.json resources), if present.
+pub fn bundled_server(app: &AppHandle) -> Option<PathBuf> {
+    use tauri::Manager;
+    let from_resources = app.path().resource_dir().ok().map(|d| d.join("llama").join("llama-server.exe"));
+    let next_to_exe = std::env::current_exe().ok().and_then(|e| e.parent().map(|d| d.join("llama").join("llama-server.exe")));
+    crate::model_paths::first_existing([from_resources, next_to_exe])
+}
+
+/// The model host for these settings, or none while no model is installed (FR-SET-010).
+fn extractor(app: &AppHandle, settings: &AppSettings) -> Option<Box<dyn Extractor + Send>> {
+    let cfg = crate::model_paths::server_config(settings, &crate::model_paths::process_env, bundled_server(app))?;
+    Some(Box::new(ModelHost::new(cfg, Duration::from_secs(60))))
 }
 
 fn start_session(app: &AppHandle, root: &Path, settings: &AppSettings, own: Arc<SelfWrites>, paused: bool) -> Result<Session, String> {
@@ -100,7 +106,7 @@ fn start_session(app: &AppHandle, root: &Path, settings: &AppSettings, own: Arc<
     let worker = Worker::new(
         vault.clone(),
         dbs.pla,
-        extractor(settings),
+        extractor(app, settings),
         Box::new(move |s| {
             *status_copy.lock().expect("status lock") = s.clone();
             let _ = status_app.emit("worker-status", s);

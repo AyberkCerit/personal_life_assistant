@@ -21,6 +21,8 @@ use serde::Serialize;
 const TICK: Duration = Duration::from_secs(1);
 /// Decision 5: an outside change is extracted after this long without further changes to the note.
 const EXTERNAL_DELAY: Duration = Duration::from_secs(45);
+/// FR-MDL-013: the model process stops after this long without requests.
+const MODEL_IDLE_AFTER: Duration = Duration::from_secs(60);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Command {
@@ -30,6 +32,8 @@ pub enum Command {
     Rescan,
     /// FR-SCH-014 / FR-EXT-026: stop processing (notes still queue) until resumed.
     Pause(bool),
+    /// A model became available (download or chosen file): use it from now on.
+    UseModel(pla_core::llm::ServerConfig),
     Shutdown,
 }
 
@@ -124,11 +128,13 @@ type AddedListener = Box<dyn Fn(&[AddedItem]) + Send>;
 
 type Notify = Box<dyn Fn(&WorkerStatus) + Send>;
 type Clock = Box<dyn Fn() -> DateTime<FixedOffset> + Send>;
+type ExtractorFactory = Box<dyn Fn(pla_core::llm::ServerConfig) -> Box<dyn Extractor + Send> + Send>;
 
 pub struct Worker {
     vault: Vault,
     conn: Connection,
     extractor: Option<Box<dyn Extractor + Send>>,
+    make_extractor: ExtractorFactory,
     notify: Notify,
     clock: Clock,
     external_delay: Duration,
@@ -149,6 +155,7 @@ impl Worker {
             vault,
             conn,
             extractor,
+            make_extractor: Box::new(|cfg| Box::new(pla_core::llm::ModelHost::new(cfg, MODEL_IDLE_AFTER)) as Box<dyn Extractor + Send>),
             notify,
             clock: Box::new(|| Local::now().fixed_offset()),
             external_delay: EXTERNAL_DELAY,
@@ -163,6 +170,11 @@ impl Worker {
 
     pub fn with_added_listener(mut self, listener: AddedListener) -> Self {
         self.on_added = Some(listener);
+        self
+    }
+
+    pub fn with_extractor_factory(mut self, f: ExtractorFactory) -> Self {
+        self.make_extractor = f;
         self
     }
 
@@ -208,6 +220,12 @@ impl Worker {
                     } else {
                         self.publish();
                     }
+                }
+                Ok(Command::UseModel(cfg)) => {
+                    self.extractor = Some((self.make_extractor)(cfg));
+                    self.status.model = self.model_state();
+                    self.status.last_error = None;
+                    self.process();
                 }
                 Ok(Command::Rescan) => {
                     if let Err(e) = enqueue_all(&self.vault, &self.conn, (self.clock)()) {
@@ -543,5 +561,25 @@ mod tests {
         wait_for(&statuses, |s| !s.paused && !s.busy && s.added == 2);
         assert_eq!(task_count(&data), 2);
         tx.shutdown();
+    }
+
+    #[test]
+    fn a_model_arriving_later_processes_the_waiting_notes() {
+        // Model-manager spec § 5, Review Focus 4
+        let tmp = tempfile::tempdir().unwrap();
+        let vault = open_vault(tmp.path()).unwrap();
+        std::fs::write(vault.root.join("notes/plan.md"), "Yarın dişçi.").unwrap();
+        let data = tmp.path().join(".data");
+        let conn = open_databases(&data).unwrap().pla;
+        let statuses = Arc::new(Mutex::new(Vec::new()));
+        let sink = Arc::clone(&statuses);
+        let handle = Worker::new(vault, conn, None, Box::new(move |s| sink.lock().unwrap().push(s.clone())))
+            .with_extractor_factory(Box::new(|_| Box::new(Fixed(TASK))))
+            .spawn();
+        wait_for(&statuses, |s| s.queued == 1 && s.model == ModelState::NotInstalled);
+        handle.send(Command::UseModel(pla_core::llm::ServerConfig::new("llama-server.exe".into(), "m.gguf".into())));
+        wait_for(&statuses, |s| !s.busy && s.added == 1 && s.queued == 0);
+        assert_eq!(task_count(&data), 1);
+        handle.shutdown();
     }
 }

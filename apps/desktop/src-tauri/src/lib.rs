@@ -1,6 +1,7 @@
 //! PLA desktop app: Tauri shell around pla-core.
 
 mod commands;
+pub mod model_paths;
 mod notify;
 mod tray;
 pub mod scheduler;
@@ -104,5 +105,12 @@ mod tests {
         for want in [16, 32, 256] {
             assert!(sizes.contains(&want), "missing {want} px frame: {sizes:?}");
         }
+    }
+
+    #[test]
+    fn the_bundled_llama_server_is_packaged() {
+        // Model-manager spec § 5: src-tauri/llama/ ships as a resource
+        let conf: serde_json::Value = serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
+        assert_eq!(conf["bundle"]["resources"]["llama/"], "llama/");
     }
 }

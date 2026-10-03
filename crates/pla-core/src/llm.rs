@@ -15,7 +15,7 @@ use serde_json::Value;
 
 use crate::extraction::{parse_extraction, request_body, RawExtraction};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ServerConfig {
     pub server_bin: PathBuf,
     pub model: PathBuf,
