@@ -67,6 +67,17 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     #[test]
+    fn the_window_fits_a_1080p_screen_at_125_percent() {
+        // User test finding 1: the status bar ended up under the taskbar
+        let conf: serde_json::Value = serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
+        let window = &conf["app"]["windows"][0];
+        let fits = |h: f64| h * 1.25 + 40.0 <= 1080.0 - 48.0;
+        assert!(fits(window["height"].as_f64().unwrap()), "{window}");
+        assert!(fits(window["minHeight"].as_f64().unwrap()), "{window}");
+        assert_eq!(window["center"], true, "Windows' default position (y≈134) pushes even a fitting window under the taskbar");
+    }
+
+    #[test]
     fn the_window_may_be_closed() {
         // Final review C1: with a close-requested listener, closing needs permission to destroy the window
         let caps: serde_json::Value = serde_json::from_str(include_str!("../capabilities/default.json")).unwrap();

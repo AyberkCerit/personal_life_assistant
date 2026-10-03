@@ -12,8 +12,11 @@ use crate::vault::Vault;
 const FORBIDDEN: [char; 11] = ['[', ']', '#', '^', '|', '\\', '/', ':', '*', '"', '?'];
 const FORBIDDEN_EXTRA: [char; 2] = ['<', '>'];
 
-/// Name part of the copy PLA writes when the user keeps their text after a conflict.
-pub const CONFLICT_SUFFIX: &str = " (çakışma)";
+/// Name part of the copy PLA writes when the user keeps their text after a conflict. Names on disk
+/// are English whatever the UI language (decision 2026-09-26).
+pub const CONFLICT_SUFFIX: &str = " (conflict)";
+/// Copies written before the suffix became English; still never extracted.
+pub const OLD_CONFLICT_SUFFIX: &str = " (çakışma)";
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct NoteFile {
@@ -202,7 +205,7 @@ mod tests {
         assert!(matches!(err, FileError::Conflict { .. }));
         assert_eq!(read_note(&v, &rel).unwrap().text, "Obsidian'dan", "nothing overwritten");
         let copy = save_copy(&v, &rel, "benim").unwrap();
-        assert_eq!(copy, "inbox/Plan (çakışma).md");
+        assert_eq!(copy, "inbox/Plan (conflict).md", "names on disk are English");
         assert_eq!(read_note(&v, &copy).unwrap().text, "benim");
     }
 

@@ -3,13 +3,14 @@
 
 use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
+use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 use chrono::{DateTime, FixedOffset, TimeDelta};
 use pla_core::jobs::{backup, maintenance_due, record_failure, record_success, DAILY, MAX_ATTEMPTS_PER_DAY};
-use pla_core::reminders::{complete, due_reminders, is_pending, local_minute, mark_notified, snooze, DueReminder};
+use pla_core::reminders::{complete, due_reminders, local_minute, mark_notified, mark_seen, snooze, unanswered, DueReminder};
 use rusqlite::Connection;
 use serde::Serialize;
 
@@ -44,31 +45,38 @@ pub struct PendingLists {
     pub missed: Vec<DueReminder>,
 }
 
-/// Reminders shown but not answered yet. Kept here, not only sent as events, because the window
-/// may open (or the banner mount) after the scheduler's first tick (final review C1).
+/// Which shown reminders the banner lists. The reminders themselves come from the database
+/// (`unanswered`), so neither a late window (final review C1) nor a restart (user test finding 3)
+/// loses one; this only remembers which of them came on time in this session. Everything else
+/// unanswered, e.g. shown before a restart, is "missed".
 #[derive(Default)]
-pub struct Pending(Mutex<PendingLists>);
+pub struct Pending(Mutex<HashSet<String>>);
 
 impl Pending {
     fn add(&self, reminders: &[DueReminder], missed: bool) {
-        let mut lists = self.0.lock().expect("pending lock");
+        let mut on_time = self.0.lock().expect("pending lock");
         for r in reminders {
-            lists.due.retain(|x| x.task_id != r.task_id);
-            lists.missed.retain(|x| x.task_id != r.task_id);
-            if missed { lists.missed.push(r.clone()) } else { lists.due.push(r.clone()) }
+            if missed {
+                on_time.remove(&r.task_id);
+            } else {
+                on_time.insert(r.task_id.clone());
+            }
         }
     }
 
-    /// Drops what was answered anywhere (done, snoozed, moved, deleted) and returns the rest.
     pub fn current(&self, conn: &Connection) -> PendingLists {
-        let mut lists = self.0.lock().expect("pending lock");
-        lists.due.retain(|r| is_pending(conn, r));
-        lists.missed.retain(|r| is_pending(conn, r));
-        lists.clone()
+        let mut on_time = self.0.lock().expect("pending lock");
+        let all = unanswered(conn).unwrap_or_default();
+        on_time.retain(|id| all.iter().any(|r| &r.task_id == id));
+        let (due, missed) = all.into_iter().partition(|r| on_time.contains(&r.task_id));
+        PendingLists { due, missed }
     }
 
-    pub fn dismiss_missed(&self) {
-        self.0.lock().expect("pending lock").missed.clear();
+    /// "Close" on the missed list: remembered in the database.
+    pub fn dismiss_missed(&self, conn: &Connection, now: DateTime<FixedOffset>) {
+        for r in self.current(conn).missed {
+            let _ = mark_seen(conn, &r.task_id, now);
+        }
     }
 }
 
@@ -98,12 +106,13 @@ impl Scheduler {
             // Marked before anyone hears of it: the banner asks for the list as soon as the event comes.
             let shown: Vec<DueReminder> = due.into_iter().filter(|r| mark_notified(&self.conn, &r.task_id, &r.notify_at, now).is_ok()).collect();
             let (missed, on_time): (Vec<DueReminder>, Vec<DueReminder>) = shown.into_iter().partition(|r| r.notify_at < late);
+            // Both kinds are sorted before anyone hears of either, so no list shows one in the wrong place.
+            self.pending.add(&missed, true);
+            self.pending.add(&on_time, false);
             if !missed.is_empty() {
-                self.pending.add(&missed, true);
                 self.notifier.missed(&missed);
             }
             for r in &on_time {
-                self.pending.add(std::slice::from_ref(r), false);
                 self.notifier.reminder(r);
             }
         }
@@ -337,7 +346,7 @@ mod tests {
         assert_eq!(pending.current(&r.sched.conn).missed.len(), 2);
         r.sched.handle(SchedCommand::Done(a));
         assert_eq!(pending.current(&r.sched.conn).missed.len(), 1);
-        pending.dismiss_missed();
+        pending.dismiss_missed(&r.sched.conn, at("2026-10-06T12:00:40+03:00"));
         assert!(pending.current(&r.sched.conn).missed.is_empty());
         let b = r.remind("Akşam", "2026-10-06", "12:01");
         r.walk("2026-10-06T12:01:00+03:00");
@@ -350,13 +359,13 @@ mod tests {
     struct Asks {
         pending: Arc<Mutex<Option<Arc<Pending>>>>,
         db: PathBuf,
-        got: Arc<Mutex<Vec<usize>>>,
+        got: Arc<Mutex<Vec<(usize, usize)>>>,
     }
     impl Asks {
         fn ask(&self) {
             let conn = rusqlite::Connection::open(&self.db).unwrap();
             let lists = self.pending.lock().unwrap().as_ref().unwrap().current(&conn);
-            self.got.lock().unwrap().push(lists.due.len() + lists.missed.len());
+            self.got.lock().unwrap().push((lists.due.len(), lists.missed.len()));
         }
     }
     impl Notifier for Asks {
@@ -387,7 +396,23 @@ mod tests {
         let mut sched = Scheduler::new(tmp.path().join("kasa"), conn, Box::new(asks), Box::new(probe), Box::new(move || *c.lock().unwrap()));
         *slot.lock().unwrap() = Some(sched.pending());
         sched.tick();
-        assert_eq!(*got.lock().unwrap(), vec![1, 2], "missed list, then the on-time one, each already listed");
+        assert_eq!(*got.lock().unwrap(), vec![(1, 1), (1, 1)], "each event finds both lists complete and in place");
+    }
+
+    #[test]
+    fn unanswered_reminders_are_listed_again_after_a_restart() {
+        // User test finding 3: the list lived only in memory
+        let mut r = rig("2026-10-06T09:00:00+03:00");
+        r.remind("İlaç", "2026-10-06", "09:01");
+        r.remind("Kapatılan", "2026-10-06", "08:00");
+        r.at("2026-10-06T09:00:00+03:00");
+        r.sched.pending().dismiss_missed(&r.sched.conn, at("2026-10-06T09:00:10+03:00"));
+        r.walk("2026-10-06T09:01:00+03:00");
+        assert_eq!(r.sched.pending().current(&r.sched.conn).due.len(), 1);
+        let after_restart = Pending::default().current(&r.sched.conn);
+        let titles: Vec<&str> = after_restart.missed.iter().map(|m| m.title.as_str()).collect();
+        assert_eq!(titles, vec!["İlaç"], "shown before the restart, never answered; the closed one stays closed");
+        assert!(after_restart.due.is_empty());
     }
 
     #[test]

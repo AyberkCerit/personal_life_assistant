@@ -19,7 +19,7 @@ function fake(outcomes: Array<SaveOutcome | Error>) {
     },
     async saveCopy(path, text) {
       copies.push(text);
-      return path.replace(".md", " (çakışma).md");
+      return path.replace(".md", " (conflict).md");
     },
   };
   return { api, saves, copies };
@@ -61,7 +61,7 @@ describe("NoteDoc", () => {
     const doc = new NoteDoc("n.md", "eski", "h0", () => "benim", api);
     await doc.save();
     expect(doc.problem).toBe("conflict");
-    expect(await doc.leave()).toBe("n (çakışma).md");
+    expect(await doc.leave()).toBe("n (conflict).md");
     expect(copies).toEqual(["benim"]);
   });
 
@@ -70,7 +70,7 @@ describe("NoteDoc", () => {
     const doc = new NoteDoc("n.md", "eski", "h0", () => "benim", api);
     await doc.save();
     expect(doc.error).toContain("sharing violation");
-    expect(await doc.leave()).toBe("n (çakışma).md");
+    expect(await doc.leave()).toBe("n (conflict).md");
     expect(copies).toEqual(["benim"]);
   });
 

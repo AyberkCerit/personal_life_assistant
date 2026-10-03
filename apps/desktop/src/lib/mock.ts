@@ -102,7 +102,7 @@ export async function mockBackend<T>(cmd: string, args: Record<string, unknown>)
       return { kind: "saved", hash: hash(text) } as T;
     }
     case "save_copy": {
-      const copy = path.replace(/\.md$/i, " (çakışma).md");
+      const copy = path.replace(/\.md$/i, " (conflict).md");
       files.set(copy, String(args.text));
       return copy as T;
     }

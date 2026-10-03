@@ -374,7 +374,8 @@ pub fn pending_reminders(state: State<AppState>) -> Result<PendingLists, String>
 #[tauri::command]
 pub fn dismiss_missed(state: State<AppState>) -> Result<(), String> {
     if let Some(session) = state.session.lock().expect("session lock").as_ref() {
-        session.pending.dismiss_missed();
+        let db = session.db.lock().expect("db lock");
+        session.pending.dismiss_missed(&db, now());
     }
     Ok(())
 }

@@ -34,20 +34,28 @@ pub fn due_reminders(conn: &Connection, now: DateTime<FixedOffset>) -> rusqlite:
 /// Marks the time that was shown; if the user moved it meanwhile, the new time still fires.
 pub fn mark_notified(conn: &Connection, task_id: &str, shown: &str, now: DateTime<FixedOffset>) -> rusqlite::Result<()> {
     conn.execute(
-        "UPDATE task SET notified_at = ?1 WHERE task_id = ?2 AND notify_at = ?3",
+        "UPDATE task SET notified_at = ?1, reminder_seen_at = NULL WHERE task_id = ?2 AND notify_at = ?3",
         params![local_minute(now), task_id, shown],
     )?;
     Ok(())
 }
 
-/// Shown and not yet answered: still open, not snoozed, not moved to another time, not deleted.
-pub fn is_pending(conn: &Connection, reminder: &DueReminder) -> bool {
-    conn.query_row(
-        "SELECT 1 FROM task WHERE task_id = ?1 AND status = 'open' AND notify_at = ?2 AND notified_at IS NOT NULL",
-        params![reminder.task_id, reminder.notify_at],
-        |_| Ok(()),
-    )
-    .is_ok()
+/// Shown and not answered yet: still open, not snoozed or moved (that clears `notified_at`), not
+/// closed in the banner. Kept in the database, so a restart does not lose them (FR-TSK-015/016).
+pub fn unanswered(conn: &Connection) -> rusqlite::Result<Vec<DueReminder>> {
+    conn.prepare(
+        "SELECT task_id, title, notify_at FROM task
+         WHERE status = 'open' AND notify_at IS NOT NULL AND notified_at IS NOT NULL AND reminder_seen_at IS NULL
+         ORDER BY notify_at, created_at",
+    )?
+    .query_map([], |r| Ok(DueReminder { task_id: r.get(0)?, title: r.get(1)?, notify_at: r.get(2)? }))?
+    .collect()
+}
+
+/// The user closed it in the banner: stop listing it until it is shown again.
+pub fn mark_seen(conn: &Connection, task_id: &str, now: DateTime<FixedOffset>) -> rusqlite::Result<()> {
+    conn.execute("UPDATE task SET reminder_seen_at = ?1 WHERE task_id = ?2", params![local_minute(now), task_id])?;
+    Ok(())
 }
 
 /// FR-TSK-013: show it again 10 minutes from now.
@@ -185,11 +193,26 @@ mod tests {
         for r in &shown {
             mark_notified(&conn, &r.task_id, &r.notify_at, at("2026-10-06T09:00:00+03:00")).unwrap();
         }
-        assert!(shown.iter().all(|r| is_pending(&conn, r)));
+        assert_eq!(unanswered(&conn).unwrap(), shown);
         complete(&conn, &a, at("2026-10-06T09:01:00+03:00")).unwrap();
         snooze(&conn, &b, at("2026-10-06T09:01:00+03:00")).unwrap();
-        let still: Vec<&str> = shown.iter().filter(|r| is_pending(&conn, r)).map(|r| r.task_id.as_str()).collect();
-        assert_eq!(still, vec![c.as_str()]);
+        let still: Vec<String> = unanswered(&conn).unwrap().into_iter().map(|r| r.task_id).collect();
+        assert_eq!(still, vec![c.clone()]);
+        mark_seen(&conn, &c, at("2026-10-06T09:02:00+03:00")).unwrap();
+        assert!(unanswered(&conn).unwrap().is_empty(), "closed in the banner");
+    }
+
+    #[test]
+    fn a_closed_reminder_is_listed_again_when_it_fires_again() {
+        // User test finding 3: "closed" is remembered, but only for that showing
+        let (_t, conn) = setup();
+        let id = reminder(&conn, "İlaç", "2026-10-06", Some("09:00"));
+        mark_notified(&conn, &id, "2026-10-06T09:00", at("2026-10-06T09:00:00+03:00")).unwrap();
+        mark_seen(&conn, &id, at("2026-10-06T09:01:00+03:00")).unwrap();
+        let moved = TaskInput { title: "İlaç".into(), date: Some("2026-10-06".into()), time: Some("21:00".into()), ..Default::default() };
+        edit_task(&conn, &id, &moved, at("2026-10-06T09:02:00+03:00")).unwrap();
+        mark_notified(&conn, &id, "2026-10-06T21:00", at("2026-10-06T21:00:00+03:00")).unwrap();
+        assert_eq!(unanswered(&conn).unwrap().len(), 1);
     }
 
     #[test]
