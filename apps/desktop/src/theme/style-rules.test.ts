@@ -7,14 +7,11 @@ const sources = import.meta.glob(["../**/*.svelte", "../**/*.css", "../**/*.ts",
   eager: true,
 }) as Record<string, string>;
 
-/** Not migrated yet; each task removes the files it moves onto the tokens. Task 8 deletes this set. */
-export const PENDING = new Set<string>([
-]);
-
 const RULES: [string, RegExp][] = [
   ["colour literal (use a --color-* token)", /#[0-9a-fA-F]{3,8}\b|\b(?:rgba?|hsla?)\(/],
   ["emoji used as an icon (use <Icon>)", /[🔔⏰✕⚠✦]/u],
   ["legacy variable (use the --color-* token)", /var\(--(?:bg|panel|border|text|muted|accent|danger)\)/],
+  ["legacy variable defined (the old aliases are gone)", /^\s*--(?:bg|panel|border|text|muted|accent|danger)\s*:/],
 ];
 
 describe("style rules", () => {
@@ -25,7 +22,6 @@ describe("style rules", () => {
   it("keeps colours in the theme and icons in Lucide", () => {
     const problems: string[] = [];
     for (const [file, text] of Object.entries(sources)) {
-      if (PENDING.has(file) || file === "../app.css") continue;
       text.split("\n").forEach((line, i) => {
         for (const [what, re] of RULES) if (re.test(line)) problems.push(`${file}:${i + 1} ${what}: ${line.trim()}`);
       });
