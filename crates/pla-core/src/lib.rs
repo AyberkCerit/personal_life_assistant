@@ -8,5 +8,6 @@ pub mod db;
 pub mod llm;
 pub mod notes;
 pub mod pipeline;
+pub mod reminders;
 pub mod settings;
 pub mod tasks;

@@ -7,6 +7,7 @@ use rusqlite::Connection;
 const PLA_MIGRATIONS: &[&str] = &[
     include_str!("../migrations/pla/001_init.sql"),
     include_str!("../migrations/pla/002_blocks_queue.sql"),
+    include_str!("../migrations/pla/003_reminders.sql"),
 ];
 const CACHE_MIGRATIONS: &[&str] = &[include_str!("../migrations/cache/001_init.sql")];
 

@@ -45,6 +45,9 @@ pub struct TaskInput {
     pub date: Option<String>,
     #[serde(default)]
     pub time: Option<String>,
+    /// None keeps the current kind; Some(true) makes a reminder, Some(false) a plain task (decision 4).
+    #[serde(default)]
+    pub remind: Option<bool>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -80,6 +83,7 @@ struct Clean {
     details: Option<String>,
     date: Option<String>,
     time: Option<String>,
+    remind: Option<bool>,
 }
 
 fn clean(input: &TaskInput) -> Result<Clean, TaskError> {
@@ -95,7 +99,7 @@ fn clean(input: &TaskInput) -> Result<Clean, TaskError> {
     let time = present(&input.time)
         .map(|t| NaiveTime::parse_from_str(&t, "%H:%M").map(|p| p.format("%H:%M").to_string()).map_err(|_| TaskError::BadTime(t)))
         .transpose()?;
-    Ok(Clean { title: title.to_owned(), details: present(&input.details), date, time })
+    Ok(Clean { title: title.to_owned(), details: present(&input.details), date, time, remind: input.remind })
 }
 
 /// Reminder time for a date and optional time (F3 rule: 09:00 when there is no time).
@@ -156,10 +160,11 @@ pub fn list_tasks(conn: &Connection, list: TaskList, today: NaiveDate) -> Result
 pub fn add_task(conn: &Connection, input: &TaskInput, now: DateTime<FixedOffset>) -> Result<String, TaskError> {
     let c = clean(input)?;
     let id = new_id();
+    let notify_at = if c.remind == Some(true) { notify_for(&c.date, &c.time) } else { None };
     conn.execute(
-        "INSERT INTO task (task_id, title, details, date, time, status, origin, created_at, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, 'open', 'manual', ?6, ?6)",
-        params![id, c.title, c.details, c.date, c.time, now.to_rfc3339()],
+        "INSERT INTO task (task_id, title, details, date, time, notify_at, status, origin, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'open', 'manual', ?7, ?7)",
+        params![id, c.title, c.details, c.date, c.time, notify_at, now.to_rfc3339()],
     )?;
     Ok(id)
 }
@@ -169,9 +174,11 @@ pub fn edit_task(conn: &Connection, id: &str, input: &TaskInput, now: DateTime<F
     let current: Option<Option<String>> =
         conn.query_row("SELECT notify_at FROM task WHERE task_id = ?1", [id], |r| r.get(0)).optional()?;
     let Some(notify_at) = current else { return Err(TaskError::NotFound) };
-    let notify_at = notify_at.and_then(|_| notify_for(&c.date, &c.time)); // reminders stay reminders (decision 2)
+    let is_reminder = c.remind.unwrap_or(notify_at.is_some());
+    let notify_at = if is_reminder { notify_for(&c.date, &c.time) } else { None };
     conn.execute(
-        "UPDATE task SET title = ?1, details = ?2, date = ?3, time = ?4, notify_at = ?5, user_modified = 1, updated_at = ?6
+        "UPDATE task SET title = ?1, details = ?2, date = ?3, time = ?4,
+                notified_at = CASE WHEN notify_at IS ?5 THEN notified_at ELSE NULL END, notify_at = ?5, user_modified = 1, updated_at = ?6
          WHERE task_id = ?7",
         params![c.title, c.details, c.date, c.time, notify_at, now.to_rfc3339(), id],
     )?;
@@ -292,7 +299,7 @@ mod tests {
         NaiveDate::from_ymd_opt(2026, 10, 6).unwrap()
     }
     fn input(title: &str, date: Option<&str>, time: Option<&str>) -> TaskInput {
-        TaskInput { title: title.into(), details: None, date: date.map(Into::into), time: time.map(Into::into) }
+        TaskInput { title: title.into(), details: None, date: date.map(Into::into), time: time.map(Into::into), remind: None }
     }
     fn setup() -> (tempfile::TempDir, Connection) {
         let tmp = tempfile::tempdir().unwrap();

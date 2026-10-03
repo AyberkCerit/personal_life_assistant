@@ -375,7 +375,7 @@ fn update_item(conn: &Connection, target: &ItemRef, block_id: &str, item: &Valid
         (ItemRef::Task(id), ValidItem::Action { reminder, title, date, time }) => {
             let f = task_fields(*reminder, title, *date, *time);
             conn.execute(
-                "UPDATE task SET title = ?1, date = ?2, time = ?3, notify_at = ?4, item_signature = ?5, source_missing = 0, updated_at = ?6, block_id = ?8 WHERE task_id = ?7",
+                "UPDATE task SET title = ?1, date = ?2, time = ?3, notified_at = CASE WHEN notify_at IS ?4 THEN notified_at ELSE NULL END, notify_at = ?4, item_signature = ?5, source_missing = 0, updated_at = ?6, block_id = ?8 WHERE task_id = ?7",
                 params![f.title, f.date, f.time, f.notify_at, signature, now, id, block_id],
             )?;
         }
@@ -623,5 +623,18 @@ mod tests {
     fn action_signature_matches_item_signature() {
         let item = ValidItem::Action { reminder: false, title: " Dişçi  Randevusu".into(), date: None, time: None };
         assert_eq!(action_signature(" Dişçi  Randevusu"), item_signature(&item));
+    }
+    #[test]
+    fn an_extraction_update_with_a_new_time_re_arms_the_reminder() {
+        // Review Focus 5
+        let (_t, conn) = setup();
+        apply(&conn, r#"{"type":"reminder","title":"İlaç","when":{"day_offset":0,"time":"21:30"}}"#);
+        conn.execute("UPDATE task SET notified_at = '2026-10-06T21:30'", []).unwrap();
+        apply(&conn, r#"{"type":"reminder","title":"İlaç","when":{"day_offset":0,"time":"21:30"}}"#);
+        let kept: Option<String> = conn.query_row("SELECT notified_at FROM task", [], |r| r.get(0)).unwrap();
+        assert!(kept.is_some(), "same time: stays notified");
+        apply(&conn, r#"{"type":"reminder","title":"İlaç","when":{"day_offset":0,"time":"22:00"}}"#);
+        let cleared: Option<String> = conn.query_row("SELECT notified_at FROM task", [], |r| r.get(0)).unwrap();
+        assert!(cleared.is_none(), "new time: fires again");
     }
 }
