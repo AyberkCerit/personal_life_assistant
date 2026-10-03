@@ -2,6 +2,7 @@
 
 pub mod extraction;
 pub mod files;
+pub mod jobs;
 pub mod fs_atomic;
 pub mod vault;
 pub mod db;
