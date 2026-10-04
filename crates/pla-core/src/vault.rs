@@ -107,6 +107,79 @@ pub fn open_vault(root: &Path) -> Result<Vault, VaultError> {
     Ok(Vault { root: root.to_path_buf(), config })
 }
 
+/// What the first-run wizard found at a folder the user is about to make the vault.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FolderState {
+    /// Does not exist yet; it will be created (FR-SET-006).
+    Missing,
+    /// Exists with nothing visible in it (hidden entries such as `.obsidian` do not count).
+    Empty,
+    /// Holds Markdown notes; opened as it is, nothing moved or changed (FR-SET-005).
+    Notes,
+    /// Holds files but no notes.
+    Other,
+    /// A network (UNC) path, which PLA does not support (FR-SET-007).
+    Network,
+    /// A file, not a folder.
+    NotFolder,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct FolderCheck {
+    pub state: FolderState,
+    /// Markdown files found (hidden folders skipped), counted up to `MD_COUNT_LIMIT`.
+    pub md_files: usize,
+}
+
+const MD_COUNT_LIMIT: usize = 10_000;
+
+/// Looks at a folder without changing anything (first-run wizard, FR-SET-005…007).
+pub fn inspect_folder(path: &Path) -> FolderCheck {
+    let check = |state| FolderCheck { state, md_files: 0 };
+    if is_network_path(path) {
+        return check(FolderState::Network);
+    }
+    if !path.exists() {
+        return check(FolderState::Missing);
+    }
+    if !path.is_dir() {
+        return check(FolderState::NotFolder);
+    }
+    let visible = std::fs::read_dir(path)
+        .map(|entries| entries.flatten().any(|e| !e.file_name().to_string_lossy().starts_with('.')))
+        .unwrap_or(false);
+    if !visible {
+        return check(FolderState::Empty);
+    }
+    let md_files = count_notes(path, MD_COUNT_LIMIT);
+    FolderCheck { state: if md_files > 0 { FolderState::Notes } else { FolderState::Other }, md_files }
+}
+
+fn count_notes(dir: &Path, limit: usize) -> usize {
+    let mut count = 0;
+    let mut stack = vec![dir.to_path_buf()];
+    while let Some(d) = stack.pop() {
+        let Ok(entries) = std::fs::read_dir(&d) else { continue };
+        for e in entries.flatten() {
+            let name = e.file_name().to_string_lossy().into_owned();
+            if name.starts_with('.') {
+                continue;
+            }
+            let path = e.path();
+            if path.is_dir() {
+                stack.push(path);
+            } else if name.to_ascii_lowercase().ends_with(".md") {
+                count += 1;
+                if count >= limit {
+                    return count;
+                }
+            }
+        }
+    }
+    count
+}
+
 /// `<app_root>/vaults/<vault_id>/` — where this vault's pla.db and cache.db live.
 pub fn data_dir(app_root: &Path, vault_id: &str) -> Result<PathBuf, VaultError> {
     if !is_valid_vault_id(vault_id) {
@@ -334,5 +407,36 @@ notes = \"Notlar/Arşiv\"
         assert!(matches!(open_vault(&tmp.path().join("yok")), Err(VaultError::NotADirectory(_))));
         assert!(matches!(open_vault(Path::new(r"\\server\share\vault")), Err(VaultError::NetworkPathUnsupported(_))));
         assert!(matches!(open_vault(Path::new(r"\\?\UNC\server\share\vault")), Err(VaultError::NetworkPathUnsupported(_))));
+    }
+
+    #[test]
+    fn inspects_a_folder_before_it_becomes_the_vault() {
+        // First-run wizard: FR-SET-005/006/007
+        let tmp = tempfile::tempdir().unwrap();
+        let missing = tmp.path().join("Yeni Kasa ğüş");
+        assert_eq!(inspect_folder(&missing), FolderCheck { state: FolderState::Missing, md_files: 0 });
+
+        let empty = tmp.path().join("bos");
+        std::fs::create_dir_all(empty.join(".obsidian")).unwrap();
+        assert_eq!(inspect_folder(&empty).state, FolderState::Empty, "hidden folders do not count");
+
+        let notes = tmp.path().join("obsidian");
+        std::fs::create_dir_all(notes.join("Projeler")).unwrap();
+        std::fs::create_dir_all(notes.join(".trash")).unwrap();
+        std::fs::write(notes.join("Günlük.md"), "x").unwrap();
+        std::fs::write(notes.join("Projeler/PLA.MD"), "x").unwrap();
+        std::fs::write(notes.join(".trash/silinen.md"), "x").unwrap();
+        assert_eq!(inspect_folder(&notes), FolderCheck { state: FolderState::Notes, md_files: 2 });
+
+        let other = tmp.path().join("fotograflar");
+        std::fs::create_dir_all(&other).unwrap();
+        std::fs::write(other.join("a.jpg"), "x").unwrap();
+        assert_eq!(inspect_folder(&other).state, FolderState::Other);
+
+        let file = tmp.path().join("dosya.txt");
+        std::fs::write(&file, "x").unwrap();
+        assert_eq!(inspect_folder(&file).state, FolderState::NotFolder);
+
+        assert_eq!(inspect_folder(Path::new(r"\\sunucu\paylasim\Kasa")).state, FolderState::Network);
     }
 }
