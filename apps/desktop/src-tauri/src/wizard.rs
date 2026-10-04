@@ -55,12 +55,12 @@ pub fn welcome_note(lang: &str) -> (&'static str, &'static str) {
     if lang == "tr" {
         (
             "Hoş geldin",
-            "# PLA'ya hoş geldin\n\nNotlarını bu klasöre yaz; PLA içlerindeki görevleri, hatırlatıcıları ve ölçümleri kendiliğinden bulur.\n\n- Yarın 9'da dişçi var.\n- Cuma günü faturayı ödemeyi unutma.\n\nBu not silinebilir.\n",
+            "---\npla_generated: true\n---\n# PLA'ya hoş geldin\n\nNotlarını bu klasöre yaz; PLA içlerindeki görevleri, hatırlatıcıları ve ölçümleri kendiliğinden bulur. Örneğin bir nota şunları yazabilirsin:\n\n- Yarın 9'da dişçi var.\n- Cuma günü faturayı ödemeyi unutma.\n\nBu notu PLA yazdığı için içindeki örnekler göreve dönüşmez; denemek için yeni bir not aç. Bu not silinebilir.\n",
         )
     } else {
         (
             "Welcome",
-            "# Welcome to PLA\n\nWrite your notes in this folder; PLA finds the tasks, reminders and measurements in them by itself.\n\n- Dentist tomorrow at 9.\n- Don't forget to pay the bill on Friday.\n\nYou can delete this note.\n",
+            "---\npla_generated: true\n---\n# Welcome to PLA\n\nWrite your notes in this folder; PLA finds the tasks, reminders and measurements in them by itself. For example, a note could say:\n\n- Dentist tomorrow at 9.\n- Don't forget to pay the bill on Friday.\n\nPLA wrote this note, so its examples do not become tasks; open a new note to try it. You can delete this note.\n",
         )
     }
 }
@@ -163,6 +163,8 @@ mod tests {
         let (en_title, en_body) = welcome_note("en");
         assert_eq!((tr_title, en_title), ("Hoş geldin", "Welcome"));
         assert!(tr_body.contains("PLA") && en_body.contains("PLA"));
+        // FR-EXT-001: PLA wrote it, so its examples never become the user's tasks
+        assert!(pla_core::notes::is_generated(tr_body) && pla_core::notes::is_generated(en_body));
         assert_eq!(welcome_note("de").0, "Welcome", "unknown languages fall back to English");
     }
 
