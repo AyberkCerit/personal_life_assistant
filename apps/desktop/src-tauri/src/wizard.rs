@@ -21,9 +21,9 @@ pub enum PrepareError {
 impl std::fmt::Display for PrepareError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Network(p) => write!(f, "network:{}", p.display()),
-            Self::NotFolder(p) => write!(f, "not_folder:{}", p.display()),
-            Self::NotWritable { path, reason } => write!(f, "not_writable:{}:{reason}", path.display()),
+            Self::Network(p) => write!(f, "network|{}", p.display()),
+            Self::NotFolder(p) => write!(f, "not_folder|{}", p.display()),
+            Self::NotWritable { path, reason } => write!(f, "not_writable|{}|{reason}", path.display()),
         }
     }
 }
@@ -146,6 +146,10 @@ mod tests {
         // FR-SET-007
         let unc = std::path::Path::new(r"\\sunucu\paylasim\Kasa");
         assert_eq!(prepare_folder(unc), Err(PrepareError::Network(unc.to_path_buf())));
+        // the UI's setupError() reads this `<code>|<path>|<reason>` shape
+        assert_eq!(PrepareError::Network(unc.to_path_buf()).to_string(), r"network|\\sunucu\paylasim\Kasa");
+        let denied = PrepareError::NotWritable { path: "C:/Kasa".into(), reason: "erişim engellendi".into() };
+        assert_eq!(denied.to_string(), "not_writable|C:/Kasa|erişim engellendi");
         let tmp = tempfile::tempdir().unwrap();
         let file = tmp.path().join("dosya.txt");
         std::fs::write(&file, "x").unwrap();

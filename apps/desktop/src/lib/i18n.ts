@@ -89,6 +89,39 @@ const dict = {
     "status.paused": "Arka plan YZ duraklatıldı",
     "status.resume": "Devam et",
     "toast.more": "öğe daha eklendi",
+    "wizard.step": "Adım {n} / 4",
+    "wizard.next": "İleri",
+    "wizard.back": "Geri",
+    "wizard.language.title": "Dilini seç",
+    "wizard.language.body": "PLA'nın menüleri ve yeni kasadaki karşılama notu bu dilde olur.",
+    "wizard.vault.title": "Notların nerede dursun?",
+    "wizard.vault.body": "PLA notlarını sıradan Markdown dosyaları olarak bu klasörde tutar. Var olan bir Obsidian kasasını da seçebilirsin.",
+    "wizard.vault.path": "Klasör",
+    "wizard.vault.browse": "Gözat",
+    "wizard.vault.use": "Bu klasörü kullan",
+    "wizard.folder.missing": "Bu klasör yok; PLA oluşturacak ve içine bir karşılama notu koyacak.",
+    "wizard.folder.empty": "Klasör boş; PLA içine bir karşılama notu koyacak.",
+    "wizard.folder.notes": "Bu klasörde {count} not var. Hiçbiri taşınmaz ya da değiştirilmez.",
+    "wizard.folder.other": "Klasörde not yok ama başka dosyalar var; onlara dokunulmaz.",
+    "wizard.folder.network": "Ağ klasörleri desteklenmiyor. Bu bilgisayardaki bir klasörü seç.",
+    "wizard.folder.not_folder": "Bu bir dosya, klasör değil. Bir klasör seç.",
+    "wizard.folder.onedrive": "Bu klasör OneDrive ile eşitleniyor; notların buluta da gider. İstemiyorsan OneDrive dışında bir klasör seç.",
+    "wizard.error.network": "{path} bir ağ klasörü; desteklenmiyor. Bu bilgisayardaki bir klasörü seç.",
+    "wizard.error.not_folder": "{path} bir dosya, klasör değil. Bir klasör seç.",
+    "wizard.error.not_writable": "{path} klasörüne yazılamıyor ({reason}). Başka bir klasör seç.",
+    "wizard.error.other": "Klasör açılamadı: {reason}",
+    "wizard.model.title": "AI modeli",
+    "wizard.model.body": "Görevleri notlarından PLA'nın kendi dil modeli çıkarır; tamamen bu bilgisayarda çalışır. İndirme arka planda sürer, beklemeden devam edebilirsin.",
+    "wizard.model.installed": "Model kurulu",
+    "wizard.model.skip": "AI olmadan devam et",
+    "wizard.model.later": "Modeli istediğin zaman alttaki durum çubuğundan kurabilirsin.",
+    "wizard.done.title": "Hazırsın",
+    "wizard.done.vault": "Notların",
+    "wizard.done.model": "AI",
+    "wizard.done.modelReady": "hazır",
+    "wizard.done.modelDownloading": "indiriliyor, bitince kendiliğinden açılır",
+    "wizard.done.modelOff": "kapalı; görevleri elle ekleyebilirsin",
+    "wizard.done.start": "PLA'yı kullanmaya başla",
   },
   en: {
     "welcome.title": "Welcome to PLA",
@@ -180,12 +213,59 @@ const dict = {
     "status.paused": "Background AI paused",
     "status.resume": "Resume",
     "toast.more": "more added",
+    "wizard.step": "Step {n} of 4",
+    "wizard.next": "Next",
+    "wizard.back": "Back",
+    "wizard.language.title": "Choose your language",
+    "wizard.language.body": "PLA's menus and the welcome note in a new vault use this language.",
+    "wizard.vault.title": "Where should your notes live?",
+    "wizard.vault.body": "PLA keeps your notes as plain Markdown files in this folder. An existing Obsidian vault works too.",
+    "wizard.vault.path": "Folder",
+    "wizard.vault.browse": "Browse",
+    "wizard.vault.use": "Use this folder",
+    "wizard.folder.missing": "This folder does not exist yet; PLA will create it with a welcome note inside.",
+    "wizard.folder.empty": "The folder is empty; PLA will put a welcome note in it.",
+    "wizard.folder.notes": "This folder holds {count} notes. None of them is moved or changed.",
+    "wizard.folder.other": "The folder has no notes but other files; they are left alone.",
+    "wizard.folder.network": "Network folders are not supported. Choose a folder on this PC.",
+    "wizard.folder.not_folder": "This is a file, not a folder. Choose a folder.",
+    "wizard.folder.onedrive": "This folder syncs with OneDrive, so your notes go to the cloud too. Choose a folder outside OneDrive if you don't want that.",
+    "wizard.error.network": "{path} is a network folder, which is not supported. Choose a folder on this PC.",
+    "wizard.error.not_folder": "{path} is a file, not a folder. Choose a folder.",
+    "wizard.error.not_writable": "PLA cannot write to {path} ({reason}). Choose another folder.",
+    "wizard.error.other": "The folder could not be opened: {reason}",
+    "wizard.model.title": "AI model",
+    "wizard.model.body": "PLA's own language model finds the tasks in your notes; it runs entirely on this PC. The download continues in the background, so you can go on without waiting.",
+    "wizard.model.installed": "Model installed",
+    "wizard.model.skip": "Continue without AI",
+    "wizard.model.later": "You can install the model any time from the status bar.",
+    "wizard.done.title": "You're all set",
+    "wizard.done.vault": "Your notes",
+    "wizard.done.model": "AI",
+    "wizard.done.modelReady": "ready",
+    "wizard.done.modelDownloading": "downloading, turns on by itself when done",
+    "wizard.done.modelOff": "off; you can add tasks by hand",
+    "wizard.done.start": "Start using PLA",
   },
 } as const;
 
 export type Key = keyof typeof dict.tr;
-export const lang: "tr" | "en" = navigator.language.toLowerCase().startsWith("tr") ? "tr" : "en";
+export type Lang = "tr" | "en";
+/** The OS language (FR-SET-003 pre-selection). */
+export const osLang: Lang = navigator.language.toLowerCase().startsWith("tr") ? "tr" : "en";
+/** The UI language; a live binding, so the app re-renders (keyed on it) after `setLang`. */
+export let lang: Lang = osLang;
+
+export function setLang(next: Lang) {
+  lang = next;
+  document.documentElement.lang = next;
+}
 
 export function t(key: Key): string {
   return dict[lang][key];
+}
+
+/** `t` with `{name}` placeholders filled. */
+export function tf(key: Key, values: Record<string, string | number>): string {
+  return t(key).replace(/\{(\w+)\}/g, (_, k: string) => String(values[k] ?? ""));
 }
