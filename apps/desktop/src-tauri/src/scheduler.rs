@@ -26,6 +26,8 @@ pub trait Notifier: Send {
     fn missed(&self, reminders: &[DueReminder]);
     fn problem(&self, message: &str);
     fn tasks_changed(&self);
+    /// A backup ran (or failed), so the settings screen can refresh its status.
+    fn backup_changed(&self) {}
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -146,6 +148,7 @@ impl Scheduler {
             SchedCommand::Snooze(id) => snooze(&self.conn, &id, now).is_ok(),
             SchedCommand::BackupNow => {
                 self.run_maintenance(now);
+                self.notifier.backup_changed();
                 false
             }
             SchedCommand::Shutdown => false,

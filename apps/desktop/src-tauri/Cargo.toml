@@ -29,4 +29,4 @@ tauri-build = { version = "2", features = [] }
 
 [target."cfg(windows)".dependencies]
 tauri-winrt-notification = "0.8"
-windows-sys = { version = "0.61.2", features = ["Win32_UI_Input_KeyboardAndMouse", "Win32_System_SystemInformation", "Win32_System_Power", "Win32_Globalization", "Win32_UI_Shell", "Win32_System_Com"] }
+windows-sys = { version = "0.61.2", features = ["Win32_UI_Input_KeyboardAndMouse", "Win32_System_SystemInformation", "Win32_System_Power", "Win32_Globalization", "Win32_UI_Shell", "Win32_System_Com", "Win32_System_Registry"] }

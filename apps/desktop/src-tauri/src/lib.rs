@@ -7,6 +7,7 @@ pub mod wizard;
 mod notify;
 mod tray;
 pub mod scheduler;
+pub mod settings_screen;
 pub mod system;
 pub mod watcher;
 pub mod worker;
@@ -72,6 +73,11 @@ pub fn run() {
             commands::settings_set,
             commands::set_autostart,
             commands::send_test_notification,
+            settings_screen::backup_status,
+            settings_screen::export_data,
+            settings_screen::notification_status,
+            settings_screen::open_place,
+            settings_screen::about_info,
             commands::hide_to_tray,
         ])
         .build(tauri::generate_context!())

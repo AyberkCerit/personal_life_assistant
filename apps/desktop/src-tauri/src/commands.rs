@@ -96,7 +96,7 @@ pub enum SaveResult {
     Missing,
 }
 
-fn app_root() -> Result<PathBuf, String> {
+pub(crate) fn app_root() -> Result<PathBuf, String> {
     default_app_root().ok_or_else(|| "APPDATA is not set; PLA cannot store its data.".to_owned())
 }
 
@@ -604,7 +604,7 @@ pub fn hide_to_tray(window: tauri::WebviewWindow, state: State<AppState>) -> Res
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct InstalledModel {
-    name: String,
+    pub name: String,
     size: u64,
     path: String,
     local: bool,
@@ -618,7 +618,7 @@ pub struct ModelStatus {
     models_dir: Option<String>,
 }
 
-fn describe_model(path: &Path, id: Option<&str>) -> Option<InstalledModel> {
+pub(crate) fn describe_model(path: &Path, id: Option<&str>) -> Option<InstalledModel> {
     let size = std::fs::metadata(path).ok().filter(|m| m.is_file())?.len();
     let entry = id.and_then(catalog::by_id);
     Some(InstalledModel {

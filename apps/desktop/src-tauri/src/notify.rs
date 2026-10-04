@@ -115,7 +115,7 @@ pub fn strings() -> &'static Strings {
     pick(UI_LANG.load(Ordering::SeqCst), os_turkish())
 }
 
-fn app_id() -> &'static str {
+pub(crate) fn app_id() -> &'static str {
     // Decision 8: an unpackaged dev build has no registered app id.
     if cfg!(debug_assertions) {
         tauri_winrt_notification::Toast::POWERSHELL_APP_ID
@@ -190,6 +190,10 @@ impl Notifier for AppNotifier {
 
     fn tasks_changed(&self) {
         let _ = self.app.emit("tasks-changed", ());
+    }
+
+    fn backup_changed(&self) {
+        let _ = self.app.emit("backup-changed", ());
     }
 }
 
