@@ -178,6 +178,8 @@
     window.addEventListener("keydown", shortcut);
     const unClose = inTauri
       ? getCurrentWindow().onCloseRequested(async (event) => {
+          // No vault open: nothing runs in the background, so closing quits (deferred F4c minor).
+          if (vaultPath === null) return;
           event.preventDefault();
           await editor?.close();
           await api.hideToTray();

@@ -47,15 +47,18 @@
   const labels = $derived({ today: t("tasks.today"), tomorrow: t("tasks.tomorrow"), noDate: t("tasks.noDate"), overdue: t("tasks.overdue") });
   const groups = $derived(tab === "review" ? [] : groupTasks(filterByOrigin(tasks, filter), tab, today, labels, lang));
 
-  async function run(action: () => Promise<unknown>) {
+  async function run(action: () => Promise<unknown>): Promise<boolean> {
+    let ok = true;
     try {
       await action();
       error = null;
       onChanged(); // e.g. a reminder ticked off here leaves the reminder banner
     } catch (e) {
       error = String(e);
+      ok = false;
     }
     await load();
+    return ok;
   }
 
   async function load() {
@@ -151,8 +154,8 @@
           <TaskRow
             {task}
             {today}
-            onDone={(done) => void run(() => api.setTaskDone(task.task_id, done))}
-            onSave={(input) => run(() => api.editTask(task.task_id, input))}
+            onDone={(done) => run(() => api.setTaskDone(task.task_id, done))}
+            onSave={async (input) => void (await run(() => api.editTask(task.task_id, input)))}
             onDelete={() => void run(() => api.deleteTask(task.task_id))}
             onOpenSource={() => task.note_path && onOpenSource(task.note_path, task.block_text)}
           />

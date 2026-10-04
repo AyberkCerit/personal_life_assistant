@@ -276,4 +276,4 @@ let pending: { due: MockReminder[]; missed: MockReminder[] } = { due: [], missed
   pending.missed = list;
   for (const cb of mockListeners.get("missed-reminders") ?? []) cb(list);
 };
-(globalThis as Record<string, unknown>).__plaMockFail = (kind: string) => { clearInterval(timer); download = { state: "failed", failure: { kind, needed: 6_700_000_000, available: 4_400_000_000, detail: kind }, received, total: RECOMMENDED.size }; emit("model-download", download); };
+(globalThis as Record<string, unknown>).__plaMockFail = (kind: string) => { clearInterval(timer); download = { state: "failed", failure: { kind, needed: 6_700_000_000, available: 4_400_000_000, status: 503, detail: kind }, received, total: RECOMMENDED.size }; emit("model-download", download); };

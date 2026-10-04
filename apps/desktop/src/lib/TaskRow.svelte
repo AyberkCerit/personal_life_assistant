@@ -22,7 +22,8 @@
   }: {
     task: Task;
     today: string;
-    onDone: (done: boolean) => void;
+    /** Resolves to whether the change was saved. */
+    onDone: (done: boolean) => Promise<boolean>;
     onSave: (input: TaskInput) => Promise<void>;
     onDelete: () => void;
     onOpenSource: () => void;
@@ -82,7 +83,7 @@
       leaving = true;
       await new Promise((r) => setTimeout(r, motion(BASE)));
     }
-    onDone(done);
+    if (!(await onDone(done))) leaving = false; // not saved: the row comes back (deferred design minor)
   }
 
   function startEdit() {

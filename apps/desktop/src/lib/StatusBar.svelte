@@ -19,7 +19,7 @@
 </script>
 
 <footer class="status" role="status" aria-live="polite">
-  <span class="model {status.model}"><span class="dot" aria-hidden="true"></span>{t(`status.model.${status.model}` as Key)}</span>
+  <span class="model {status.model}" class:busy={status.busy}><span class="dot" aria-hidden="true"></span>{t(`status.model.${status.model}` as Key)}</span>
   {#if download?.state === "running" && download.progress.received < download.progress.total}
     <button class="link" onclick={onShowModel}>{t("model.status")} {new Intl.NumberFormat(lang, { style: "percent" }).format(Math.floor((download.progress.received / download.progress.total) * 100) / 100)}</button>
   {/if}
@@ -45,7 +45,9 @@
   .status :global(.btn) { padding-block: 0; }
   .model { display: inline-flex; align-items: center; gap: var(--space-2); white-space: nowrap; }
   .dot { width: 0.5rem; height: 0.5rem; border-radius: var(--radius-full); background: var(--color-text-muted); }
-  .running .dot { background: var(--color-accent); animation: pulse 1.6s var(--ease-standard) infinite; }
+  .running .dot { background: var(--color-accent); }
+  /* only while it is working, not all the time the model is loaded (deferred design minor) */
+  .running.busy .dot { animation: pulse 1.6s var(--ease-standard) infinite; }
   .error { display: inline-flex; gap: var(--space-1); align-items: center; color: var(--color-danger); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .end { margin-left: auto; display: inline-flex; }
   .link { background: none; border: 0; padding: 0; color: var(--color-link); cursor: pointer; font-size: var(--text-sm); }

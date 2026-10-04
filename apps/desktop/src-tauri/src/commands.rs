@@ -704,7 +704,10 @@ pub fn model_status(state: State<AppState>) -> Result<ModelStatus, String> {
     Ok(ModelStatus {
         installed: path.as_deref().and_then(|p| describe_model(p, settings.model_id.as_deref())),
         recommended: catalog::recommended(),
-        download: state.downloads.current(),
+        download: state.downloads.current().or_else(|| {
+            let (entry, dir) = (catalog::recommended(), models::models_dir()?);
+            crate::model_download::leftover(&dl::part_path(&dir, entry), entry.size)
+        }),
         models_dir: models::models_dir().map(|d| d.to_string_lossy().into_owned()),
     })
 }

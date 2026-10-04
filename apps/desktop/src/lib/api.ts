@@ -48,7 +48,7 @@ export interface DueReminder { task_id: string; title: string; notify_at: string
 export interface CatalogEntry { id: string; name: string; file_name: string; size: number; sha256: string; url: string; source: string; licence: string; licence_url: string }
 export interface InstalledModel { name: string; size: number; path: string; local: boolean }
 export interface Progress { received: number; total: number; bytes_per_sec: number; eta_secs: number | null }
-export interface Failure { kind: string; needed: number | null; available: number | null; detail: string }
+export interface Failure { kind: string; needed: number | null; available: number | null; status: number | null; detail: string }
 export type DownloadState =
   | { state: "running"; progress: Progress }
   | { state: "paused"; received: number; total: number }

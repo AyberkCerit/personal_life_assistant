@@ -26,6 +26,7 @@
       ? fill(t(failureKey(download.failure.kind) as Key), {
           needed: formatBytes(download.failure.needed ?? 0, lang),
           available: formatBytes(download.failure.available ?? 0, lang),
+          status: String(download.failure.status ?? ""),
         })
       : "",
   );
