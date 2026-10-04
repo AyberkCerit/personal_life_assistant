@@ -24,7 +24,7 @@ const EXTERNAL_DELAY: Duration = Duration::from_secs(45);
 /// FR-MDL-013: the model process stops after this long without requests.
 const MODEL_IDLE_AFTER: Duration = Duration::from_secs(60);
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub enum Command {
     Enqueue(String),
     EnqueueLater(String),
@@ -34,6 +34,8 @@ pub enum Command {
     Pause(bool),
     /// A model became available (download or chosen file): use it from now on.
     UseModel(pla_core::llm::ServerConfig),
+    /// FR-MDL-019: stop and forget the model (ends llama-server), then answer, so the file can go.
+    DropModel(std::sync::mpsc::Sender<()>),
     Shutdown,
 }
 
@@ -226,6 +228,12 @@ impl Worker {
                     self.status.model = self.model_state();
                     self.status.last_error = None;
                     self.process();
+                }
+                Ok(Command::DropModel(done)) => {
+                    self.extractor = None; // dropping the host ends llama-server
+                    self.status.model = self.model_state();
+                    self.publish();
+                    let _ = done.send(());
                 }
                 Ok(Command::Rescan) => {
                     if let Err(e) = enqueue_all(&self.vault, &self.conn, (self.clock)()) {
@@ -580,6 +588,43 @@ mod tests {
         handle.send(Command::UseModel(pla_core::llm::ServerConfig::new("llama-server.exe".into(), "m.gguf".into())));
         wait_for(&statuses, |s| !s.busy && s.added == 1 && s.queued == 0);
         assert_eq!(task_count(&data), 1);
+        handle.shutdown();
+    }
+
+    /// Ends like the model host: dropping it is what stops llama-server.
+    struct Hosted(Arc<AtomicBool>);
+    impl Extractor for Hosted {
+        fn extract_raw(&mut self, _: NaiveDate, _: &str) -> Result<String, LlmError> {
+            Ok(TASK.to_owned())
+        }
+    }
+    impl Drop for Hosted {
+        fn drop(&mut self) {
+            self.0.store(true, Ordering::SeqCst);
+        }
+    }
+
+    #[test]
+    fn removing_the_model_stops_it_before_saying_so() {
+        // FR-MDL-019, settings Review Focus 2: the file can only be deleted once llama-server is gone
+        let tmp = tempfile::tempdir().unwrap();
+        let vault = open_vault(tmp.path()).unwrap();
+        let data = tmp.path().join(".data");
+        let conn = open_databases(&data).unwrap().pla;
+        let statuses = Arc::new(Mutex::new(Vec::new()));
+        let sink = Arc::clone(&statuses);
+        let dropped = Arc::new(AtomicBool::new(false));
+        let handle = Worker::new(vault, conn, Some(Box::new(Hosted(Arc::clone(&dropped)))), Box::new(move |s| sink.lock().unwrap().push(s.clone()))).spawn();
+        wait_for(&statuses, |s| s.model == ModelState::Off);
+        let (ack, done) = std::sync::mpsc::channel();
+        handle.send(Command::DropModel(ack));
+        done.recv_timeout(Duration::from_secs(5)).expect("the worker answers");
+        assert!(dropped.load(Ordering::SeqCst), "the host was dropped before the answer");
+        wait_for(&statuses, |s| s.model == ModelState::NotInstalled);
+        std::fs::write(tmp.path().join("notes/sonra.md"), "Yarın dişçi.").unwrap();
+        handle.send(Command::Enqueue("notes/sonra.md".into()));
+        let s = wait_for(&statuses, |s| s.queued >= 1);
+        assert_eq!(s.added, 0, "no model, the note waits");
         handle.shutdown();
     }
 }

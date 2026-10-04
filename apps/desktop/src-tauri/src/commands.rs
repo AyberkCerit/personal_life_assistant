@@ -213,15 +213,27 @@ fn open_vault_locked(app: &AppHandle, state: &State<AppState>, path: &Path) -> R
     let mut settings = load_settings(&root).map_err(|e| e.to_string())?.settings;
     // Stop the previous vault before opening the next, outside the lock: one writer per pla.db.
     let previous = state.session.lock().expect("session lock").take();
+    let mut old_root = None;
     if let Some(old) = previous {
         if same_folder(&old.vault.root, path) {
             let opened = vault_info_of(&old.vault);
             *state.session.lock().expect("session lock") = Some(old);
             return Ok(opened);
         }
+        old_root = Some(old.vault.root.clone());
         drop(old);
     }
-    let session = start_session(app, path, &settings, Arc::clone(&state.self_writes), state.paused.load(Ordering::SeqCst))?;
+    let paused = state.paused.load(Ordering::SeqCst);
+    let session = match start_session(app, path, &settings, Arc::clone(&state.self_writes), paused) {
+        Ok(session) => session,
+        Err(e) => {
+            // The new folder could not be opened: go back to the previous vault (settings Review Focus 3).
+            if let Some(back) = old_root.and_then(|r| start_session(app, &r, &settings, Arc::clone(&state.self_writes), paused).ok()) {
+                *state.session.lock().expect("session lock") = Some(back);
+            }
+            return Err(e);
+        }
+    };
     let opened = vault_info_of(&session.vault);
     settings.vault_path = Some(session.vault.root.clone());
     save_settings(&root, &settings).map_err(|e| e.to_string())?;
@@ -643,6 +655,45 @@ fn install_model(app: &AppHandle, model_path: &Path, model_id: Option<&str>, ins
         }
     }
     let _ = app.emit("model-changed", installed);
+    Ok(())
+}
+
+/// FR-MDL-019: stops the model, then deletes a model PLA downloaded or only forgets a file the
+/// user chose (settings Review Focus 2). AI features turn off; notes keep queueing.
+#[tauri::command(async)]
+pub fn model_remove(app: AppHandle, state: State<AppState>) -> Result<(), String> {
+    let root = app_root()?;
+    let settings = load_settings(&root).map_err(|e| e.to_string())?.settings;
+    let models_dir = models::models_dir();
+    let Some(plan) = crate::model_paths::removal(&settings, models_dir.as_deref()) else { return Ok(()) };
+    let (ack, done) = std::sync::mpsc::channel();
+    let asked = state.session.lock().expect("session lock").as_ref().map(|s| s.worker.send(Command::DropModel(ack))).is_some();
+    if asked {
+        done.recv_timeout(Duration::from_secs(15)).map_err(|_| "model_busy".to_owned())?;
+    }
+    if let crate::model_paths::Removal::Delete(path) = &plan {
+        // llama-server may need a moment to release the file after it exits
+        let mut result = std::fs::remove_file(path);
+        for _ in 0..20 {
+            match &result {
+                Err(e) if e.kind() != std::io::ErrorKind::NotFound => {
+                    std::thread::sleep(Duration::from_millis(250));
+                    result = std::fs::remove_file(path);
+                }
+                _ => break,
+            }
+        }
+        match result {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(format!("not_removed|{}|{}", path.display(), crate::wizard::write_failure(&e))),
+        }
+    }
+    update_settings(&root, &state.settings_lock, |s| {
+        s.model_path = None;
+        s.model_id = None;
+    })?;
+    let _ = app.emit("model-removed", ());
     Ok(())
 }
 
