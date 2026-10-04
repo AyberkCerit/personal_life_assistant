@@ -26,7 +26,14 @@
   onMount(() => {
     void refresh();
     const un = api.onModelChanged(() => void refresh());
-    return () => void un.then((f) => f());
+    const unRemoved = api.onModelRemoved(() => {
+      dismissed = false; // AI just went off: offer the model again
+      void refresh();
+    });
+    return () => {
+      void un.then((f) => f());
+      void unRemoved.then((f) => f());
+    };
   });
 </script>
 

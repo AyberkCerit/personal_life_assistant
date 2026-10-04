@@ -18,6 +18,8 @@
   import { getCurrentWindow } from "@tauri-apps/api/window";
   import StatusBar from "./lib/StatusBar.svelte";
   import Wizard from "./lib/Wizard.svelte";
+  import Settings from "./lib/Settings.svelte";
+  import type { Section } from "./lib/settings";
   import type { Progress } from "./lib/wizard";
   import { t, lang, setLang, type Lang } from "./lib/i18n";
   import type { VaultInfo } from "./lib/api";
@@ -37,6 +39,10 @@
   let reveal = $state<string | null>(null);
   let editor: ReturnType<typeof Editor> | undefined = $state();
   let error = $state<string | null>(null);
+  let settingsOpen = $state(false);
+  let settingsSection = $state<Section>("general"); // kept here: a language switch re-mounts the window
+  let settingsRefocus = $state<string | null>(null);
+  let settingsOpener: HTMLElement | null = null;
   let status = $state<WorkerStatus>({ queued: 0, model: "off", busy: false, last_error: null, added: 0, paused: false });
 
   async function refresh() {
@@ -46,6 +52,39 @@
   function switchLanguage(l: Lang) {
     setLang(l);
     uiLang = l;
+  }
+
+  function openSettings() {
+    if (wizard || settingsOpen) return;
+    settingsOpener = document.activeElement as HTMLElement | null;
+    settingsOpen = true;
+  }
+
+  function closeSettings() {
+    settingsOpen = false;
+    settingsOpener?.focus();
+  }
+
+  // FR-SET-012: the open note is saved before the app re-renders in the new language; if it cannot
+  // be saved, the language stays and the section shows why.
+  async function settingsLanguage(l: Lang) {
+    await editor?.close();
+    await api.settingsSet("language", l);
+    settingsRefocus = "language";
+    switchLanguage(l);
+  }
+
+  async function settingsTheme(theme: "dark" | "light") {
+    await api.settingsSet("theme", theme);
+    document.documentElement.dataset.theme = theme;
+  }
+
+  // FR-SET-014: the note is saved into the old vault before it closes.
+  async function settingsSwitchVault(path: string) {
+    await editor?.close();
+    current = null;
+    await vaultOpened(await api.setupVault(path, lang));
+    tasksVersion++;
   }
 
   async function wizardFinished(info: VaultInfo) {
@@ -129,6 +168,14 @@
     const unNew = api.onNewNote(() => document.querySelector<HTMLInputElement>(".tree input")?.focus());
     const unPaused = api.onPausedChanged((p) => (status = { ...status, paused: p }));
     const unModel = api.onModelDownload((s) => (modelDownload = s));
+    const unSettings = api.onOpenSettings(openSettings);
+    const shortcut = (e: KeyboardEvent) => {
+      if (e.ctrlKey && e.key === ",") {
+        e.preventDefault();
+        openSettings();
+      }
+    };
+    window.addEventListener("keydown", shortcut);
     const unClose = inTauri
       ? getCurrentWindow().onCloseRequested(async (event) => {
           event.preventDefault();
@@ -144,6 +191,8 @@
       void unNew.then((f) => f());
       void unPaused.then((f) => f());
       void unModel.then((f) => f());
+      void unSettings.then((f) => f());
+      window.removeEventListener("keydown", shortcut);
     };
   });
 </script>
@@ -182,9 +231,19 @@
     <aside class="side-panel">
       <TaskPanel version={tasksVersion} onOpenSource={openSource} onChanged={() => panelEdits++} />
     </aside>
-    <StatusBar {status} onResume={() => void api.setPaused(false)} download={modelDownload} onShowModel={() => (showModel = true)} />
+    <StatusBar {status} onResume={() => void api.setPaused(false)} download={modelDownload} onShowModel={() => (showModel = true)} onSettings={openSettings} />
     <AddedToast onChanged={() => tasksVersion++} />
   </div>
+{/if}
+{#if settingsOpen && !wizard}
+  <Settings
+    bind:section={settingsSection}
+    bind:refocus={settingsRefocus}
+    onClose={closeSettings}
+    onLanguage={settingsLanguage}
+    onTheme={settingsTheme}
+    onSwitchVault={settingsSwitchVault}
+  />
 {/if}
 {/key}
 

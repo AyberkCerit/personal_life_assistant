@@ -1,18 +1,21 @@
 <script lang="ts">
   import CircleAlert from "@lucide/svelte/icons/circle-alert";
   import Play from "@lucide/svelte/icons/play";
+  import SettingsIcon from "@lucide/svelte/icons/settings";
   import type { DownloadState, WorkerStatus } from "./api";
   import { lang, t, type Key } from "./i18n";
   import Badge from "./ui/Badge.svelte";
   import Button from "./ui/Button.svelte";
   import Icon from "./ui/Icon.svelte";
+  import IconButton from "./ui/IconButton.svelte";
 
   let {
     status,
     onResume,
     download = null,
     onShowModel = () => {},
-  }: { status: WorkerStatus; onResume: () => void; download?: DownloadState | null; onShowModel?: () => void } = $props();
+    onSettings = () => {},
+  }: { status: WorkerStatus; onResume: () => void; download?: DownloadState | null; onShowModel?: () => void; onSettings?: () => void } = $props();
 </script>
 
 <footer class="status" role="status" aria-live="polite">
@@ -30,6 +33,7 @@
   {#if status.last_error}
     <span class="error" title={status.last_error}><Icon icon={CircleAlert} size="sm" />{status.last_error}</span>
   {/if}
+  <span class="end"><IconButton icon={SettingsIcon} label={t("status.settings")} onclick={onSettings} /></span>
 </footer>
 
 <style>
@@ -43,6 +47,7 @@
   .dot { width: 0.5rem; height: 0.5rem; border-radius: var(--radius-full); background: var(--color-text-muted); }
   .running .dot { background: var(--color-accent); animation: pulse 1.6s var(--ease-standard) infinite; }
   .error { display: inline-flex; gap: var(--space-1); align-items: center; color: var(--color-danger); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .end { margin-left: auto; display: inline-flex; }
   .link { background: none; border: 0; padding: 0; color: var(--color-link); cursor: pointer; font-size: var(--text-sm); }
   @keyframes pulse { 50% { opacity: 0.35; } }
 </style>
