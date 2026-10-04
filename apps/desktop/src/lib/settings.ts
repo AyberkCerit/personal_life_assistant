@@ -11,7 +11,7 @@ export function trapIndex(current: number, count: number, shift: boolean): numbe
   return (current + (shift ? count - 1 : 1)) % count;
 }
 
-const OWN_CODES = ["not_removed", "not_found", "model_busy", "invalid_setting"];
+const OWN_CODES = ["not_removed", "not_found", "model_busy", "invalid_setting", "no_vault", "download_running", "missing", "vault_lost"];
 
 /** Reads the commands' `<code>|<path>|<reason>` errors; folder errors share the wizard's texts. */
 export function settingsError(err: string): { key: Key; path: string; reason: string; reasonKey?: Key } {

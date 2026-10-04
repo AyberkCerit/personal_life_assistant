@@ -62,7 +62,9 @@
 
   function closeSettings() {
     settingsOpen = false;
-    settingsOpener?.focus();
+    // A language switch re-renders the app, so the element that opened the window may be gone.
+    const back = settingsOpener?.isConnected ? settingsOpener : document.querySelector<HTMLElement>(".status .end button");
+    back?.focus();
   }
 
   // FR-SET-012: the open note is saved before the app re-renders in the new language; if it cannot
@@ -82,9 +84,19 @@
   // FR-SET-014: the note is saved into the old vault before it closes.
   async function settingsSwitchVault(path: string) {
     await editor?.close();
+    const open = current;
     current = null;
-    await vaultOpened(await api.setupVault(path, lang));
-    tasksVersion++;
+    try {
+      await vaultOpened(await api.setupVault(path, lang));
+      tasksVersion++;
+    } catch (e) {
+      if (String(e).startsWith("vault_lost|")) {
+        vaultPath = null; // nothing is open any more: the welcome screen lets the user pick one
+      } else {
+        current = open; // still the old vault: the note comes back (settings final review M2)
+      }
+      throw e;
+    }
   }
 
   async function wizardFinished(info: VaultInfo) {

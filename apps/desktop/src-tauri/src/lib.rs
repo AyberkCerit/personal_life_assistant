@@ -21,9 +21,7 @@ pub fn run() {
         .setup(|app| {
             // FR-SET-012: tray and notifications speak the language chosen in PLA.
             if let Some(root) = pla_core::vault::default_app_root() {
-                if let Ok(loaded) = pla_core::settings::load_settings(&root) {
-                    notify::set_ui_language(loaded.settings.language.as_deref());
-                }
+                notify::set_ui_language(pla_core::settings::peek_language(&root).as_deref());
             }
             tray::build(app.handle())?;
             // FR-SET-016: started by Windows sign-in → stay in the tray.

@@ -8,6 +8,7 @@
   import { api, inTauri, type DownloadState, type ModelStatus } from "./api";
   import { lang, t, type Key } from "./i18n";
   import { failureKey, formatBytes, progressLine } from "./modelText";
+  import { describeError } from "./settings";
   import Button from "./ui/Button.svelte";
 
   let { status, onDone }: { status: ModelStatus; onDone: () => void } = $props();
@@ -37,7 +38,7 @@
     try {
       await api.modelDownloadStart();
     } catch (e) {
-      localError = String(e); // e.g. "already running" (final review I4)
+      localError = describeError(e); // e.g. "already running" (final review I4)
     }
   }
 

@@ -24,6 +24,11 @@ describe("settings screen", () => {
     expect(settingsError("model_busy")).toMatchObject({ key: "settings.error.model_busy" });
     expect(settingsError(String.raw`network|\\s\p`)).toMatchObject({ key: "wizard.error.network", path: String.raw`\\s\p` });
     expect(settingsError("boom")).toEqual({ key: "settings.error.other", path: "", reason: "boom" });
+    // settings final review M8: no English text from the backend in a Turkish UI
+    expect(settingsError("no_vault")).toMatchObject({ key: "settings.error.no_vault" });
+    expect(settingsError("download_running")).toMatchObject({ key: "settings.error.download_running" });
+    expect(settingsError("missing|Notlar|")).toMatchObject({ key: "settings.error.missing", path: "Notlar" });
+    expect(settingsError("vault_lost|C:/Kasa|disk")).toMatchObject({ key: "settings.error.vault_lost", path: "C:/Kasa", reason: "disk" });
   });
 
   it("says when the backup last ran or why it failed", () => {

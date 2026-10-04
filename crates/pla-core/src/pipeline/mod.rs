@@ -70,7 +70,7 @@ pub fn enqueue(conn: &Connection, note_path: &str, now: DateTime<FixedOffset>) -
 /// known note that is no longer on disk, so its items get marked (FR-VLT-019).
 pub fn enqueue_all(vault: &Vault, conn: &Connection, now: DateTime<FixedOffset>) -> Result<usize, PipelineError> {
     let mut notes = list_user_notes(vault)?;
-    let known: Vec<String> = conn
+    let known: std::collections::HashSet<String> = conn
         .prepare("SELECT DISTINCT note_path FROM block WHERE missing = 0")?
         .query_map([], |r| r.get(0))?
         .collect::<Result<_, _>>()?;

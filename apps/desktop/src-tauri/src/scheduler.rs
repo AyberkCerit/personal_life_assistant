@@ -139,6 +139,7 @@ impl Scheduler {
                 }
             }
         }
+        self.notifier.backup_changed(); // nightly runs too (settings final review M9)
     }
 
     pub fn handle(&mut self, command: SchedCommand) {
@@ -148,7 +149,6 @@ impl Scheduler {
             SchedCommand::Snooze(id) => snooze(&self.conn, &id, now).is_ok(),
             SchedCommand::BackupNow => {
                 self.run_maintenance(now);
-                self.notifier.backup_changed();
                 false
             }
             SchedCommand::Shutdown => false,

@@ -148,7 +148,7 @@ pub struct BackupStatus {
 #[tauri::command]
 pub fn backup_status(state: State<AppState>) -> Result<BackupStatus, String> {
     let guard = state.session.lock().expect("session lock");
-    let session = guard.as_ref().ok_or("No vault is open.")?;
+    let session = guard.as_ref().ok_or("no_vault")?;
     let job = pla_core::jobs::status(&session.db.lock().expect("db lock"), pla_core::jobs::DAILY).map_err(|e| e.to_string())?;
     Ok(BackupStatus { job, backups: pla_core::jobs::backups(&session.vault.root) })
 }
@@ -158,12 +158,12 @@ pub fn backup_status(state: State<AppState>) -> Result<BackupStatus, String> {
 pub fn export_data(state: State<AppState>, dir: String, lang: String) -> Result<Vec<String>, String> {
     let dir = PathBuf::from(dir);
     if !dir.is_absolute() || !dir.is_dir() {
-        return Err(format!("not_folder|{}|", dir.display()));
+        return Err(format!("missing|{}|", dir.display()));
     }
     let style = region_style();
     let (tasks, metrics) = {
         let guard = state.session.lock().expect("session lock");
-        let session = guard.as_ref().ok_or("No vault is open.")?;
+        let session = guard.as_ref().ok_or("no_vault")?;
         let db = session.db.lock().expect("db lock");
         let tasks = pla_core::export::tasks_csv(&db, &lang, style).map_err(|e| e.to_string())?;
         (tasks, pla_core::export::metrics_csv(&db, &lang, style).map_err(|e| e.to_string())?)
@@ -198,7 +198,17 @@ pub fn open_place(state: State<AppState>, kind: PlaceKind) -> Result<(), String>
     if kind != PlaceKind::NotificationSettings && !Path::new(&target).exists() {
         return Err(format!("not_found|{}|", Path::new(&target).display()));
     }
-    std::process::Command::new("explorer.exe").arg(&target).spawn().map_err(|e| e.to_string())?;
+    let mut explorer = std::process::Command::new("explorer.exe");
+    #[cfg(windows)]
+    {
+        // Quoted as one argument: explorer reads a bare comma (`C:\Notlar,2026`) as a switch
+        // separator (settings final review M7). Windows paths cannot contain a quote.
+        use std::os::windows::process::CommandExt;
+        explorer.raw_arg(format!("\"{}\"", target.to_string_lossy()));
+    }
+    #[cfg(not(windows))]
+    explorer.arg(&target);
+    explorer.spawn().map_err(|e| e.to_string())?;
     Ok(())
 }
 

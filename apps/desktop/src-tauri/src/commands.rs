@@ -210,7 +210,7 @@ pub fn open_vault(app: AppHandle, state: State<AppState>, path: String) -> Resul
 /// Opens `path` as the vault and remembers it; the caller holds the settings lock.
 fn open_vault_locked(app: &AppHandle, state: &State<AppState>, path: &Path) -> Result<VaultInfo, String> {
     let root = app_root()?;
-    let mut settings = load_settings(&root).map_err(|e| e.to_string())?.settings;
+    let settings = load_settings(&root).map_err(|e| e.to_string())?.settings;
     // Stop the previous vault before opening the next, outside the lock: one writer per pla.db.
     let previous = state.session.lock().expect("session lock").take();
     let mut old_root = None;
@@ -224,19 +224,29 @@ fn open_vault_locked(app: &AppHandle, state: &State<AppState>, path: &Path) -> R
         drop(old);
     }
     let paused = state.paused.load(Ordering::SeqCst);
-    let session = match start_session(app, path, &settings, Arc::clone(&state.self_writes), paused) {
-        Ok(session) => session,
-        Err(e) => {
-            // The new folder could not be opened: go back to the previous vault (settings Review Focus 3).
-            if let Some(back) = old_root.and_then(|r| start_session(app, &r, &settings, Arc::clone(&state.self_writes), paused).ok()) {
+    // The new folder could not be opened (or remembered): go back to the previous vault (settings
+    // Review Focus 3). If even that fails, say so: the UI must not keep showing a closed vault.
+    let restore = |error: String| -> String {
+        let Some(old) = &old_root else { return error };
+        match start_session(app, old, &settings, Arc::clone(&state.self_writes), paused) {
+            Ok(back) => {
                 *state.session.lock().expect("session lock") = Some(back);
+                error
             }
-            return Err(e);
+            Err(_) => format!("vault_lost|{}|{error}", old.display()),
         }
     };
+    let session = match start_session(app, path, &settings, Arc::clone(&state.self_writes), paused) {
+        Ok(session) => session,
+        Err(e) => return Err(restore(e)),
+    };
     let opened = vault_info_of(&session.vault);
-    settings.vault_path = Some(session.vault.root.clone());
-    save_settings(&root, &settings).map_err(|e| e.to_string())?;
+    let mut remembered = settings.clone();
+    remembered.vault_path = Some(session.vault.root.clone());
+    if let Err(e) = save_settings(&root, &remembered) {
+        drop(session); // stop it before the old one opens again
+        return Err(restore(e.to_string()));
+    }
     *state.session.lock().expect("session lock") = Some(session); // drops (and stops) the previous one
     Ok(opened)
 }
@@ -667,9 +677,11 @@ pub fn model_remove(app: AppHandle, state: State<AppState>) -> Result<(), String
     let models_dir = models::models_dir();
     let Some(plan) = crate::model_paths::removal(&settings, models_dir.as_deref()) else { return Ok(()) };
     let (ack, done) = std::sync::mpsc::channel();
-    let asked = state.session.lock().expect("session lock").as_ref().map(|s| s.worker.send(Command::DropModel(ack))).is_some();
+    let asked = state.session.lock().expect("session lock").as_ref().map(|s| s.worker.drop_model(ack)).is_some();
     if asked {
-        done.recv_timeout(Duration::from_secs(15)).map_err(|_| "model_busy".to_owned())?;
+        // The run stops before its next model call; one call in flight can take up to the host's
+        // request timeout (60 s).
+        done.recv_timeout(Duration::from_secs(90)).map_err(|_| "model_busy".to_owned())?;
     }
     if let crate::model_paths::Removal::Delete(path) = &plan {
         // llama-server may need a moment to release the file after it exits
@@ -689,9 +701,12 @@ pub fn model_remove(app: AppHandle, state: State<AppState>) -> Result<(), String
             Err(e) => return Err(format!("not_removed|{}|{}", path.display(), crate::wizard::write_failure(&e))),
         }
     }
+    // A model chosen or downloaded meanwhile stays (settings final review M1).
     update_settings(&root, &state.settings_lock, |s| {
-        s.model_path = None;
-        s.model_id = None;
+        if s.model_path == settings.model_path {
+            s.model_path = None;
+            s.model_id = None;
+        }
     })?;
     let _ = app.emit("model-removed", ());
     Ok(())
@@ -760,7 +775,7 @@ pub fn model_download_start(app: AppHandle, state: State<AppState>) -> Result<()
                 }
             },
         )
-        .map_err(|_| "A model download is already running.".to_owned())
+        .map_err(|_| "download_running".to_owned())
 }
 
 #[tauri::command]

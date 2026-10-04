@@ -38,7 +38,8 @@
   const pendingFocus = refocus;
 
   function focusables(): HTMLElement[] {
-    return dialog ? [...dialog.querySelectorAll<HTMLElement>("button:not(:disabled), input:not(:disabled), select:not(:disabled), a[href], [tabindex='0']")] : [];
+    const selector = "button:not(:disabled), input:not(:disabled), select:not(:disabled), a[href], [tabindex='0']";
+    return dialog ? [...dialog.querySelectorAll<HTMLElement>(selector)].filter((e) => e.tabIndex !== -1) : [];
   }
 
   function keydown(e: KeyboardEvent) {
@@ -54,10 +55,11 @@
   }
 
   function navKey(e: KeyboardEvent) {
-    const step = e.key === "ArrowDown" ? 1 : e.key === "ArrowUp" ? -1 : 0;
-    if (step === 0) return;
+    const at = SECTIONS.indexOf(section);
+    const to = { ArrowDown: at + 1, ArrowUp: at - 1, Home: 0, End: SECTIONS.length - 1 }[e.key];
+    if (to === undefined) return;
     e.preventDefault();
-    const next = SECTIONS[(SECTIONS.indexOf(section) + step + SECTIONS.length) % SECTIONS.length];
+    const next = SECTIONS[(to + SECTIONS.length) % SECTIONS.length];
     section = next;
     dialog?.querySelector<HTMLElement>(`[data-section="${next}"]`)?.focus();
   }
@@ -69,12 +71,15 @@
 </script>
 
 <div class="backdrop" transition:fade={{ duration: motion(BASE) }} onclick={onClose} aria-hidden="true"></div>
-<div class="dialog" role="dialog" aria-modal="true" aria-labelledby="settings-title" tabindex="-1" bind:this={dialog} onkeydown={keydown}>
+<!-- on the window: after an action removes the focused button, Esc and Tab still belong to the
+     settings window (settings final review M3) -->
+<svelte:window onkeydown={keydown} />
+<div class="dialog" role="dialog" aria-modal="true" aria-labelledby="settings-title" tabindex="-1" bind:this={dialog}>
   <nav aria-label={t("settings.title")}>
     <h2 id="settings-title">{t("settings.title")}</h2>
     <ul role="tablist" aria-orientation="vertical">
       {#each SECTIONS as s (s)}
-        <li>
+        <li role="presentation">
           <button
             role="tab"
             data-section={s}

@@ -17,6 +17,7 @@
 
   let view = $state<SettingsView | null>(null);
   let error = $state<string | null>(null);
+  let revision = $state(0); // bumped after a refused change: the controls are drawn again from what is saved
 
   async function run(action: () => Promise<void>) {
     error = null;
@@ -24,8 +25,8 @@
       await action();
     } catch (e) {
       error = describeError(e);
-      view = await api.settingsGet(); // the controls show what is really saved
-      if (languageSelect) languageSelect.value = lang;
+      view = await api.settingsGet(); // the controls show what is really saved (settings final review M5)
+      revision++;
     }
   }
 
@@ -41,6 +42,7 @@
 </script>
 
 {#if view}
+  {#key revision}
   <Row label={t("settings.language")} hint={t("settings.language.hint")} forId="set-language">
     <select id="set-language" bind:this={languageSelect} value={lang} onchange={(e) => void run(() => onLanguage(e.currentTarget.value as Lang))}>
       <option value="tr">Türkçe</option>
@@ -56,5 +58,6 @@
   <Row label={t("settings.autostart")} hint={t("settings.autostart.hint")}>
     <Checkbox checked={view.autostart} label={t("settings.autostart")} hideLabel onchange={(on) => void run(() => api.setAutostart(on))} />
   </Row>
+  {/key}
 {/if}
 {#if error}<Banner kind="danger" icon={CircleAlert} role="alert">{error}</Banner>{/if}

@@ -60,6 +60,13 @@ pub fn load_settings(app_root: &Path) -> std::io::Result<LoadedSettings> {
     }
 }
 
+/// The saved language, read without changing anything: a broken file is left for `load_settings`
+/// (and `startup`) to move aside and report.
+pub fn peek_language(app_root: &Path) -> Option<String> {
+    let text = std::fs::read_to_string(app_root.join(FILE)).ok()?;
+    serde_json::from_str::<AppSettings>(&text).ok()?.language
+}
+
 pub fn save_settings(app_root: &Path, settings: &AppSettings) -> std::io::Result<()> {
     std::fs::create_dir_all(app_root)?;
     let text = serde_json::to_string_pretty(settings).expect("settings serialize");
@@ -69,6 +76,19 @@ pub fn save_settings(app_root: &Path, settings: &AppSettings) -> std::io::Result
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn peeking_at_the_language_leaves_a_broken_file_for_startup() {
+        // settings final review M6: only `startup` may move a broken file aside and say so
+        let tmp = tempfile::tempdir().unwrap();
+        assert_eq!(peek_language(tmp.path()), None);
+        save_settings(tmp.path(), &AppSettings { language: Some("tr".into()), ..AppSettings::default() }).unwrap();
+        assert_eq!(peek_language(tmp.path()).as_deref(), Some("tr"));
+        std::fs::write(tmp.path().join(FILE), "{ bozuk").unwrap();
+        assert_eq!(peek_language(tmp.path()), None);
+        assert!(tmp.path().join(FILE).exists(), "not renamed");
+        assert!(load_settings(tmp.path()).unwrap().recovered_from_broken);
+    }
 
     #[test]
     fn no_file_means_first_run_with_defaults() {
