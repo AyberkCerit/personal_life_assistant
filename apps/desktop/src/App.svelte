@@ -17,8 +17,15 @@
   import Editor from "./lib/Editor.svelte";
   import { getCurrentWindow } from "@tauri-apps/api/window";
   import StatusBar from "./lib/StatusBar.svelte";
-  import { t, lang } from "./lib/i18n";
+  import Wizard from "./lib/Wizard.svelte";
+  import type { Progress } from "./lib/wizard";
+  import { t, lang, setLang, type Lang } from "./lib/i18n";
+  import type { VaultInfo } from "./lib/api";
 
+  let loaded = $state(false);
+  let wizard = $state(false);
+  let wizardProgress = $state<Progress>({ step: "language", path: "", opened: null });
+  let uiLang = $state<Lang>(lang); // the app is keyed on it: switching re-renders every text
   let vaultPath = $state<string | null>(null);
   let entries = $state<TreeEntry[]>([]);
   let current = $state<string | null>(null);
@@ -36,16 +43,29 @@
     entries = await api.listTree();
   }
 
+  function switchLanguage(l: Lang) {
+    setLang(l);
+    uiLang = l;
+  }
+
+  async function wizardFinished(info: VaultInfo) {
+    wizard = false;
+    await vaultOpened(info);
+  }
+
+  async function vaultOpened(info: VaultInfo) {
+    vaultPath = info.path;
+    inbox = info.inbox;
+    status = await api.workerStatus(); // the first status may have been sent before we listened
+    error = null;
+    await refresh();
+  }
+
   async function chooseVault() {
     const picked = inTauri ? await open({ directory: true }) : "C:/Deneme Kasası";
     if (typeof picked !== "string") return;
     try {
-      const info = await api.openVault(picked);
-      vaultPath = info.path;
-      inbox = info.inbox;
-      status = await api.workerStatus(); // the first status may have been sent before we listened
-      error = null;
-      await refresh();
+      await vaultOpened(await api.openVault(picked));
     } catch (e) {
       error = String(e);
     }
@@ -87,6 +107,8 @@
     document.documentElement.lang = lang;
     void (async () => {
       const info = await api.startup();
+      if (info.language) switchLanguage(info.language);
+      wizard = info.show_wizard;
       document.documentElement.dataset.theme = info.theme;
       error = info.error;
       vaultPath = info.vault_path;
@@ -95,6 +117,7 @@
         await refresh();
         status = await api.workerStatus(); // F4a M2: do not miss the first status
       }
+      loaded = true;
     })();
     const unStatus = api.onStatus((s) => {
       const finished = status.busy && !s.busy;
@@ -125,7 +148,12 @@
   });
 </script>
 
-{#if vaultPath === null}
+{#key uiLang}
+{#if !loaded}
+  <!-- startup: nothing to flash before we know whether the wizard is due -->
+{:else if wizard}
+  <Wizard bind:progress={wizardProgress} onLang={switchLanguage} onFinish={(v) => void wizardFinished(v)} />
+{:else if vaultPath === null}
   <main class="welcome">
     <Logo size={64} />
     <h1>{t("welcome.title")}</h1>
@@ -158,6 +186,7 @@
     <AddedToast onChanged={() => tasksVersion++} />
   </div>
 {/if}
+{/key}
 
 <style>
   .welcome { margin: auto; max-width: 26rem; padding: var(--space-8) var(--space-4); display: flex; flex-direction: column; align-items: center; gap: var(--space-3); text-align: center; }

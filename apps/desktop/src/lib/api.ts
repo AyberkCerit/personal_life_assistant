@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { mockBackend, mockListeners } from "./mock";
+import type { FolderReport } from "./wizard";
 
 export interface TaskInput { title: string; details?: string | null; date?: string | null; time?: string | null; remind?: boolean | null }
 export interface ReviewItem {
@@ -24,6 +25,10 @@ export type SaveResult = { kind: "saved"; hash: string } | { kind: "conflict"; c
 export interface StartupInfo {
   vault_path: string | null;
   first_run: boolean;
+  /** FR-SET-001: show the first-run wizard. */
+  show_wizard: boolean;
+  /** The language chosen in the wizard; null = follow the OS. */
+  language: "tr" | "en" | null;
   settings_recovered: boolean;
   theme: "dark" | "light";
   error: string | null;
@@ -49,6 +54,7 @@ export type DownloadState =
   | { state: "failed"; failure: Failure; received: number; total: number }
   | { state: "done"; path: string };
 export interface ModelStatus { installed: InstalledModel | null; recommended: CatalogEntry; download: DownloadState | null; models_dir: string | null }
+export interface WizardDefaults { suggested_vault: string | null }
 export interface PendingReminders { due: DueReminder[]; missed: DueReminder[] }
 
 /** Inside the Tauri window; false in a plain browser (Vite dev server), where a mock backend answers. */
@@ -68,6 +74,12 @@ function on<T>(event: string, cb: (payload: T) => void): Promise<UnlistenFn> {
 export const api = {
   startup: () => call<StartupInfo>("startup"),
   openVault: (path: string) => call<VaultInfo>("open_vault", { path }),
+  wizardDefaults: () => call<WizardDefaults>("wizard_defaults"),
+  inspectVaultFolder: (path: string) => call<FolderReport>("inspect_vault_folder", { path }),
+  /** Errors are `<code>|<path>|<reason>` (see `setupError`). */
+  setupVault: (path: string, lang: string) => call<VaultInfo>("setup_vault", { path, lang }),
+  setLanguage: (lang: string) => call<void>("set_language", { lang }),
+  finishSetup: () => call<void>("finish_setup"),
   listTree: () => call<TreeEntry[]>("list_tree"),
   readNote: (path: string) => call<NoteFile>("read_note", { path }),
   saveNote: (path: string, text: string, expectedHash: string | null) =>

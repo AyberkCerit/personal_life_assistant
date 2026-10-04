@@ -3,6 +3,7 @@
 mod commands;
 pub mod model_download;
 pub mod model_paths;
+pub mod wizard;
 mod notify;
 mod tray;
 pub mod scheduler;
@@ -55,6 +56,11 @@ pub fn run() {
             commands::model_download_start,
             commands::model_download_pause,
             commands::model_use_local,
+            commands::wizard_defaults,
+            commands::inspect_vault_folder,
+            commands::setup_vault,
+            commands::set_language,
+            commands::finish_setup,
             commands::hide_to_tray,
         ])
         .build(tauri::generate_context!())

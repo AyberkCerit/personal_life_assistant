@@ -31,6 +31,8 @@ pub struct AppSettings {
     pub model_id: Option<String>,
     /// The "PLA keeps running in the tray" hint was shown once (FR-SCH-001).
     pub tray_hint_shown: bool,
+    /// The first-run wizard was finished (FR-SET-001); older files load as `false`.
+    pub setup_complete: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -108,5 +110,15 @@ mod tests {
         assert_eq!(load_settings(tmp.path()).unwrap().settings.model_id.as_deref(), Some("gemma-4-e2b-it-q3km"));
         std::fs::write(tmp.path().join("settings.json"), r#"{ "theme": "dark" }"#).unwrap();
         assert_eq!(load_settings(tmp.path()).unwrap().settings.model_id, None, "older files still load");
+    }
+
+    #[test]
+    fn setup_is_unfinished_until_the_wizard_says_so() {
+        // First-run wizard: older settings files load as "not finished"
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(tmp.path().join("settings.json"), r#"{ "vault_path": "C:/Kasa" }"#).unwrap();
+        assert!(!load_settings(tmp.path()).unwrap().settings.setup_complete);
+        save_settings(tmp.path(), &AppSettings { setup_complete: true, ..AppSettings::default() }).unwrap();
+        assert!(load_settings(tmp.path()).unwrap().settings.setup_complete);
     }
 }
