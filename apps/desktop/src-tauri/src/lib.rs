@@ -18,6 +18,12 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_autostart::init(tauri_plugin_autostart::MacosLauncher::LaunchAgent, Some(vec!["--hidden"])))
         .setup(|app| {
+            // FR-SET-012: tray and notifications speak the language chosen in PLA.
+            if let Some(root) = pla_core::vault::default_app_root() {
+                if let Ok(loaded) = pla_core::settings::load_settings(&root) {
+                    notify::set_ui_language(loaded.settings.language.as_deref());
+                }
+            }
             tray::build(app.handle())?;
             // FR-SET-016: started by Windows sign-in → stay in the tray.
             if !std::env::args().any(|a| a == "--hidden") {
@@ -61,6 +67,10 @@ pub fn run() {
             commands::setup_vault,
             commands::set_language,
             commands::finish_setup,
+            commands::settings_get,
+            commands::settings_set,
+            commands::set_autostart,
+            commands::send_test_notification,
             commands::hide_to_tray,
         ])
         .build(tauri::generate_context!())

@@ -283,13 +283,85 @@ pub fn setup_vault(app: AppHandle, state: State<AppState>, path: String, lang: S
     Ok(info)
 }
 
-/// FR-SET-003: the language chosen in the wizard (and later in settings).
+/// FR-SET-003: the language chosen in the wizard.
 #[tauri::command]
-pub fn set_language(state: State<AppState>, lang: String) -> Result<(), String> {
-    if lang != "tr" && lang != "en" {
-        return Err(format!("unsupported language {lang}"));
+pub fn set_language(app: AppHandle, state: State<AppState>, lang: String) -> Result<(), String> {
+    settings_set(app, state, "language".into(), serde_json::Value::String(lang)).map(|_| ())
+}
+
+/// What the settings screen shows (FR-SET-011).
+#[derive(Serialize)]
+pub struct SettingsView {
+    language: Option<String>,
+    theme: Theme,
+    autostart: bool,
+    paused: bool,
+    vault_path: Option<String>,
+}
+
+/// One plain setting from the settings screen; anything else is refused and changes nothing.
+pub fn apply_setting(s: &mut AppSettings, key: &str, value: &serde_json::Value) -> Result<(), String> {
+    use serde_json::Value;
+    match (key, value) {
+        ("language", Value::Null) => s.language = None,
+        ("language", Value::String(l)) if l == "tr" || l == "en" => s.language = Some(l.clone()),
+        ("theme", Value::String(t)) if t == "dark" => s.theme = Theme::Dark,
+        ("theme", Value::String(t)) if t == "light" => s.theme = Theme::Light,
+        _ => return Err(format!("invalid_setting|{key}|{value}")),
     }
-    update_settings(&app_root()?, &state.settings_lock, |s| s.language = Some(lang)).map(|_| ())
+    Ok(())
+}
+
+fn settings_view(app: &AppHandle, state: &State<AppState>, settings: &AppSettings) -> SettingsView {
+    use tauri_plugin_autostart::ManagerExt;
+    SettingsView {
+        language: settings.language.clone(),
+        theme: settings.theme,
+        autostart: app.autolaunch().is_enabled().unwrap_or(false),
+        paused: state.paused.load(Ordering::SeqCst),
+        vault_path: settings.vault_path.as_ref().map(|p| p.to_string_lossy().into_owned()),
+    }
+}
+
+#[tauri::command]
+pub fn settings_get(app: AppHandle, state: State<AppState>) -> Result<SettingsView, String> {
+    let settings = load_settings(&app_root()?).map_err(|e| e.to_string())?.settings;
+    Ok(settings_view(&app, &state, &settings))
+}
+
+/// Changes one setting at once (no Save button); a language change also re-labels the tray and
+/// the notifications (FR-SET-012).
+#[tauri::command]
+pub fn settings_set(app: AppHandle, state: State<AppState>, key: String, value: serde_json::Value) -> Result<SettingsView, String> {
+    let mut refused = None;
+    let settings = update_settings(&app_root()?, &state.settings_lock, |s| {
+        let mut changed = s.clone();
+        match apply_setting(&mut changed, &key, &value) {
+            Ok(()) => *s = changed,
+            Err(e) => refused = Some(e),
+        }
+    })?;
+    if let Some(e) = refused {
+        return Err(e);
+    }
+    if key == "language" {
+        crate::notify::set_ui_language(settings.language.as_deref());
+        crate::tray::refresh(&app);
+    }
+    Ok(settings_view(&app, &state, &settings))
+}
+
+/// The Notifications section's "send a test notification".
+#[tauri::command]
+pub fn send_test_notification() {
+    let s = strings();
+    show_info(s.test_title, s.test_body);
+}
+
+/// FR-SET-016, from the settings screen; the tray check follows.
+#[tauri::command]
+pub fn set_autostart(app: AppHandle, enabled: bool) -> Result<(), String> {
+    crate::tray::apply_autostart(&app, enabled)
 }
 
 #[tauri::command]
@@ -655,6 +727,23 @@ pub fn model_use_local(app: AppHandle, path: String) -> Result<InstalledModel, S
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_settings_screen_can_change_only_known_values() {
+        // FR-SET-011, settings_set
+        let mut s = AppSettings::default();
+        apply_setting(&mut s, "language", &serde_json::json!("en")).unwrap();
+        assert_eq!(s.language.as_deref(), Some("en"));
+        apply_setting(&mut s, "language", &serde_json::Value::Null).unwrap();
+        assert_eq!(s.language, None, "null = follow Windows again");
+        apply_setting(&mut s, "theme", &serde_json::json!("light")).unwrap();
+        assert_eq!(s.theme, Theme::Light);
+        let before = s.clone();
+        for (key, value) in [("language", serde_json::json!("de")), ("theme", serde_json::json!("blue")), ("vault_path", serde_json::json!("C:/x")), ("theme", serde_json::json!(1))] {
+            assert!(apply_setting(&mut s, key, &value).is_err(), "{key} = {value}");
+        }
+        assert_eq!(s, before, "a refused value changes nothing");
+    }
 
     #[test]
     fn using_a_non_gguf_file_changes_nothing() {
