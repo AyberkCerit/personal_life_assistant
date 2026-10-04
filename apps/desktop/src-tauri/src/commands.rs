@@ -176,7 +176,8 @@ pub fn startup(app: AppHandle, state: State<AppState>) -> Result<StartupInfo, St
         vault_path: None,
         first_run: loaded.first_run,
         show_wizard: crate::wizard::show_wizard(loaded.first_run, &loaded.settings),
-        language: loaded.settings.language.clone(),
+        // only languages the UI has; a hand-edited "de" would leave it blank (final review M5)
+        language: loaded.settings.language.clone().filter(|l| l == "tr" || l == "en"),
         settings_recovered: loaded.recovered_from_broken,
         theme: theme.to_owned(),
         error: None,
@@ -244,19 +245,12 @@ fn write_welcome_note(vault: &Vault, own: &SelfWrites, lang: &str) -> Result<Str
 #[derive(Serialize)]
 pub struct WizardDefaults {
     suggested_vault: Option<String>,
-    in_onedrive: bool,
-    os_language: &'static str,
 }
 
-/// FR-SET-003/004: what the wizard proposes before the user chooses.
+/// FR-SET-004: the folder the wizard proposes before the user chooses.
 #[tauri::command]
 pub fn wizard_defaults() -> WizardDefaults {
-    let suggested = crate::wizard::suggested_vault();
-    WizardDefaults {
-        in_onedrive: suggested.as_deref().is_some_and(|p| crate::wizard::in_onedrive(p, &crate::model_paths::process_env)),
-        suggested_vault: suggested.map(|p| p.to_string_lossy().into_owned()),
-        os_language: if crate::notify::strings().done == "Tamamlandı" { "tr" } else { "en" },
-    }
+    WizardDefaults { suggested_vault: crate::wizard::suggested_vault().map(|p| p.to_string_lossy().into_owned()) }
 }
 
 #[derive(Serialize)]
@@ -266,18 +260,19 @@ pub struct FolderReport {
 }
 
 /// The vault step shows what choosing this folder will do (FR-SET-005…007), without changing it.
-#[tauri::command]
+/// Runs off the main thread: counting notes in a big folder takes a moment (final review I3).
+#[tauri::command(async)]
 pub fn inspect_vault_folder(path: String) -> FolderReport {
-    let path = Path::new(path.trim());
-    FolderReport { check: pla_core::vault::inspect_folder(path), in_onedrive: crate::wizard::in_onedrive(path, &crate::model_paths::process_env) }
+    let path = crate::wizard::clean_path(&path);
+    FolderReport { check: pla_core::vault::inspect_folder(&path), in_onedrive: crate::wizard::in_onedrive(&path, &crate::model_paths::process_env) }
 }
 
 /// The wizard's vault step: prepare the folder (create, refuse network paths, check writing), open
 /// it, and greet a new vault with a welcome note.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn setup_vault(app: AppHandle, state: State<AppState>, path: String, lang: String) -> Result<VaultInfo, String> {
     let _settings_guard = state.settings_lock.lock().expect("settings lock");
-    let path = PathBuf::from(path.trim());
+    let path = crate::wizard::clean_path(&path);
     let fresh = crate::wizard::prepare_folder(&path).map_err(|e| e.to_string())?;
     let info = open_vault_locked(&app, &state, &path)?;
     if fresh {

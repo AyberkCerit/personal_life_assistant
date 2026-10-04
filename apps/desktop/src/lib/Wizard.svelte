@@ -9,7 +9,7 @@
   import Info from "@lucide/svelte/icons/info";
   import { api, inTauri, type DownloadState, type ModelStatus, type VaultInfo } from "./api";
   import { lang, t, tf, type Lang } from "./i18n";
-  import { folderAdvice, nextStep, prevStep, setupError, STEPS, type Advice, type Progress, type Step } from "./wizard";
+  import { folderAdvice, modelSummary, nextStep, prevStep, setupError, STEPS, type Advice, type Progress, type Step } from "./wizard";
   import ModelCard from "./ModelCard.svelte";
   import Banner from "./ui/Banner.svelte";
   import Button from "./ui/Button.svelte";
@@ -30,7 +30,8 @@
   let download = $state<DownloadState | null>(null);
 
   const usable = $derived(progress.path.trim() !== "" && advice.every((a) => a.usable));
-  const modelState = $derived(model?.installed ? "ready" : download && download.state !== "failed" ? "downloading" : "off");
+  const modelState = $derived(modelSummary(!!model?.installed, download));
+  const summaryKey = { ready: "wizard.done.modelReady", downloading: "wizard.done.modelDownloading", paused: "wizard.done.modelPaused", off: "wizard.done.modelOff" } as const;
 
   async function go(step: Step) {
     error = null;
@@ -41,13 +42,26 @@
   }
 
   async function refreshModel() {
-    model = await api.modelStatus();
-    download = model.download;
+    try {
+      model = await api.modelStatus();
+      download = model.download;
+    } catch (e) {
+      error = String(e); // the step itself still works: the user can skip the model
+    }
   }
 
-  async function chooseLanguage(l: Lang) {
-    await api.setLanguage(l);
-    onLang(l); // re-mounts the app in the new language
+  async function chooseLanguage(l: Lang): Promise<boolean> {
+    try {
+      await api.setLanguage(l);
+    } catch (e) {
+      error = String(e);
+      return false;
+    }
+    if (l !== lang) {
+      progress.refocus = true;
+      onLang(l); // re-mounts the app in the new language
+    }
+    return true;
   }
 
   async function browse() {
@@ -62,8 +76,8 @@
       progress.opened = await api.setupVault(progress.path.trim(), lang);
       await go(nextStep("vault"));
     } catch (e) {
-      const { key, path, reason } = setupError(String(e));
-      error = tf(key, { path, reason });
+      const { key, path, reason, reasonKey } = setupError(String(e));
+      error = tf(key, { path, reason: reasonKey ? t(reasonKey) : reason });
     } finally {
       busy = false;
     }
@@ -96,6 +110,10 @@
   onMount(() => {
     if (progress.path === "") void api.wizardDefaults().then((d) => (progress.path ||= d.suggested_vault ?? ""));
     if (progress.step === "model" || progress.step === "done") void refreshModel();
+    if (progress.refocus) {
+      progress.refocus = false; // the language switch re-mounted us: keep the keyboard where it was
+      document.querySelector<HTMLInputElement>(".wizard input[name=lang]:checked")?.focus();
+    }
     const un = api.onModelDownload((s) => (download = s));
     const unChanged = api.onModelChanged(() => void refreshModel());
     return () => {
@@ -111,7 +129,7 @@
 <main class="wizard">
   <header>
     <Logo size={40} />
-    <ol class="dots" aria-label={tf("wizard.step", { n: STEPS.indexOf(progress.step) + 1 })}>
+    <ol class="dots" aria-hidden="true">
       {#each STEPS as s, i (s)}
         <li class:current={s === progress.step} class:past={i < STEPS.indexOf(progress.step)}></li>
       {/each}
@@ -133,13 +151,13 @@
   {:else if progress.step === "vault"}
     <h1 bind:this={heading} tabindex="-1">{t("wizard.vault.title")}</h1>
     <p class="body">{t("wizard.vault.body")}</p>
-    <label class="field">
-      <span>{t("wizard.vault.path")}</span>
+    <div class="field">
+      <label for="vault-path">{t("wizard.vault.path")}</label>
       <span class="row">
-        <input type="text" bind:value={progress.path} spellcheck="false" onkeydown={(e) => e.key === "Enter" && usable && !busy && void useFolder()} />
+        <input id="vault-path" type="text" bind:value={progress.path} spellcheck="false" onkeydown={(e) => e.key === "Enter" && usable && !busy && void useFolder()} />
         <Button icon={FolderOpen} onclick={() => void browse()}>{t("wizard.vault.browse")}</Button>
       </span>
-    </label>
+    </div>
     <div class="advice" aria-live="polite">
       {#each advice as a (a.key)}
         <Banner kind={adviceKind(a)} icon={adviceIcon(a)}>{tf(a.key, { count: a.count ?? 0 })}</Banner>
@@ -159,7 +177,7 @@
     <dl>
       <dt>{t("wizard.done.vault")}</dt><dd class="path">{progress.opened?.path}</dd>
       <dt>{t("wizard.done.model")}</dt>
-      <dd>{t(modelState === "ready" ? "wizard.done.modelReady" : modelState === "downloading" ? "wizard.done.modelDownloading" : "wizard.done.modelOff")}</dd>
+      <dd>{t(summaryKey[modelState])}</dd>
     </dl>
   {/if}
 
@@ -171,11 +189,11 @@
     {/if}
     <span class="spacer"></span>
     {#if progress.step === "language"}
-      <Button variant="primary" onclick={() => void chooseLanguage(lang).then(() => go("vault"))}>{t("wizard.next")}</Button>
+      <Button variant="primary" onclick={() => void chooseLanguage(lang).then((ok) => (ok ? go("vault") : undefined))}>{t("wizard.next")}</Button>
     {:else if progress.step === "vault"}
       <Button variant="primary" disabled={!usable || busy} onclick={() => void useFolder()}>{t("wizard.vault.use")}</Button>
     {:else if progress.step === "model"}
-      {#if modelState === "off"}
+      {#if modelState === "off" || modelState === "paused"}
         <Button onclick={() => void go("done")}>{t("wizard.model.skip")}</Button>
       {:else}
         <Button variant="primary" onclick={() => void go("done")}>{t("wizard.next")}</Button>

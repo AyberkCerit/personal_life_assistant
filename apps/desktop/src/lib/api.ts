@@ -54,7 +54,7 @@ export type DownloadState =
   | { state: "failed"; failure: Failure; received: number; total: number }
   | { state: "done"; path: string };
 export interface ModelStatus { installed: InstalledModel | null; recommended: CatalogEntry; download: DownloadState | null; models_dir: string | null }
-export interface WizardDefaults { suggested_vault: string | null; in_onedrive: boolean; os_language: "tr" | "en" }
+export interface WizardDefaults { suggested_vault: string | null }
 export interface PendingReminders { due: DueReminder[]; missed: DueReminder[] }
 
 /** Inside the Tauri window; false in a plain browser (Vite dev server), where a mock backend answers. */

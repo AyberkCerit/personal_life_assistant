@@ -113,71 +113,113 @@ pub fn open_vault(root: &Path) -> Result<Vault, VaultError> {
 pub enum FolderState {
     /// Does not exist yet; it will be created (FR-SET-006).
     Missing,
-    /// Exists with nothing visible in it (hidden entries such as `.obsidian` do not count).
+    /// Exists with nothing visible in it (hidden entries such as `.obsidian` or `desktop.ini` do not count).
     Empty,
     /// Holds Markdown notes; opened as it is, nothing moved or changed (FR-SET-005).
     Notes,
-    /// Holds files but no notes.
+    /// Holds files but no notes (or could not be listed).
     Other,
     /// A network (UNC) path, which PLA does not support (FR-SET-007).
     Network,
     /// A file, not a folder.
     NotFolder,
+    /// Not a full path (`Notlar`, `C:Notlar`): it would depend on PLA's working folder.
+    Relative,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub struct FolderCheck {
     pub state: FolderState,
-    /// Markdown files found (hidden folders skipped), counted up to `MD_COUNT_LIMIT`.
+    /// Markdown files found (hidden entries and links skipped).
     pub md_files: usize,
+    /// The count stopped at a limit, so there may be more.
+    pub more: bool,
 }
 
 const MD_COUNT_LIMIT: usize = 10_000;
+/// Entries looked at before the count gives up, so a folder like `C:\` answers quickly.
+const ENTRY_LIMIT: usize = 50_000;
 
 /// Looks at a folder without changing anything (first-run wizard, FR-SET-005…007).
 pub fn inspect_folder(path: &Path) -> FolderCheck {
-    let check = |state| FolderCheck { state, md_files: 0 };
-    if is_network_path(path) {
-        return check(FolderState::Network);
+    let state = folder_state(path);
+    if state != FolderState::Other {
+        return FolderCheck { state, md_files: 0, more: false };
     }
-    if !path.exists() {
-        return check(FolderState::Missing);
-    }
-    if !path.is_dir() {
-        return check(FolderState::NotFolder);
-    }
-    let visible = std::fs::read_dir(path)
-        .map(|entries| entries.flatten().any(|e| !e.file_name().to_string_lossy().starts_with('.')))
-        .unwrap_or(false);
-    if !visible {
-        return check(FolderState::Empty);
-    }
-    let md_files = count_notes(path, MD_COUNT_LIMIT);
-    FolderCheck { state: if md_files > 0 { FolderState::Notes } else { FolderState::Other }, md_files }
+    let (md_files, more) = count_notes(path, MD_COUNT_LIMIT, ENTRY_LIMIT);
+    FolderCheck { state: if md_files > 0 { FolderState::Notes } else { FolderState::Other }, md_files, more }
 }
 
-fn count_notes(dir: &Path, limit: usize) -> usize {
-    let mut count = 0;
+/// `inspect_folder` without counting notes: a folder with visible entries is `Other`.
+pub fn folder_state(path: &Path) -> FolderState {
+    if is_network_path(path) {
+        return FolderState::Network;
+    }
+    if !path.is_absolute() {
+        return FolderState::Relative;
+    }
+    if !path.exists() {
+        return FolderState::Missing;
+    }
+    if !path.is_dir() {
+        return FolderState::NotFolder;
+    }
+    match std::fs::read_dir(path) {
+        Ok(entries) => {
+            let mut entries = entries;
+            if entries.any(|e| e.is_ok_and(|e| !is_hidden(&e))) {
+                FolderState::Other
+            } else {
+                FolderState::Empty
+            }
+        }
+        Err(_) => FolderState::Other, // an unreadable folder promises nothing; the write check reports it
+    }
+}
+
+/// Dot-named, or marked hidden/system by Windows (`desktop.ini`, `Thumbs.db`).
+fn is_hidden(entry: &std::fs::DirEntry) -> bool {
+    if entry.file_name().to_string_lossy().starts_with('.') {
+        return true;
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        const HIDDEN_OR_SYSTEM: u32 = 0x2 | 0x4;
+        if entry.metadata().is_ok_and(|m| m.file_attributes() & HIDDEN_OR_SYSTEM != 0) {
+            return true;
+        }
+    }
+    false
+}
+
+/// Counts `.md` files up to `limit`, looking at no more than `max_entries` entries and never following
+/// links or junctions. Returns the count and whether a limit cut it short.
+fn count_notes(dir: &Path, limit: usize, max_entries: usize) -> (usize, bool) {
+    let (mut count, mut seen) = (0, 0);
     let mut stack = vec![dir.to_path_buf()];
     while let Some(d) = stack.pop() {
         let Ok(entries) = std::fs::read_dir(&d) else { continue };
         for e in entries.flatten() {
-            let name = e.file_name().to_string_lossy().into_owned();
-            if name.starts_with('.') {
+            seen += 1;
+            if seen > max_entries {
+                return (count, true);
+            }
+            let Ok(kind) = e.file_type() else { continue };
+            if kind.is_symlink() || is_hidden(&e) {
                 continue;
             }
-            let path = e.path();
-            if path.is_dir() {
-                stack.push(path);
-            } else if name.to_ascii_lowercase().ends_with(".md") {
+            if kind.is_dir() {
+                stack.push(e.path());
+            } else if e.file_name().to_string_lossy().to_ascii_lowercase().ends_with(".md") {
                 count += 1;
                 if count >= limit {
-                    return count;
+                    return (count, true);
                 }
             }
         }
     }
-    count
+    (count, false)
 }
 
 /// `<app_root>/vaults/<vault_id>/` — where this vault's pla.db and cache.db live.
@@ -254,8 +296,19 @@ fn is_valid_folder(dir: &str) -> bool {
 }
 
 fn is_network_path(path: &Path) -> bool {
-    let s = path.as_os_str().to_string_lossy();
-    s.starts_with(r"\\?\UNC\") || (s.starts_with(r"\\") && !s.starts_with(r"\\?\") && !s.starts_with(r"\\.\"))
+    use std::path::Prefix;
+    match path.components().next() {
+        Some(Component::Prefix(p)) => match p.kind() {
+            Prefix::UNC(..) | Prefix::VerbatimUNC(..) => true,
+            // `\\.\UNC\…` and a lowercase `\\?\unc\…` reach the network too
+            Prefix::DeviceNS(name) | Prefix::Verbatim(name) => name.eq_ignore_ascii_case("UNC"),
+            _ => false,
+        },
+        _ => {
+            let s = path.as_os_str().to_string_lossy();
+            s.starts_with(r"\\") || s.starts_with("//")
+        }
+    }
 }
 
 #[cfg(test)]
@@ -414,7 +467,7 @@ notes = \"Notlar/Arşiv\"
         // First-run wizard: FR-SET-005/006/007
         let tmp = tempfile::tempdir().unwrap();
         let missing = tmp.path().join("Yeni Kasa ğüş");
-        assert_eq!(inspect_folder(&missing), FolderCheck { state: FolderState::Missing, md_files: 0 });
+        assert_eq!(inspect_folder(&missing), FolderCheck { state: FolderState::Missing, md_files: 0, more: false });
 
         let empty = tmp.path().join("bos");
         std::fs::create_dir_all(empty.join(".obsidian")).unwrap();
@@ -426,7 +479,7 @@ notes = \"Notlar/Arşiv\"
         std::fs::write(notes.join("Günlük.md"), "x").unwrap();
         std::fs::write(notes.join("Projeler/PLA.MD"), "x").unwrap();
         std::fs::write(notes.join(".trash/silinen.md"), "x").unwrap();
-        assert_eq!(inspect_folder(&notes), FolderCheck { state: FolderState::Notes, md_files: 2 });
+        assert_eq!(inspect_folder(&notes), FolderCheck { state: FolderState::Notes, md_files: 2, more: false });
 
         let other = tmp.path().join("fotograflar");
         std::fs::create_dir_all(&other).unwrap();
@@ -438,5 +491,39 @@ notes = \"Notlar/Arşiv\"
         assert_eq!(inspect_folder(&file).state, FolderState::NotFolder);
 
         assert_eq!(inspect_folder(Path::new(r"\\sunucu\paylasim\Kasa")).state, FolderState::Network);
+    }
+
+    #[test]
+    fn network_paths_are_recognised_in_every_spelling() {
+        // final review I1: the wizard's text field accepts whatever the user types
+        for p in [r"\\sunucu\paylasim", "//sunucu/paylasim/Kasa", r"\/sunucu\paylasim", r"\\.\UNC\sunucu\paylasim\x", r"\\?\unc\sunucu\paylasim", r"\\?\UNC\sunucu\paylasim"] {
+            assert!(is_network_path(Path::new(p)), "{p}");
+            assert_eq!(inspect_folder(Path::new(p)).state, FolderState::Network, "{p}");
+        }
+        for p in [r"C:\Notlar", r"\\?\C:\Notlar", r"\\.\C:\Notlar"] {
+            assert!(!is_network_path(Path::new(p)), "{p}");
+        }
+    }
+
+    #[test]
+    fn relative_paths_are_no_place_for_the_vault() {
+        // final review I2: they would resolve against the process's working folder
+        for p in ["Notlar", r"C:Notlar", "", r"\Notlar"] {
+            assert_eq!(inspect_folder(Path::new(p)).state, FolderState::Relative, "{p:?}");
+        }
+    }
+
+    #[test]
+    fn counting_notes_stops_at_its_limits() {
+        // final review I3: typing `C:\` must not walk the whole disk
+        let tmp = tempfile::tempdir().unwrap();
+        for i in 0..5 {
+            std::fs::create_dir_all(tmp.path().join(format!("d{i}"))).unwrap();
+            std::fs::write(tmp.path().join(format!("d{i}/n.md")), "x").unwrap();
+        }
+        assert_eq!(count_notes(tmp.path(), 3, 1000), (3, true), "note limit");
+        let (found, more) = count_notes(tmp.path(), 100, 4);
+        assert!(more && found < 5, "entry limit: {found}");
+        assert_eq!(count_notes(tmp.path(), 100, 1000), (5, false));
     }
 }

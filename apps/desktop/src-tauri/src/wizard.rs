@@ -3,7 +3,7 @@
 use std::path::{Path, PathBuf};
 
 use pla_core::settings::AppSettings;
-use pla_core::vault::{inspect_folder, FolderState};
+use pla_core::vault::{folder_state, FolderState};
 
 /// FR-SET-001: no settings yet, or a setup that never chose a vault. Users whose settings already
 /// have a vault (from before the wizard existed) go straight to the app.
@@ -15,6 +15,7 @@ pub fn show_wizard(first_run: bool, settings: &AppSettings) -> bool {
 pub enum PrepareError {
     Network(PathBuf),
     NotFolder(PathBuf),
+    Relative(PathBuf),
     NotWritable { path: PathBuf, reason: String },
 }
 
@@ -23,20 +24,22 @@ impl std::fmt::Display for PrepareError {
         match self {
             Self::Network(p) => write!(f, "network|{}", p.display()),
             Self::NotFolder(p) => write!(f, "not_folder|{}", p.display()),
+            Self::Relative(p) => write!(f, "relative|{}", p.display()),
             Self::NotWritable { path, reason } => write!(f, "not_writable|{}|{reason}", path.display()),
         }
     }
 }
 
-/// Makes `path` ready to become the vault: refuses network paths and files (FR-SET-007), creates a
-/// missing folder, and checks it can be written. Returns `true` when the folder was missing or
-/// empty, i.e. when a welcome note belongs in it (FR-SET-006). A folder with notes is not touched
-/// (FR-SET-005); the write probe is removed again.
+/// Makes `path` ready to become the vault: refuses network and relative paths and files
+/// (FR-SET-007), creates a missing folder, and checks it can be written. Returns `true` when the
+/// folder was missing or empty, i.e. when a welcome note belongs in it (FR-SET-006). A folder with
+/// notes is not touched (FR-SET-005): the write check uses a new file of its own and removes it.
 pub fn prepare_folder(path: &Path) -> Result<bool, PrepareError> {
-    let not_writable = |e: std::io::Error| PrepareError::NotWritable { path: path.to_path_buf(), reason: e.to_string() };
-    let fresh = match inspect_folder(path).state {
+    let not_writable = |e: std::io::Error| PrepareError::NotWritable { path: path.to_path_buf(), reason: write_failure(&e) };
+    let fresh = match folder_state(path) {
         FolderState::Network => return Err(PrepareError::Network(path.to_path_buf())),
         FolderState::NotFolder => return Err(PrepareError::NotFolder(path.to_path_buf())),
+        FolderState::Relative => return Err(PrepareError::Relative(path.to_path_buf())),
         FolderState::Missing => {
             std::fs::create_dir_all(path).map_err(not_writable)?;
             true
@@ -44,10 +47,26 @@ pub fn prepare_folder(path: &Path) -> Result<bool, PrepareError> {
         FolderState::Empty => true,
         FolderState::Notes | FolderState::Other => false,
     };
-    let probe = path.join(".pla-write-check");
-    std::fs::write(&probe, b"").map_err(not_writable)?;
+    let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
+    let probe = path.join(format!(".pla-write-check-{}-{stamp}", std::process::id()));
+    std::fs::OpenOptions::new().write(true).create_new(true).open(&probe).map_err(not_writable)?;
     std::fs::remove_file(&probe).map_err(not_writable)?;
     Ok(fresh)
+}
+
+/// Why a folder could not be written: a code the UI translates, or the OS text as a last resort.
+pub fn write_failure(e: &std::io::Error) -> String {
+    match e.kind() {
+        std::io::ErrorKind::PermissionDenied => "access_denied".into(),
+        _ => e.to_string(),
+    }
+}
+
+/// A folder path as typed or pasted: surrounding spaces and one pair of quotes removed.
+pub fn clean_path(input: &str) -> PathBuf {
+    let trimmed = input.trim();
+    let unquoted = trimmed.strip_prefix('"').and_then(|t| t.strip_suffix('"')).unwrap_or(trimmed);
+    PathBuf::from(unquoted.trim())
 }
 
 /// The note a new vault starts with (FR-SET-006).
@@ -155,6 +174,59 @@ mod tests {
         std::fs::write(&file, "x").unwrap();
         assert_eq!(prepare_folder(&file), Err(PrepareError::NotFolder(file.clone())));
         assert!(PrepareError::NotFolder(file.clone()).to_string().contains("dosya.txt"));
+    }
+
+    #[test]
+    fn relative_and_network_paths_in_any_spelling_are_refused() {
+        // final review I1/I2
+        let before = std::env::current_dir().unwrap();
+        for p in ["Notlar", r"C:Notlar", ""] {
+            assert_eq!(prepare_folder(std::path::Path::new(p)), Err(PrepareError::Relative(p.into())), "{p:?}");
+        }
+        assert_eq!(PrepareError::Relative("Notlar".into()).to_string(), "relative|Notlar");
+        let unc = std::path::Path::new("//sunucu/paylasim");
+        assert_eq!(prepare_folder(unc), Err(PrepareError::Network(unc.to_path_buf())));
+        assert_eq!(std::env::current_dir().unwrap(), before);
+        assert!(!before.join("Notlar").exists(), "nothing created next to the process");
+    }
+
+    #[test]
+    fn typed_paths_lose_quotes_and_spaces() {
+        // Explorer's "Copy as path" adds quotes (final review I2)
+        assert_eq!(clean_path(r#"  "C:\Kasa ğüş\"  "#), std::path::PathBuf::from(r"C:\Kasa ğüş\"));
+        assert_eq!(clean_path(" C:\\Kasa "), std::path::PathBuf::from(r"C:\Kasa"));
+        assert_eq!(clean_path(r#""C:\a"b""#), std::path::PathBuf::from(r#"C:\a"b"#), "only a surrounding pair");
+    }
+
+    #[test]
+    fn access_denied_is_a_code_the_ui_can_translate() {
+        // final review M3: the OS text would come in the OS language
+        let denied = std::io::Error::from(std::io::ErrorKind::PermissionDenied);
+        assert_eq!(write_failure(&denied), "access_denied");
+        let other = std::io::Error::other("disk on fire");
+        assert_eq!(write_failure(&other), "disk on fire");
+    }
+
+    #[test]
+    fn the_write_check_never_touches_an_existing_file() {
+        // final review M4
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(tmp.path().join(".pla-write-check"), "kullanıcının").unwrap();
+        std::fs::write(tmp.path().join("Not.md"), "x").unwrap();
+        assert_eq!(prepare_folder(tmp.path()), Ok(false));
+        assert_eq!(std::fs::read_to_string(tmp.path().join(".pla-write-check")).unwrap(), "kullanıcının");
+        assert_eq!(std::fs::read_dir(tmp.path()).unwrap().count(), 2);
+    }
+
+    #[test]
+    fn a_folder_with_only_system_files_still_gets_a_welcome() {
+        // final review M7: desktop.ini does not make a folder "used"
+        let tmp = tempfile::tempdir().unwrap();
+        let ini = tmp.path().join("desktop.ini");
+        std::fs::write(&ini, "[.ShellClassInfo]").unwrap();
+        let status = std::process::Command::new("attrib").args(["+h", "+s"]).arg(&ini).status().unwrap();
+        assert!(status.success());
+        assert_eq!(prepare_folder(tmp.path()), Ok(true));
     }
 
     #[test]
