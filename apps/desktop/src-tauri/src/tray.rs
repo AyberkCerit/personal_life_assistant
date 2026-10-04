@@ -1,34 +1,26 @@
 //! The tray icon (FR-SCH-001/002, FR-SET-016): PLA keeps running with the window closed.
 
+use std::sync::Mutex;
+
 use tauri::menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Emitter, Manager, Wry};
 use tauri_plugin_autostart::ManagerExt;
 
-/// Kept so a pause from the status bar also updates the tray check (final review I4).
-struct TrayItems {
-    pause: CheckMenuItem<Wry>,
-}
+/// The check items of the current menu, so a change made in the window also updates the tray
+/// (final review I4); replaced when the menu is rebuilt in another language.
+#[derive(Default)]
+struct TrayItems(Mutex<Option<(CheckMenuItem<Wry>, CheckMenuItem<Wry>)>>);
 
 pub fn set_pause_checked(app: &AppHandle, paused: bool) {
-    if let Some(items) = app.try_state::<TrayItems>() {
-        let _ = items.pause.set_checked(paused);
+    if let Some((pause, _)) = app.try_state::<TrayItems>().and_then(|items| items.0.lock().expect("tray lock").clone()) {
+        let _ = pause.set_checked(paused);
     }
 }
 
-struct Labels {
-    open: &'static str,
-    new_note: &'static str,
-    pause: &'static str,
-    autostart: &'static str,
-    quit: &'static str,
-}
-
-fn labels() -> Labels {
-    if crate::notify::strings().done == "Tamamlandı" {
-        Labels { open: "Aç", new_note: "Yeni not", pause: "Arka plan YZ'yi duraklat", autostart: "Windows ile başlat", quit: "Çık" }
-    } else {
-        Labels { open: "Open", new_note: "New note", pause: "Pause background AI", autostart: "Start with Windows", quit: "Quit" }
+pub fn set_autostart_checked(app: &AppHandle, on: bool) {
+    if let Some((_, autostart)) = app.try_state::<TrayItems>().and_then(|items| items.0.lock().expect("tray lock").clone()) {
+        let _ = autostart.set_checked(on);
     }
 }
 
@@ -45,20 +37,47 @@ pub fn show_main(app: &AppHandle) {
     }
 }
 
-pub fn build(app: &AppHandle) -> tauri::Result<()> {
-    let l = labels();
-    let autostart_on = app.autolaunch().is_enabled().unwrap_or(false);
-    let open = MenuItem::with_id(app, "open", l.open, true, None::<&str>)?;
-    let new_note = MenuItem::with_id(app, "new_note", l.new_note, true, None::<&str>)?;
-    let pause = CheckMenuItem::with_id(app, "pause", l.pause, true, false, None::<&str>)?;
-    let autostart = CheckMenuItem::with_id(app, "autostart", l.autostart, true, autostart_on, None::<&str>)?;
-    let quit = MenuItem::with_id(app, "quit", l.quit, true, None::<&str>)?;
-    let separator = PredefinedMenuItem::separator(app)?;
-    let menu = Menu::with_items(app, &[&open, &new_note, &separator, &pause, &autostart, &separator, &quit])?;
+/// FR-SET-016: one path for the tray item and the settings screen, so both agree.
+pub fn apply_autostart(app: &AppHandle, on: bool) -> Result<(), String> {
+    let manager = app.autolaunch();
+    if on { manager.enable() } else { manager.disable() }.map_err(|e| e.to_string())?;
+    set_autostart_checked(app, on);
+    let _ = app.emit("autostart-changed", on);
+    Ok(())
+}
 
-    app.manage(TrayItems { pause: pause.clone() });
-    let pause_item = pause.clone();
-    let autostart_item = autostart.clone();
+/// The menu in the current UI language, with the checks as they are now.
+fn menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
+    let s = crate::notify::strings();
+    let paused = app.state::<crate::commands::AppState>().paused.load(std::sync::atomic::Ordering::SeqCst);
+    let autostart_on = app.autolaunch().is_enabled().unwrap_or(false);
+    let open = MenuItem::with_id(app, "open", s.tray_open, true, None::<&str>)?;
+    let new_note = MenuItem::with_id(app, "new_note", s.tray_new_note, true, None::<&str>)?;
+    let pause = CheckMenuItem::with_id(app, "pause", s.tray_pause, true, paused, None::<&str>)?;
+    let autostart = CheckMenuItem::with_id(app, "autostart", s.tray_autostart, true, autostart_on, None::<&str>)?;
+    let settings = MenuItem::with_id(app, "settings", s.tray_settings, true, None::<&str>)?;
+    let quit = MenuItem::with_id(app, "quit", s.tray_quit, true, None::<&str>)?;
+    let separator = PredefinedMenuItem::separator(app)?;
+    let menu = Menu::with_items(app, &[&open, &new_note, &separator, &pause, &autostart, &settings, &separator, &quit])?;
+    *app.state::<TrayItems>().0.lock().expect("tray lock") = Some((pause, autostart));
+    Ok(menu)
+}
+
+/// Rebuilds the menu after a language change (FR-SET-012).
+pub fn refresh(app: &AppHandle) {
+    if let (Some(tray), Ok(menu)) = (app.tray_by_id("pla"), menu(app)) {
+        let _ = tray.set_menu(Some(menu));
+    }
+}
+
+fn checked(app: &AppHandle, pick: impl Fn(&(CheckMenuItem<Wry>, CheckMenuItem<Wry>)) -> &CheckMenuItem<Wry>) -> bool {
+    let items = app.state::<TrayItems>().0.lock().expect("tray lock").clone();
+    items.as_ref().is_some_and(|i| pick(i).is_checked().unwrap_or(false))
+}
+
+pub fn build(app: &AppHandle) -> tauri::Result<()> {
+    app.manage(TrayItems::default());
+    let menu = menu(app)?;
     TrayIconBuilder::with_id("pla")
         .icon(tray_icon())
         .tooltip("PLA")
@@ -70,11 +89,16 @@ pub fn build(app: &AppHandle) -> tauri::Result<()> {
                 show_main(app);
                 let _ = app.emit("new-note", ());
             }
-            "pause" => crate::commands::apply_pause(app, pause_item.is_checked().unwrap_or(false)),
+            "settings" => {
+                show_main(app);
+                let _ = app.emit("open-settings", ());
+            }
+            "pause" => crate::commands::apply_pause(app, checked(app, |i| &i.0)),
             "autostart" => {
-                let on = autostart_item.is_checked().unwrap_or(false);
-                let manager = app.autolaunch();
-                let _ = if on { manager.enable() } else { manager.disable() };
+                let on = checked(app, |i| &i.1);
+                if apply_autostart(app, on).is_err() {
+                    set_autostart_checked(app, !on); // the check shows what Windows really has
+                }
             }
             "quit" => app.exit(0),
             _ => {}

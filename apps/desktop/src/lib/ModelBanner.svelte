@@ -26,7 +26,19 @@
   onMount(() => {
     void refresh();
     const un = api.onModelChanged(() => void refresh());
-    return () => void un.then((f) => f());
+    // A failure must not stay hidden behind a closed banner (deferred model minor).
+    const unDownload = api.onModelDownload((s) => {
+      if (s.state === "failed") dismissed = false;
+    });
+    const unRemoved = api.onModelRemoved(() => {
+      dismissed = false; // AI just went off: offer the model again
+      void refresh();
+    });
+    return () => {
+      void un.then((f) => f());
+      void unRemoved.then((f) => f());
+      void unDownload.then((f) => f());
+    };
   });
 </script>
 

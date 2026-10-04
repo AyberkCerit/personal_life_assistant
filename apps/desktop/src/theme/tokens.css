@@ -28,6 +28,7 @@
   --color-selection: #2f4f4b;
   --color-active-line: rgb(255 255 255 / 0.025);
   --shadow-color: rgb(0 0 0 / 0.35);
+  --color-scrim: rgb(0 0 0 / 0.5);
 }
 
 :root[data-theme="light"] {
@@ -57,6 +58,7 @@
   --color-selection: #b9e6d8;
   --color-active-line: rgb(20 30 50 / 0.035);
   --shadow-color: rgb(20 30 50 / 0.12);
+  --color-scrim: rgb(20 30 50 / 0.35);
 }
 
 :root {

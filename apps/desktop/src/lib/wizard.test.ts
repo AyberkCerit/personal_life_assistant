@@ -40,7 +40,7 @@ describe("first-run wizard", () => {
     expect(modelSummary(true, null)).toBe("ready");
     expect(modelSummary(false, { state: "running", progress: { received: 1, total: 2, bytes_per_sec: 1, eta_secs: 1 } })).toBe("downloading");
     expect(modelSummary(false, { state: "paused", received: 1, total: 2 })).toBe("paused");
-    expect(modelSummary(false, { state: "failed", failure: { kind: "network", needed: null, available: null, detail: "" }, received: 1, total: 2 })).toBe("off");
+    expect(modelSummary(false, { state: "failed", failure: { kind: "network", needed: null, available: null, status: null, detail: "" }, received: 1, total: 2 })).toBe("off");
     expect(modelSummary(false, null)).toBe("off");
   });
 });

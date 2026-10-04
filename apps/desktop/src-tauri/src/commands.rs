@@ -96,7 +96,7 @@ pub enum SaveResult {
     Missing,
 }
 
-fn app_root() -> Result<PathBuf, String> {
+pub(crate) fn app_root() -> Result<PathBuf, String> {
     default_app_root().ok_or_else(|| "APPDATA is not set; PLA cannot store its data.".to_owned())
 }
 
@@ -210,21 +210,43 @@ pub fn open_vault(app: AppHandle, state: State<AppState>, path: String) -> Resul
 /// Opens `path` as the vault and remembers it; the caller holds the settings lock.
 fn open_vault_locked(app: &AppHandle, state: &State<AppState>, path: &Path) -> Result<VaultInfo, String> {
     let root = app_root()?;
-    let mut settings = load_settings(&root).map_err(|e| e.to_string())?.settings;
+    let settings = load_settings(&root).map_err(|e| e.to_string())?.settings;
     // Stop the previous vault before opening the next, outside the lock: one writer per pla.db.
     let previous = state.session.lock().expect("session lock").take();
+    let mut old_root = None;
     if let Some(old) = previous {
         if same_folder(&old.vault.root, path) {
             let opened = vault_info_of(&old.vault);
             *state.session.lock().expect("session lock") = Some(old);
             return Ok(opened);
         }
+        old_root = Some(old.vault.root.clone());
         drop(old);
     }
-    let session = start_session(app, path, &settings, Arc::clone(&state.self_writes), state.paused.load(Ordering::SeqCst))?;
+    let paused = state.paused.load(Ordering::SeqCst);
+    // The new folder could not be opened (or remembered): go back to the previous vault (settings
+    // Review Focus 3). If even that fails, say so: the UI must not keep showing a closed vault.
+    let restore = |error: String| -> String {
+        let Some(old) = &old_root else { return error };
+        match start_session(app, old, &settings, Arc::clone(&state.self_writes), paused) {
+            Ok(back) => {
+                *state.session.lock().expect("session lock") = Some(back);
+                error
+            }
+            Err(_) => format!("vault_lost|{}|{error}", old.display()),
+        }
+    };
+    let session = match start_session(app, path, &settings, Arc::clone(&state.self_writes), paused) {
+        Ok(session) => session,
+        Err(e) => return Err(restore(e)),
+    };
     let opened = vault_info_of(&session.vault);
-    settings.vault_path = Some(session.vault.root.clone());
-    save_settings(&root, &settings).map_err(|e| e.to_string())?;
+    let mut remembered = settings.clone();
+    remembered.vault_path = Some(session.vault.root.clone());
+    if let Err(e) = save_settings(&root, &remembered) {
+        drop(session); // stop it before the old one opens again
+        return Err(restore(e.to_string()));
+    }
     *state.session.lock().expect("session lock") = Some(session); // drops (and stops) the previous one
     Ok(opened)
 }
@@ -283,13 +305,85 @@ pub fn setup_vault(app: AppHandle, state: State<AppState>, path: String, lang: S
     Ok(info)
 }
 
-/// FR-SET-003: the language chosen in the wizard (and later in settings).
+/// FR-SET-003: the language chosen in the wizard.
 #[tauri::command]
-pub fn set_language(state: State<AppState>, lang: String) -> Result<(), String> {
-    if lang != "tr" && lang != "en" {
-        return Err(format!("unsupported language {lang}"));
+pub fn set_language(app: AppHandle, state: State<AppState>, lang: String) -> Result<(), String> {
+    settings_set(app, state, "language".into(), serde_json::Value::String(lang)).map(|_| ())
+}
+
+/// What the settings screen shows (FR-SET-011).
+#[derive(Serialize)]
+pub struct SettingsView {
+    language: Option<String>,
+    theme: Theme,
+    autostart: bool,
+    paused: bool,
+    vault_path: Option<String>,
+}
+
+/// One plain setting from the settings screen; anything else is refused and changes nothing.
+pub fn apply_setting(s: &mut AppSettings, key: &str, value: &serde_json::Value) -> Result<(), String> {
+    use serde_json::Value;
+    match (key, value) {
+        ("language", Value::Null) => s.language = None,
+        ("language", Value::String(l)) if l == "tr" || l == "en" => s.language = Some(l.clone()),
+        ("theme", Value::String(t)) if t == "dark" => s.theme = Theme::Dark,
+        ("theme", Value::String(t)) if t == "light" => s.theme = Theme::Light,
+        _ => return Err(format!("invalid_setting|{key}|{value}")),
     }
-    update_settings(&app_root()?, &state.settings_lock, |s| s.language = Some(lang)).map(|_| ())
+    Ok(())
+}
+
+fn settings_view(app: &AppHandle, state: &State<AppState>, settings: &AppSettings) -> SettingsView {
+    use tauri_plugin_autostart::ManagerExt;
+    SettingsView {
+        language: settings.language.clone(),
+        theme: settings.theme,
+        autostart: app.autolaunch().is_enabled().unwrap_or(false),
+        paused: state.paused.load(Ordering::SeqCst),
+        vault_path: settings.vault_path.as_ref().map(|p| p.to_string_lossy().into_owned()),
+    }
+}
+
+#[tauri::command]
+pub fn settings_get(app: AppHandle, state: State<AppState>) -> Result<SettingsView, String> {
+    let settings = load_settings(&app_root()?).map_err(|e| e.to_string())?.settings;
+    Ok(settings_view(&app, &state, &settings))
+}
+
+/// Changes one setting at once (no Save button); a language change also re-labels the tray and
+/// the notifications (FR-SET-012).
+#[tauri::command]
+pub fn settings_set(app: AppHandle, state: State<AppState>, key: String, value: serde_json::Value) -> Result<SettingsView, String> {
+    let mut refused = None;
+    let settings = update_settings(&app_root()?, &state.settings_lock, |s| {
+        let mut changed = s.clone();
+        match apply_setting(&mut changed, &key, &value) {
+            Ok(()) => *s = changed,
+            Err(e) => refused = Some(e),
+        }
+    })?;
+    if let Some(e) = refused {
+        return Err(e);
+    }
+    if key == "language" {
+        crate::notify::set_ui_language(settings.language.as_deref());
+        crate::tray::refresh(&app);
+    }
+    Ok(settings_view(&app, &state, &settings))
+}
+
+/// The Notifications section's "send a test notification".
+#[tauri::command]
+pub fn send_test_notification() {
+    let s = strings();
+    show_info(s.test_title, s.test_body);
+}
+
+/// FR-SET-016, from the settings screen; the tray check follows.
+#[tauri::command]
+pub fn set_autostart(app: AppHandle, enabled: bool) -> Result<(), String> {
+    crate::tray::apply_autostart(&app, enabled)
 }
 
 #[tauri::command]
@@ -520,7 +614,7 @@ pub fn hide_to_tray(window: tauri::WebviewWindow, state: State<AppState>) -> Res
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct InstalledModel {
-    name: String,
+    pub name: String,
     size: u64,
     path: String,
     local: bool,
@@ -534,7 +628,7 @@ pub struct ModelStatus {
     models_dir: Option<String>,
 }
 
-fn describe_model(path: &Path, id: Option<&str>) -> Option<InstalledModel> {
+pub(crate) fn describe_model(path: &Path, id: Option<&str>) -> Option<InstalledModel> {
     let size = std::fs::metadata(path).ok().filter(|m| m.is_file())?.len();
     let entry = id.and_then(catalog::by_id);
     Some(InstalledModel {
@@ -574,6 +668,50 @@ fn install_model(app: &AppHandle, model_path: &Path, model_id: Option<&str>, ins
     Ok(())
 }
 
+/// FR-MDL-019: stops the model, then deletes a model PLA downloaded or only forgets a file the
+/// user chose (settings Review Focus 2). AI features turn off; notes keep queueing.
+#[tauri::command(async)]
+pub fn model_remove(app: AppHandle, state: State<AppState>) -> Result<(), String> {
+    let root = app_root()?;
+    let settings = load_settings(&root).map_err(|e| e.to_string())?.settings;
+    let models_dir = models::models_dir();
+    let Some(plan) = crate::model_paths::removal(&settings, models_dir.as_deref()) else { return Ok(()) };
+    let (ack, done) = std::sync::mpsc::channel();
+    let asked = state.session.lock().expect("session lock").as_ref().map(|s| s.worker.drop_model(ack)).is_some();
+    if asked {
+        // The run stops before its next model call; one call in flight can take up to the host's
+        // request timeout (60 s).
+        done.recv_timeout(Duration::from_secs(90)).map_err(|_| "model_busy".to_owned())?;
+    }
+    if let crate::model_paths::Removal::Delete(path) = &plan {
+        // llama-server may need a moment to release the file after it exits
+        let mut result = std::fs::remove_file(path);
+        for _ in 0..20 {
+            match &result {
+                Err(e) if e.kind() != std::io::ErrorKind::NotFound => {
+                    std::thread::sleep(Duration::from_millis(250));
+                    result = std::fs::remove_file(path);
+                }
+                _ => break,
+            }
+        }
+        match result {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(format!("not_removed|{}|{}", path.display(), crate::wizard::write_failure(&e))),
+        }
+    }
+    // A model chosen or downloaded meanwhile stays (settings final review M1).
+    update_settings(&root, &state.settings_lock, |s| {
+        if s.model_path == settings.model_path {
+            s.model_path = None;
+            s.model_id = None;
+        }
+    })?;
+    let _ = app.emit("model-removed", ());
+    Ok(())
+}
+
 #[tauri::command]
 pub fn model_status(state: State<AppState>) -> Result<ModelStatus, String> {
     let settings = load_settings(&app_root()?).map_err(|e| e.to_string())?.settings;
@@ -581,7 +719,10 @@ pub fn model_status(state: State<AppState>) -> Result<ModelStatus, String> {
     Ok(ModelStatus {
         installed: path.as_deref().and_then(|p| describe_model(p, settings.model_id.as_deref())),
         recommended: catalog::recommended(),
-        download: state.downloads.current(),
+        download: state.downloads.current().or_else(|| {
+            let (entry, dir) = (catalog::recommended(), models::models_dir()?);
+            crate::model_download::leftover(&dl::part_path(&dir, entry), entry.size)
+        }),
         models_dir: models::models_dir().map(|d| d.to_string_lossy().into_owned()),
     })
 }
@@ -634,7 +775,7 @@ pub fn model_download_start(app: AppHandle, state: State<AppState>) -> Result<()
                 }
             },
         )
-        .map_err(|_| "A model download is already running.".to_owned())
+        .map_err(|_| "download_running".to_owned())
 }
 
 #[tauri::command]
@@ -655,6 +796,23 @@ pub fn model_use_local(app: AppHandle, path: String) -> Result<InstalledModel, S
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_settings_screen_can_change_only_known_values() {
+        // FR-SET-011, settings_set
+        let mut s = AppSettings::default();
+        apply_setting(&mut s, "language", &serde_json::json!("en")).unwrap();
+        assert_eq!(s.language.as_deref(), Some("en"));
+        apply_setting(&mut s, "language", &serde_json::Value::Null).unwrap();
+        assert_eq!(s.language, None, "null = follow Windows again");
+        apply_setting(&mut s, "theme", &serde_json::json!("light")).unwrap();
+        assert_eq!(s.theme, Theme::Light);
+        let before = s.clone();
+        for (key, value) in [("language", serde_json::json!("de")), ("theme", serde_json::json!("blue")), ("vault_path", serde_json::json!("C:/x")), ("theme", serde_json::json!(1))] {
+            assert!(apply_setting(&mut s, key, &value).is_err(), "{key} = {value}");
+        }
+        assert_eq!(s, before, "a refused value changes nothing");
+    }
 
     #[test]
     fn using_a_non_gguf_file_changes_nothing() {

@@ -70,10 +70,13 @@ pub fn enqueue(conn: &Connection, note_path: &str, now: DateTime<FixedOffset>) -
 /// known note that is no longer on disk, so its items get marked (FR-VLT-019).
 pub fn enqueue_all(vault: &Vault, conn: &Connection, now: DateTime<FixedOffset>) -> Result<usize, PipelineError> {
     let mut notes = list_user_notes(vault)?;
-    let known: Vec<String> = conn
+    let known: std::collections::HashSet<String> = conn
         .prepare("SELECT DISTINCT note_path FROM block WHERE missing = 0")?
         .query_map([], |r| r.get(0))?
         .collect::<Result<_, _>>()?;
+    // A note PLA wrote itself (FR-EXT-001) that never had blocks has nothing to extract: leaving it
+    // out keeps "waiting for the model" honest. One that had blocks is still queued so they go away.
+    notes.retain(|n| known.contains(n) || !std::fs::read_to_string(vault.root.join(n)).is_ok_and(|t| is_generated(&t)));
     notes.extend(known.into_iter().filter(|n| !vault.root.join(n).exists()));
     for note in &notes {
         enqueue(conn, note, now)?;
@@ -413,6 +416,18 @@ mod tests {
         assert!(tasks(&conn).is_empty());
         assert!(queued_notes(&conn).unwrap().is_empty());
         assert_eq!(report.model_error, None);
+    }
+
+    #[test]
+    fn notes_pla_wrote_itself_never_wait_for_the_model() {
+        // settings E2E finding: a new vault showed "1 note waiting for the model" for its welcome note
+        let tmp = tempfile::tempdir().unwrap();
+        let vault = open_vault(tmp.path()).unwrap();
+        let conn = open_databases(&tmp.path().join(".data")).unwrap().pla;
+        write(&vault, "inbox/Hoş geldin.md", format!("---\npla_generated: true\n---\n{DENTIST}").as_bytes());
+        write(&vault, "notes/benim.md", DENTIST.as_bytes());
+        enqueue_all(&vault, &conn, at(T1)).unwrap();
+        assert_eq!(queued_notes(&conn).unwrap(), vec!["notes/benim.md".to_owned()]);
     }
 
     #[test]

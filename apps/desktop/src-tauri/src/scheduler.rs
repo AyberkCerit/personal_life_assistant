@@ -26,6 +26,8 @@ pub trait Notifier: Send {
     fn missed(&self, reminders: &[DueReminder]);
     fn problem(&self, message: &str);
     fn tasks_changed(&self);
+    /// A backup ran (or failed), so the settings screen can refresh its status.
+    fn backup_changed(&self) {}
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -137,6 +139,7 @@ impl Scheduler {
                 }
             }
         }
+        self.notifier.backup_changed(); // nightly runs too (settings final review M9)
     }
 
     pub fn handle(&mut self, command: SchedCommand) {

@@ -62,6 +62,9 @@ function addMockTask(input: MockInput, origin: Task["origin"]): Task {
 let vault: string | null = null;
 let setupDone = false;
 let mockLang: "tr" | "en" | null = null;
+let mockTheme: "dark" | "light" = "dark";
+let mockAutostart = false;
+let lastBackup: string | null = null;
 
 function hash(s: string): string {
   let h = 0;
@@ -112,6 +115,38 @@ export async function mockBackend<T>(cmd: string, args: Record<string, unknown>)
     case "set_language":
       mockLang = args.lang as "tr" | "en";
       return undefined as T;
+    case "settings_get":
+      return { language: mockLang, theme: mockTheme, autostart: mockAutostart, paused: false, vault_path: vault } as T;
+    case "settings_set":
+      if (args.key === "language") mockLang = args.value as "tr" | "en" | null;
+      else if (args.key === "theme") mockTheme = args.value as "dark" | "light";
+      return { language: mockLang, theme: mockTheme, autostart: mockAutostart, paused: false, vault_path: vault } as T;
+    case "set_autostart":
+      mockAutostart = Boolean(args.enabled);
+      emit("autostart-changed", mockAutostart);
+      return undefined as T;
+    case "send_test_notification":
+      return undefined as T;
+    case "notification_status":
+      return false as T;
+    case "model_remove":
+      installed = null;
+      emit("model-removed", null);
+      return undefined as T;
+    case "backup_now":
+      setTimeout(() => {
+        lastBackup = new Date().toISOString();
+        emit("backup-changed", null);
+      }, 600);
+      return undefined as T;
+    case "backup_status":
+      return { job: { last_success_at: lastBackup, last_attempt_at: lastBackup, last_error: null }, backups: lastBackup ? ["pla-2026-10-05.db"] : [] } as T;
+    case "export_data":
+      return [`${args.dir}/PLA-gorevler.csv`, `${args.dir}/PLA-olcumler.csv`] as T;
+    case "open_place":
+      return undefined as T;
+    case "about_info":
+      return { version: "0.1.0", model: installed?.name ?? null, model_licence: installed ? "Apache-2.0" : null, components: [{ name: "llama.cpp", licence: "MIT", url: "https://github.com/ggml-org/llama.cpp" }, { name: "Svelte", licence: "MIT", url: "https://svelte.dev" }] } as T;
     case "finish_setup":
       setupDone = true;
       return undefined as T;
@@ -241,4 +276,4 @@ let pending: { due: MockReminder[]; missed: MockReminder[] } = { due: [], missed
   pending.missed = list;
   for (const cb of mockListeners.get("missed-reminders") ?? []) cb(list);
 };
-(globalThis as Record<string, unknown>).__plaMockFail = (kind: string) => { clearInterval(timer); download = { state: "failed", failure: { kind, needed: 6_700_000_000, available: 4_400_000_000, detail: kind }, received, total: RECOMMENDED.size }; emit("model-download", download); };
+(globalThis as Record<string, unknown>).__plaMockFail = (kind: string) => { clearInterval(timer); download = { state: "failed", failure: { kind, needed: 6_700_000_000, available: 4_400_000_000, status: 503, detail: kind }, received, total: RECOMMENDED.size }; emit("model-download", download); };

@@ -2,6 +2,7 @@
 //! and, while the window is open, an in-app banner via events (decision 3, FR-TSK-015).
 
 use std::sync::mpsc::Sender;
+use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::Mutex;
 
 use pla_core::reminders::DueReminder;
@@ -20,6 +21,14 @@ pub struct Strings {
     pub tray_body: &'static str,
     pub model_ready_title: &'static str,
     pub model_ready_body: &'static str,
+    pub test_title: &'static str,
+    pub test_body: &'static str,
+    pub tray_open: &'static str,
+    pub tray_new_note: &'static str,
+    pub tray_pause: &'static str,
+    pub tray_autostart: &'static str,
+    pub tray_settings: &'static str,
+    pub tray_quit: &'static str,
 }
 
 const TR: Strings = Strings {
@@ -33,6 +42,14 @@ const TR: Strings = Strings {
     tray_body: "Pencere kapandı ama hatırlatıcılar çalışıyor. Tamamen kapatmak için tepsi simgesinden Çık'ı seç.",
     model_ready_title: "PLA: model hazır",
     model_ready_body: "Yapay zekâ özellikleri açıldı; bekleyen notlar işleniyor.",
+    test_title: "PLA deneme bildirimi",
+    test_body: "Bu bildirimi görüyorsan hatırlatıcılar da görünecek.",
+    tray_open: "Aç",
+    tray_new_note: "Yeni not",
+    tray_pause: "Arka plan YZ'yi duraklat",
+    tray_autostart: "Windows ile başlat",
+    tray_settings: "Ayarlar",
+    tray_quit: "Çık",
 };
 
 const EN: Strings = Strings {
@@ -46,22 +63,59 @@ const EN: Strings = Strings {
     tray_body: "The window is closed but reminders still work. To quit, choose Quit from the tray icon.",
     model_ready_title: "PLA: model ready",
     model_ready_body: "AI features are on; waiting notes are being processed.",
+    test_title: "PLA test notification",
+    test_body: "If you can see this, reminders will show up too.",
+    tray_open: "Open",
+    tray_new_note: "New note",
+    tray_pause: "Pause background AI",
+    tray_autostart: "Start with Windows",
+    tray_settings: "Settings",
+    tray_quit: "Quit",
 };
 
-/// Turkish when the Windows UI language is Turkish, otherwise English (as FR-SET-003).
-pub fn strings() -> &'static Strings {
+/// The language chosen in PLA: 0 = follow Windows, 1 = Turkish, 2 = English (FR-SET-003/012).
+static UI_LANG: AtomicU8 = AtomicU8::new(0);
+
+/// Called at startup and whenever the language setting changes.
+pub fn set_ui_language(lang: Option<&str>) {
+    UI_LANG.store(
+        match lang {
+            Some("tr") => 1,
+            Some("en") => 2,
+            _ => 0,
+        },
+        Ordering::SeqCst,
+    );
+}
+
+/// The saved language wins; without one, Turkish when Windows is Turkish, otherwise English.
+fn pick(saved: u8, os_turkish: bool) -> &'static Strings {
+    match saved {
+        1 => &TR,
+        2 => &EN,
+        _ if os_turkish => &TR,
+        _ => &EN,
+    }
+}
+
+fn os_turkish() -> bool {
     #[cfg(windows)]
     {
         // SAFETY: no arguments, returns a LANGID.
         let lang = unsafe { windows_sys::Win32::Globalization::GetUserDefaultUILanguage() };
-        if lang & 0x3ff == 0x1f {
-            return &TR;
-        }
+        lang & 0x3ff == 0x1f
     }
-    &EN
+    #[cfg(not(windows))]
+    {
+        false
+    }
 }
 
-fn app_id() -> &'static str {
+pub fn strings() -> &'static Strings {
+    pick(UI_LANG.load(Ordering::SeqCst), os_turkish())
+}
+
+pub(crate) fn app_id() -> &'static str {
     // Decision 8: an unpackaged dev build has no registered app id.
     if cfg!(debug_assertions) {
         tauri_winrt_notification::Toast::POWERSHELL_APP_ID
@@ -137,6 +191,10 @@ impl Notifier for AppNotifier {
     fn tasks_changed(&self) {
         let _ = self.app.emit("tasks-changed", ());
     }
+
+    fn backup_changed(&self) {
+        let _ = self.app.emit("backup-changed", ());
+    }
 }
 
 /// Tells the user the model is ready when they cannot see the window (model-manager spec § 5).
@@ -146,5 +204,19 @@ pub fn model_ready(app: &AppHandle) {
     if hidden {
         let s = strings();
         show_info(s.model_ready_title, s.model_ready_body);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_saved_language_wins_over_windows() {
+        // FR-SET-012: tray and notifications follow the language chosen in PLA
+        assert_eq!(pick(1, false).done, "Tamamlandı");
+        assert_eq!(pick(2, true).done, "Done");
+        assert_eq!(pick(0, true).done, "Tamamlandı");
+        assert_eq!(pick(0, false).done, "Done");
     }
 }

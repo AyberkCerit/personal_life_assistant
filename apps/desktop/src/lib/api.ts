@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { mockBackend, mockListeners } from "./mock";
 import type { FolderReport } from "./wizard";
+import type { JobStatus } from "./settings";
 
 export interface TaskInput { title: string; details?: string | null; date?: string | null; time?: string | null; remind?: boolean | null }
 export interface ReviewItem {
@@ -47,7 +48,7 @@ export interface DueReminder { task_id: string; title: string; notify_at: string
 export interface CatalogEntry { id: string; name: string; file_name: string; size: number; sha256: string; url: string; source: string; licence: string; licence_url: string }
 export interface InstalledModel { name: string; size: number; path: string; local: boolean }
 export interface Progress { received: number; total: number; bytes_per_sec: number; eta_secs: number | null }
-export interface Failure { kind: string; needed: number | null; available: number | null; detail: string }
+export interface Failure { kind: string; needed: number | null; available: number | null; status: number | null; detail: string }
 export type DownloadState =
   | { state: "running"; progress: Progress }
   | { state: "paused"; received: number; total: number }
@@ -55,6 +56,11 @@ export type DownloadState =
   | { state: "done"; path: string };
 export interface ModelStatus { installed: InstalledModel | null; recommended: CatalogEntry; download: DownloadState | null; models_dir: string | null }
 export interface WizardDefaults { suggested_vault: string | null }
+export interface SettingsView { language: "tr" | "en" | null; theme: "dark" | "light"; autostart: boolean; paused: boolean; vault_path: string | null }
+export interface BackupStatus { job: JobStatus; backups: string[] }
+export interface Component { name: string; licence: string; url: string }
+export interface About { version: string; model: string | null; model_licence: string | null; components: Component[] }
+export type PlaceKind = "vault" | "backups" | "app_data" | "local_data" | "model_folder" | "notification_settings";
 export interface PendingReminders { due: DueReminder[]; missed: DueReminder[] }
 
 /** Inside the Tauri window; false in a plain browser (Vite dev server), where a mock backend answers. */
@@ -80,6 +86,22 @@ export const api = {
   setupVault: (path: string, lang: string) => call<VaultInfo>("setup_vault", { path, lang }),
   setLanguage: (lang: string) => call<void>("set_language", { lang }),
   finishSetup: () => call<void>("finish_setup"),
+  settingsGet: () => call<SettingsView>("settings_get"),
+  /** Applies at once; errors are `invalid_setting|<key>|<value>`. */
+  settingsSet: (key: "language" | "theme", value: string | null) => call<SettingsView>("settings_set", { key, value }),
+  setAutostart: (enabled: boolean) => call<void>("set_autostart", { enabled }),
+  sendTestNotification: () => call<void>("send_test_notification"),
+  notificationStatus: () => call<boolean>("notification_status"),
+  modelRemove: () => call<void>("model_remove"),
+  backupNow: () => call<void>("backup_now"),
+  backupStatus: () => call<BackupStatus>("backup_status"),
+  exportData: (dir: string, lang: string) => call<string[]>("export_data", { dir, lang }),
+  openPlace: (kind: PlaceKind) => call<void>("open_place", { kind }),
+  aboutInfo: () => call<About>("about_info"),
+  onOpenSettings: (cb: () => void) => on<unknown>("open-settings", () => cb()),
+  onAutostartChanged: (cb: (on: boolean) => void) => on<boolean>("autostart-changed", cb),
+  onBackupChanged: (cb: () => void) => on<unknown>("backup-changed", () => cb()),
+  onModelRemoved: (cb: () => void) => on<unknown>("model-removed", () => cb()),
   listTree: () => call<TreeEntry[]>("list_tree"),
   readNote: (path: string) => call<NoteFile>("read_note", { path }),
   saveNote: (path: string, text: string, expectedHash: string | null) =>

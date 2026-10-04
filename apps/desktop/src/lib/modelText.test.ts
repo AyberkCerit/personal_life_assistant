@@ -23,7 +23,7 @@ describe("model download text", () => {
   });
 
   it("maps every failure kind to a message", () => {
-    for (const k of ["network", "host", "https", "space", "checksum", "io"]) expect(failureKey(k)).toBe(`model.error.${k}`);
+    for (const k of ["network", "host", "https", "space", "checksum", "io", "http"]) expect(failureKey(k)).toBe(`model.error.${k}`);
     expect(failureKey("something new")).toBe("model.error.io");
   });
 });

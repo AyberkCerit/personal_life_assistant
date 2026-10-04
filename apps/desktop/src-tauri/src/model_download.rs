@@ -14,20 +14,24 @@ pub struct Failure {
     pub kind: &'static str,
     pub needed: Option<u64>,
     pub available: Option<u64>,
+    /// The HTTP status of a refusing server.
+    pub status: Option<u16>,
     pub detail: String,
 }
 
 impl From<&DownloadError> for Failure {
     fn from(e: &DownloadError) -> Self {
+        let status = if let DownloadError::Http(code) = e { Some(*code) } else { None };
         let (kind, needed, available) = match e {
             DownloadError::Network(_) | DownloadError::Paused => ("network", None, None),
+            DownloadError::Http(_) => ("http", None, None),
             DownloadError::HostNotAllowed(_) => ("host", None, None),
             DownloadError::NotHttps => ("https", None, None),
             DownloadError::InsufficientSpace { needed, available } => ("space", Some(*needed), Some(*available)),
             DownloadError::ChecksumMismatch => ("checksum", None, None),
             DownloadError::Io(_) => ("io", None, None),
         };
-        Self { kind, needed, available, detail: e.to_string() }
+        Self { kind, needed, available, status, detail: e.to_string() }
     }
 }
 
@@ -50,6 +54,8 @@ pub struct ModelDownloads {
     state: Arc<Mutex<Option<DownloadState>>>,
     cancel: Arc<AtomicBool>,
     thread: Mutex<Option<JoinHandle<()>>>,
+    /// Set by the run once its last state is out: the thread is only returning now.
+    ending: Arc<AtomicBool>,
 }
 
 impl ModelDownloads {
@@ -63,10 +69,15 @@ impl ModelDownloads {
     ) -> Result<(), AlreadyRunning> {
         let mut thread = self.thread.lock().expect("download thread lock");
         if thread.as_ref().is_some_and(|t| !t.is_finished()) {
-            return Err(AlreadyRunning);
+            if !self.ending.load(Ordering::SeqCst) {
+                return Err(AlreadyRunning);
+            }
+            // Paused a moment ago and resumed at once: the old run has said its last word.
+            let _ = thread.take().map(|t| t.join());
         }
         self.cancel.store(false, Ordering::SeqCst);
-        let (state, cancel) = (Arc::clone(&self.state), Arc::clone(&self.cancel));
+        self.ending.store(false, Ordering::SeqCst);
+        let (state, cancel, ending) = (Arc::clone(&self.state), Arc::clone(&self.cancel), Arc::clone(&self.ending));
         let run: Box<Run> = Box::new(run);
         *thread = Some(
             std::thread::Builder::new()
@@ -81,6 +92,8 @@ impl ModelDownloads {
                         last = (p.received, p.total);
                         set(DownloadState::Running { progress: p });
                     });
+                    // From here on only the last state is left to send; a new start may wait for it.
+                    ending.store(true, Ordering::SeqCst);
                     match result {
                         Ok(path) => {
                             set(DownloadState::Done { path: path.to_string_lossy().into_owned() });
@@ -118,8 +131,26 @@ impl ModelDownloads {
     }
 }
 
+/// After a restart nothing is running, but a `.part` file says how far an earlier download got:
+/// show it as paused so the card offers "Resume" (deferred model minor).
+pub fn leftover(part: &std::path::Path, total: u64) -> Option<DownloadState> {
+    let received = std::fs::metadata(part).ok().filter(|m| m.is_file())?.len();
+    (received > 0).then_some(DownloadState::Paused { received, total })
+}
+
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn a_part_file_from_an_earlier_run_shows_as_paused() {
+        let tmp = tempfile::tempdir().unwrap();
+        let part = tmp.path().join("m.gguf.part");
+        assert_eq!(leftover(&part, 1000), None, "nothing started");
+        std::fs::write(&part, vec![0u8; 300]).unwrap();
+        assert_eq!(leftover(&part, 1000), Some(DownloadState::Paused { received: 300, total: 1000 }));
+        std::fs::write(&part, b"").unwrap();
+        assert_eq!(leftover(&part, 1000), None, "an empty part is no progress");
+    }
     use super::*;
     use std::sync::mpsc;
 
@@ -188,7 +219,7 @@ mod tests {
         d.start(|_, _| Err(DownloadError::InsufficientSpace { needed: 9, available: 3 }), move |s| tx.send(s.clone()).unwrap(), |_| {}).unwrap();
         assert_eq!(
             rx.recv().unwrap(),
-            DownloadState::Failed { failure: Failure { kind: "space", needed: Some(9), available: Some(3), detail: "not enough disk space: 9 bytes needed, 3 available".into() }, received: 0, total: 0 }
+            DownloadState::Failed { failure: Failure { kind: "space", needed: Some(9), available: Some(3), status: None, detail: "not enough disk space: 9 bytes needed, 3 available".into() }, received: 0, total: 0 }
         );
         for (e, kind) in [
             (DownloadError::Network("x".into()), "network"),
@@ -196,9 +227,11 @@ mod tests {
             (DownloadError::NotHttps, "https"),
             (DownloadError::ChecksumMismatch, "checksum"),
             (DownloadError::Io("disk".into()), "io"),
+            (DownloadError::Http(503), "http"),
         ] {
             assert_eq!(Failure::from(&e).kind, kind);
         }
+        assert_eq!(Failure::from(&DownloadError::Http(404)).status, Some(404));
     }
 
     #[test]

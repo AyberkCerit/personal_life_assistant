@@ -1,5 +1,6 @@
 //! PLA core: everything that does not need a window.
 
+pub mod export;
 pub mod extraction;
 pub mod files;
 pub mod jobs;

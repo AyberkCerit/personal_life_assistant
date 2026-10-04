@@ -73,6 +73,31 @@ pub fn record_failure(conn: &Connection, job: &str, now: DateTime<FixedOffset>, 
     Ok(attempts)
 }
 
+/// What the Scheduler settings show about a job.
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize)]
+pub struct JobStatus {
+    pub last_success_at: Option<String>,
+    pub last_attempt_at: Option<String>,
+    pub last_error: Option<String>,
+}
+
+pub fn status(conn: &Connection, job: &str) -> rusqlite::Result<JobStatus> {
+    Ok(conn
+        .query_row("SELECT last_success_at, last_attempt_at, last_error FROM job_run WHERE job_type = ?1", [job], |r| {
+            Ok(JobStatus { last_success_at: r.get(0)?, last_attempt_at: r.get(1)?, last_error: r.get(2)? })
+        })
+        .optional()?
+        .unwrap_or_default())
+}
+
+/// PLA's backups of this vault, newest first.
+pub fn backups(vault_root: &Path) -> Vec<String> {
+    let Ok(entries) = std::fs::read_dir(vault_root.join(".pla").join("backup")) else { return Vec::new() };
+    let mut names: Vec<String> = entries.filter_map(|e| e.ok()).map(|e| e.file_name().to_string_lossy().into_owned()).filter(|n| is_backup_name(n)).collect();
+    names.sort_by(|a, b| b.cmp(a));
+    names
+}
+
 fn is_backup_name(name: &str) -> bool {
     name.len() == "pla-YYYY-MM-DD.db".len()
         && name.starts_with("pla-")
@@ -113,6 +138,27 @@ mod tests {
     }
     fn d(s: &str) -> NaiveDate {
         NaiveDate::parse_from_str(s, "%Y-%m-%d").unwrap()
+    }
+
+    #[test]
+    fn the_settings_screen_sees_the_last_backup_and_its_error() {
+        // Scheduler section: last backup or error, and the backups on disk
+        let tmp = tempfile::tempdir().unwrap();
+        let conn = open_databases(&tmp.path().join("data")).unwrap().pla;
+        assert_eq!(status(&conn, DAILY).unwrap(), JobStatus::default());
+        record_failure(&conn, DAILY, at("2026-10-06T23:00:00+03:00"), "disk full").unwrap();
+        let failed = status(&conn, DAILY).unwrap();
+        assert_eq!((failed.last_success_at, failed.last_error.as_deref()), (None, Some("disk full")));
+        record_success(&conn, DAILY, at("2026-10-06T23:10:00+03:00")).unwrap();
+        let ok = status(&conn, DAILY).unwrap();
+        assert_eq!((ok.last_success_at.as_deref(), ok.last_error), (Some("2026-10-06T23:10:00+03:00"), None));
+
+        let vault = tmp.path().join("kasa");
+        assert_eq!(backups(&vault), Vec::<String>::new());
+        backup(&conn, &vault, d("2026-10-05")).unwrap();
+        backup(&conn, &vault, d("2026-10-06")).unwrap();
+        std::fs::write(vault.join(".pla/backup/notlarim.txt"), "x").unwrap();
+        assert_eq!(backups(&vault), vec!["pla-2026-10-06.db".to_owned(), "pla-2026-10-05.db".to_owned()], "newest first, only PLA's own");
     }
 
     #[test]

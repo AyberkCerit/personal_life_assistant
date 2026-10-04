@@ -31,6 +31,9 @@ pub struct Progress {
 pub enum DownloadError {
     #[error("network error: {0}")]
     Network(String),
+    /// The server answered, but not with the file (e.g. 404, 503).
+    #[error("the server answered HTTP {0}")]
+    Http(u16),
     #[error("{0} is not an allowed download host")]
     HostNotAllowed(String),
     #[error("only https downloads are allowed")]
@@ -112,7 +115,7 @@ pub fn download(req: &Request, progress: &mut dyn FnMut(Progress)) -> Result<Pat
                 hasher = Sha256::new();
                 File::create(&part)?
             }
-            code => return Err(DownloadError::Network(format!("the server answered HTTP {code}"))),
+            code => return Err(DownloadError::Http(code)),
         };
         let chunks = read_in_background(response.into_body().into_reader());
         let started = Instant::now();
@@ -305,6 +308,8 @@ mod tests {
         StallFirstAfter(usize),
         RedirectTo(String),
         Corrupt,
+        /// Answers every request with this status and no body.
+        Status(u16),
     }
 
     /// A tiny HTTP/1.1 server on 127.0.0.1 that records each request's path and Range header.
@@ -339,6 +344,10 @@ mod tests {
                         continue;
                     }
                     Mode::Corrupt => data[0] ^= 0xff,
+                    Mode::Status(code) => {
+                        write!(stream, "HTTP/1.1 {code} Nope\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").unwrap();
+                        continue;
+                    }
                     _ => {}
                 }
                 let honour_range = !matches!(mode, Mode::IgnoreRange) && from > 0;
@@ -400,6 +409,16 @@ mod tests {
     fn run(e: &CatalogEntry, dir: &Path, cancel: &AtomicBool, progress: &mut dyn FnMut(Progress)) -> Result<PathBuf, DownloadError> {
         let req = Request { entry: e, dir, policy: &LocalOnly, free_space: &plenty, cancel, progress_every: Duration::ZERO, stall_after: Duration::from_millis(400) };
         download(&req, progress)
+    }
+
+    #[test]
+    fn a_refusing_server_is_reported_with_its_status() {
+        // deferred model minor: a 503 is not a dropped connection
+        let data = body();
+        let (url, _) = serve(data.clone(), Mode::Status(503));
+        let tmp = tempfile::tempdir().unwrap();
+        let e = entry(&url, &data);
+        assert_eq!(run(&e, tmp.path(), &AtomicBool::new(false), &mut |_| {}), Err(DownloadError::Http(503)));
     }
 
     #[test]

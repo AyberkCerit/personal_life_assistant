@@ -23,7 +23,7 @@ export function progressLine(p: Progress, lang: string): string {
   return `${formatBytes(p.received, lang)} / ${formatBytes(p.total, lang)} · ${speed} ${unit} · ${formatEta(p.eta_secs, lang)}`;
 }
 
-const KINDS = ["network", "host", "https", "space", "checksum", "io"];
+const KINDS = ["network", "host", "https", "space", "checksum", "io", "http"];
 
 /** i18n key for a download failure kind (IR-UI-006 texts live in i18n.ts). */
 export function failureKey(kind: string): `model.error.${string}` {

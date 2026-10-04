@@ -24,7 +24,7 @@ const EXTERNAL_DELAY: Duration = Duration::from_secs(45);
 /// FR-MDL-013: the model process stops after this long without requests.
 const MODEL_IDLE_AFTER: Duration = Duration::from_secs(60);
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub enum Command {
     Enqueue(String),
     EnqueueLater(String),
@@ -34,6 +34,8 @@ pub enum Command {
     Pause(bool),
     /// A model became available (download or chosen file): use it from now on.
     UseModel(pla_core::llm::ServerConfig),
+    /// FR-MDL-019: stop and forget the model (ends llama-server), then answer, so the file can go.
+    DropModel(std::sync::mpsc::Sender<()>),
     Shutdown,
 }
 
@@ -43,6 +45,7 @@ pub struct WorkerHandle {
     tx: Sender<Command>,
     cancel: Arc<AtomicBool>,
     pause: Arc<AtomicBool>,
+    dropping: Arc<AtomicBool>,
     join: Option<JoinHandle<()>>,
 }
 
@@ -55,6 +58,13 @@ impl WorkerHandle {
     pub fn set_paused(&self, paused: bool) {
         self.pause.store(paused, Ordering::SeqCst);
         self.send(Command::Pause(paused));
+    }
+
+    /// FR-MDL-019: stops the current run between two model calls (not after the whole queue), then
+    /// drops the model; `done` hears when llama-server is gone (settings final review I1).
+    pub fn drop_model(&self, done: Sender<()>) {
+        self.dropping.store(true, Ordering::SeqCst);
+        self.send(Command::DropModel(done));
     }
 
     pub fn sender(&self) -> Sender<Command> {
@@ -84,6 +94,7 @@ struct Cancellable<'a> {
     inner: &'a mut (dyn Extractor + Send),
     cancel: &'a AtomicBool,
     pause: &'a AtomicBool,
+    dropping: &'a AtomicBool,
 }
 
 impl Extractor for Cancellable<'_> {
@@ -93,6 +104,9 @@ impl Extractor for Cancellable<'_> {
         }
         if self.pause.load(Ordering::SeqCst) {
             return Err(LlmError::Http("background AI is paused".into()));
+        }
+        if self.dropping.load(Ordering::SeqCst) {
+            return Err(LlmError::Http("the model is being removed".into()));
         }
         self.inner.extract_raw(reference, text)
     }
@@ -142,6 +156,7 @@ pub struct Worker {
     status: WorkerStatus,
     cancel: Arc<AtomicBool>,
     pause: Arc<AtomicBool>,
+    dropping: Arc<AtomicBool>,
     on_added: Option<AddedListener>,
     /// Reads titles of added items while the main connection is busy in the pipeline.
     reader: Option<Connection>,
@@ -162,6 +177,7 @@ impl Worker {
             later: HashMap::new(),
             cancel: Arc::new(AtomicBool::new(false)),
             pause: Arc::new(AtomicBool::new(false)),
+            dropping: Arc::new(AtomicBool::new(false)),
             on_added: None,
             reader,
             status: WorkerStatus { queued: 0, model, busy: false, last_error: None, added: 0, paused: false },
@@ -190,9 +206,9 @@ impl Worker {
 
     pub fn spawn(self) -> WorkerHandle {
         let (tx, rx) = mpsc::channel();
-        let (cancel, pause) = (Arc::clone(&self.cancel), Arc::clone(&self.pause));
+        let (cancel, pause, dropping) = (Arc::clone(&self.cancel), Arc::clone(&self.pause), Arc::clone(&self.dropping));
         let join = std::thread::Builder::new().name("pla-worker".into()).spawn(move || self.run(rx)).expect("spawn worker");
-        WorkerHandle { tx, cancel, pause, join: Some(join) }
+        WorkerHandle { tx, cancel, pause, dropping, join: Some(join) }
     }
 
     fn run(mut self, rx: Receiver<Command>) {
@@ -226,6 +242,14 @@ impl Worker {
                     self.status.model = self.model_state();
                     self.status.last_error = None;
                     self.process();
+                }
+                Ok(Command::DropModel(done)) => {
+                    self.extractor = None; // dropping the host ends llama-server
+                    self.dropping.store(false, Ordering::SeqCst);
+                    self.status.model = self.model_state();
+                    self.status.last_error = None; // the interrupted run's "being removed" is no error
+                    self.publish();
+                    let _ = done.send(());
                 }
                 Ok(Command::Rescan) => {
                     if let Err(e) = enqueue_all(&self.vault, &self.conn, (self.clock)()) {
@@ -283,7 +307,7 @@ impl Worker {
             self.status.queued = queued_notes(&self.conn).map_or(0, |q| q.len());
             (self.notify)(&self.status); // field borrows: the extractor stays borrowed
             let now = (self.clock)();
-            let mut guarded = Cancellable { inner: extractor.as_mut(), cancel: &self.cancel, pause: &self.pause };
+            let mut guarded = Cancellable { inner: extractor.as_mut(), cancel: &self.cancel, pause: &self.pause, dropping: &self.dropping };
             let (reader, listener, added) = (&self.reader, &self.on_added, &mut self.status.added);
             // Each note's additions are reported as soon as it is done (FR-EXT-015), not at the end of a long run.
             let mut on_note = |_: &str, outcomes: &[Outcome]| {
@@ -580,6 +604,77 @@ mod tests {
         handle.send(Command::UseModel(pla_core::llm::ServerConfig::new("llama-server.exe".into(), "m.gguf".into())));
         wait_for(&statuses, |s| !s.busy && s.added == 1 && s.queued == 0);
         assert_eq!(task_count(&data), 1);
+        handle.shutdown();
+    }
+
+    /// Ends like the model host: dropping it is what stops llama-server.
+    struct Hosted(Arc<AtomicBool>);
+    impl Extractor for Hosted {
+        fn extract_raw(&mut self, _: NaiveDate, _: &str) -> Result<String, LlmError> {
+            Ok(TASK.to_owned())
+        }
+    }
+    impl Drop for Hosted {
+        fn drop(&mut self) {
+            self.0.store(true, Ordering::SeqCst);
+        }
+    }
+
+    struct Counted(Arc<std::sync::atomic::AtomicUsize>);
+    impl Extractor for Counted {
+        fn extract_raw(&mut self, _: NaiveDate, _: &str) -> Result<String, LlmError> {
+            self.0.fetch_add(1, Ordering::SeqCst);
+            std::thread::sleep(Duration::from_millis(300));
+            Ok(TASK.to_owned())
+        }
+    }
+
+    #[test]
+    fn removing_the_model_does_not_wait_for_the_whole_queue() {
+        // settings final review I1: a long catch-up queue must not hold the removal
+        let tmp = tempfile::tempdir().unwrap();
+        let vault = open_vault(tmp.path()).unwrap();
+        for i in 0..20 {
+            std::fs::write(vault.root.join(format!("notes/n{i}.md")), format!("Yarın {i} dişçi.")).unwrap();
+        }
+        let conn = open_databases(&tmp.path().join(".data")).unwrap().pla;
+        let statuses = Arc::new(Mutex::new(Vec::new()));
+        let sink = Arc::clone(&statuses);
+        let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let handle = Worker::new(vault, conn, Some(Box::new(Counted(Arc::clone(&calls)))), Box::new(move |s| sink.lock().unwrap().push(s.clone()))).spawn();
+        wait_for(&statuses, |s| s.busy);
+        let (ack, done) = std::sync::mpsc::channel();
+        let asked = Instant::now();
+        handle.drop_model(ack);
+        done.recv_timeout(Duration::from_secs(5)).expect("answered between two model calls");
+        assert!(asked.elapsed() < Duration::from_secs(2), "took {:?}", asked.elapsed());
+        assert!(calls.load(Ordering::SeqCst) < 20, "the rest of the queue was not run first");
+        let s = wait_for(&statuses, |s| s.model == ModelState::NotInstalled && !s.busy);
+        assert_eq!(s.last_error, None, "removing is not an error");
+        handle.shutdown();
+    }
+
+    #[test]
+    fn removing_the_model_stops_it_before_saying_so() {
+        // FR-MDL-019, settings Review Focus 2: the file can only be deleted once llama-server is gone
+        let tmp = tempfile::tempdir().unwrap();
+        let vault = open_vault(tmp.path()).unwrap();
+        let data = tmp.path().join(".data");
+        let conn = open_databases(&data).unwrap().pla;
+        let statuses = Arc::new(Mutex::new(Vec::new()));
+        let sink = Arc::clone(&statuses);
+        let dropped = Arc::new(AtomicBool::new(false));
+        let handle = Worker::new(vault, conn, Some(Box::new(Hosted(Arc::clone(&dropped)))), Box::new(move |s| sink.lock().unwrap().push(s.clone()))).spawn();
+        wait_for(&statuses, |s| s.model == ModelState::Off);
+        let (ack, done) = std::sync::mpsc::channel();
+        handle.send(Command::DropModel(ack));
+        done.recv_timeout(Duration::from_secs(5)).expect("the worker answers");
+        assert!(dropped.load(Ordering::SeqCst), "the host was dropped before the answer");
+        wait_for(&statuses, |s| s.model == ModelState::NotInstalled);
+        std::fs::write(tmp.path().join("notes/sonra.md"), "Yarın dişçi.").unwrap();
+        handle.send(Command::Enqueue("notes/sonra.md".into()));
+        let s = wait_for(&statuses, |s| s.queued >= 1);
+        assert_eq!(s.added, 0, "no model, the note waits");
         handle.shutdown();
     }
 }
