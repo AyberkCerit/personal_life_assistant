@@ -54,6 +54,8 @@ pub struct ModelDownloads {
     state: Arc<Mutex<Option<DownloadState>>>,
     cancel: Arc<AtomicBool>,
     thread: Mutex<Option<JoinHandle<()>>>,
+    /// Set by the run once its last state is out: the thread is only returning now.
+    ending: Arc<AtomicBool>,
 }
 
 impl ModelDownloads {
@@ -67,10 +69,15 @@ impl ModelDownloads {
     ) -> Result<(), AlreadyRunning> {
         let mut thread = self.thread.lock().expect("download thread lock");
         if thread.as_ref().is_some_and(|t| !t.is_finished()) {
-            return Err(AlreadyRunning);
+            if !self.ending.load(Ordering::SeqCst) {
+                return Err(AlreadyRunning);
+            }
+            // Paused a moment ago and resumed at once: the old run has said its last word.
+            let _ = thread.take().map(|t| t.join());
         }
         self.cancel.store(false, Ordering::SeqCst);
-        let (state, cancel) = (Arc::clone(&self.state), Arc::clone(&self.cancel));
+        self.ending.store(false, Ordering::SeqCst);
+        let (state, cancel, ending) = (Arc::clone(&self.state), Arc::clone(&self.cancel), Arc::clone(&self.ending));
         let run: Box<Run> = Box::new(run);
         *thread = Some(
             std::thread::Builder::new()
@@ -85,6 +92,8 @@ impl ModelDownloads {
                         last = (p.received, p.total);
                         set(DownloadState::Running { progress: p });
                     });
+                    // From here on only the last state is left to send; a new start may wait for it.
+                    ending.store(true, Ordering::SeqCst);
                     match result {
                         Ok(path) => {
                             set(DownloadState::Done { path: path.to_string_lossy().into_owned() });

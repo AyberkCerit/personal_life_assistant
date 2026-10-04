@@ -50,6 +50,8 @@
   .running.busy .dot { animation: pulse 1.6s var(--ease-standard) infinite; }
   .error { display: inline-flex; gap: var(--space-1); align-items: center; color: var(--color-danger); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .end { margin-left: auto; display: inline-flex; }
+  /* the status row is 1.75rem tall with a border: a smaller gear keeps it from pushing the page */
+  .end :global(.icon-btn) { width: 1.5rem; height: 1.5rem; }
   .link { background: none; border: 0; padding: 0; color: var(--color-link); cursor: pointer; font-size: var(--text-sm); }
   @keyframes pulse { 50% { opacity: 0.35; } }
 </style>
