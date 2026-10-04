@@ -78,6 +78,10 @@ fn vault_info_of(vault: &Vault) -> VaultInfo {
 pub struct StartupInfo {
     vault_path: Option<String>,
     first_run: bool,
+    /// FR-SET-001: show the first-run wizard instead of the app.
+    show_wizard: bool,
+    /// The language chosen in the wizard; `None` = follow the OS (FR-SET-003).
+    language: Option<String>,
     settings_recovered: bool,
     theme: String,
     error: Option<String>,
@@ -171,6 +175,8 @@ pub fn startup(app: AppHandle, state: State<AppState>) -> Result<StartupInfo, St
     let mut info = StartupInfo {
         vault_path: None,
         first_run: loaded.first_run,
+        show_wizard: crate::wizard::show_wizard(loaded.first_run, &loaded.settings),
+        language: loaded.settings.language.clone(),
         settings_recovered: loaded.recovered_from_broken,
         theme: theme.to_owned(),
         error: None,
@@ -196,25 +202,104 @@ pub fn startup(app: AppHandle, state: State<AppState>) -> Result<StartupInfo, St
 
 #[tauri::command]
 pub fn open_vault(app: AppHandle, state: State<AppState>, path: String) -> Result<VaultInfo, String> {
-    let root = app_root()?;
     let _settings_guard = state.settings_lock.lock().expect("settings lock");
+    open_vault_locked(&app, &state, Path::new(&path))
+}
+
+/// Opens `path` as the vault and remembers it; the caller holds the settings lock.
+fn open_vault_locked(app: &AppHandle, state: &State<AppState>, path: &Path) -> Result<VaultInfo, String> {
+    let root = app_root()?;
     let mut settings = load_settings(&root).map_err(|e| e.to_string())?.settings;
     // Stop the previous vault before opening the next, outside the lock: one writer per pla.db.
     let previous = state.session.lock().expect("session lock").take();
     if let Some(old) = previous {
-        if same_folder(&old.vault.root, Path::new(&path)) {
+        if same_folder(&old.vault.root, path) {
             let opened = vault_info_of(&old.vault);
             *state.session.lock().expect("session lock") = Some(old);
             return Ok(opened);
         }
         drop(old);
     }
-    let session = start_session(&app, Path::new(&path), &settings, Arc::clone(&state.self_writes), state.paused.load(Ordering::SeqCst))?;
+    let session = start_session(app, path, &settings, Arc::clone(&state.self_writes), state.paused.load(Ordering::SeqCst))?;
     let opened = vault_info_of(&session.vault);
     settings.vault_path = Some(session.vault.root.clone());
     save_settings(&root, &settings).map_err(|e| e.to_string())?;
     *state.session.lock().expect("session lock") = Some(session); // drops (and stops) the previous one
     Ok(opened)
+}
+
+/// FR-SET-006: the note a new or empty vault starts with, saved as PLA's own write. An existing note
+/// of that name is left alone.
+fn write_welcome_note(vault: &Vault, own: &SelfWrites, lang: &str) -> Result<String, String> {
+    let (title, body) = crate::wizard::welcome_note(lang);
+    let rel = format!("{}/{title}.md", vault.config.folders.inbox);
+    let path = files::resolve(vault, &rel).map_err(|e| e.to_string())?;
+    if !path.exists() {
+        own.record_text(&rel, body);
+        pla_core::fs_atomic::write_atomic(&path, body.as_bytes()).map_err(|e| e.to_string())?;
+    }
+    Ok(rel)
+}
+
+#[derive(Serialize)]
+pub struct WizardDefaults {
+    suggested_vault: Option<String>,
+    in_onedrive: bool,
+    os_language: &'static str,
+}
+
+/// FR-SET-003/004: what the wizard proposes before the user chooses.
+#[tauri::command]
+pub fn wizard_defaults() -> WizardDefaults {
+    let suggested = crate::wizard::suggested_vault();
+    WizardDefaults {
+        in_onedrive: suggested.as_deref().is_some_and(|p| crate::wizard::in_onedrive(p, &crate::model_paths::process_env)),
+        suggested_vault: suggested.map(|p| p.to_string_lossy().into_owned()),
+        os_language: if crate::notify::strings().done == "Tamamlandı" { "tr" } else { "en" },
+    }
+}
+
+#[derive(Serialize)]
+pub struct FolderReport {
+    check: pla_core::vault::FolderCheck,
+    in_onedrive: bool,
+}
+
+/// The vault step shows what choosing this folder will do (FR-SET-005…007), without changing it.
+#[tauri::command]
+pub fn inspect_vault_folder(path: String) -> FolderReport {
+    let path = Path::new(path.trim());
+    FolderReport { check: pla_core::vault::inspect_folder(path), in_onedrive: crate::wizard::in_onedrive(path, &crate::model_paths::process_env) }
+}
+
+/// The wizard's vault step: prepare the folder (create, refuse network paths, check writing), open
+/// it, and greet a new vault with a welcome note.
+#[tauri::command]
+pub fn setup_vault(app: AppHandle, state: State<AppState>, path: String, lang: String) -> Result<VaultInfo, String> {
+    let _settings_guard = state.settings_lock.lock().expect("settings lock");
+    let path = PathBuf::from(path.trim());
+    let fresh = crate::wizard::prepare_folder(&path).map_err(|e| e.to_string())?;
+    let info = open_vault_locked(&app, &state, &path)?;
+    if fresh {
+        if let Some(session) = state.session.lock().expect("session lock").as_ref() {
+            write_welcome_note(&session.vault, &state.self_writes, &lang)?;
+        }
+    }
+    Ok(info)
+}
+
+/// FR-SET-003: the language chosen in the wizard (and later in settings).
+#[tauri::command]
+pub fn set_language(state: State<AppState>, lang: String) -> Result<(), String> {
+    if lang != "tr" && lang != "en" {
+        return Err(format!("unsupported language {lang}"));
+    }
+    update_settings(&app_root()?, &state.settings_lock, |s| s.language = Some(lang)).map(|_| ())
+}
+
+#[tauri::command]
+pub fn finish_setup(state: State<AppState>) -> Result<(), String> {
+    update_settings(&app_root()?, &state.settings_lock, |s| s.setup_complete = true).map(|_| ())
 }
 
 fn same_folder(a: &Path, b: &Path) -> bool {
@@ -630,5 +715,19 @@ mod tests {
         assert_eq!(DevLocal.allows("https://huggingface.co/x"), Ok(()));
         assert_eq!(DevLocal.allows("http://example.com/x"), Err(PolicyError::NotHttps));
         assert!(matches!(DevLocal.allows("https://evil.com/x"), Err(PolicyError::HostNotAllowed(_))));
+    }
+
+    #[test]
+    fn a_new_vault_gets_a_welcome_note_in_its_inbox() {
+        // FR-SET-006, written as PLA's own save so the watcher ignores it
+        let tmp = tempfile::tempdir().unwrap();
+        let vault = open_vault_dir(tmp.path()).unwrap();
+        let own = SelfWrites::default();
+        let rel = write_welcome_note(&vault, &own, "tr").unwrap();
+        assert_eq!(rel, "inbox/Hoş geldin.md");
+        let text = std::fs::read_to_string(tmp.path().join("inbox/Hoş geldin.md")).unwrap();
+        assert!(text.starts_with("# PLA'ya hoş geldin"));
+        assert!(own.is_own(&rel, &pla_core::pipeline::blocks::content_hash(text.as_bytes())));
+        assert_eq!(write_welcome_note(&vault, &own, "en").unwrap(), "inbox/Welcome.md");
     }
 }
