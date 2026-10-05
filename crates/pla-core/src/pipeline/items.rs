@@ -321,7 +321,7 @@ fn task_fields(reminder: bool, title: &str, date: Option<NaiveDate>, time: Optio
     }
 }
 
-fn metric_value_json(value: Option<f64>, exercise: &Option<String>, sets: Option<i64>, reps: Option<i64>) -> String {
+pub(crate) fn metric_value_json(value: Option<f64>, exercise: &Option<String>, sets: Option<i64>, reps: Option<i64>) -> String {
     let mut map = Map::new();
     if let Some(v) = value {
         map.insert("value".into(), Value::from(v));

@@ -90,7 +90,7 @@ fn canonical_unit(kind: MetricKind) -> Unit {
 }
 
 /// E-D8 plausible ranges, inclusive, in canonical units.
-fn plausible_range(kind: MetricKind) -> (f64, f64) {
+pub(crate) fn plausible_range(kind: MetricKind) -> (f64, f64) {
     match kind {
         MetricKind::Sleep => (0.0, 24.0),
         MetricKind::Water => (0.0, 10_000.0),
