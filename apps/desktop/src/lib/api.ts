@@ -3,6 +3,7 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { mockBackend, mockListeners } from "./mock";
 import type { FolderReport } from "./wizard";
 import type { JobStatus } from "./settings";
+import type { DayValue, MetricKind } from "./metrics";
 
 export interface TaskInput { title: string; details?: string | null; date?: string | null; time?: string | null; remind?: boolean | null }
 export interface ReviewItem {
@@ -61,6 +62,43 @@ export interface BackupStatus { job: JobStatus; backups: string[] }
 export interface Component { name: string; licence: string; url: string }
 export interface About { version: string; model: string | null; model_licence: string | null; components: Component[] }
 export type PlaceKind = "vault" | "backups" | "app_data" | "local_data" | "model_folder" | "notification_settings";
+export interface MetricRecord {
+  metric_id: string;
+  kind: MetricKind;
+  date: string;
+  value: number | null;
+  unit: string | null;
+  exercise: string | null;
+  sets: number | null;
+  reps: number | null;
+  origin: "manual" | "extracted" | "assistant";
+  user_modified: boolean;
+  note_path: string | null;
+  block_text: string | null;
+  created_at: string;
+}
+export interface Summary {
+  kind: MetricKind;
+  days: DayValue[];
+  average: number | null;
+  min: number | null;
+  max: number | null;
+  trend: number | null;
+  weekly: { week_start: string; average: number }[];
+  conflicts: number;
+}
+export interface MetricCard { kind: MetricKind; last: DayValue | null; average7: number | null; spark: (number | null)[]; conflicts: number }
+export type MetricUnit = "h" | "min" | "ml" | "l" | "glass" | "count" | "kg" | "lb";
+export interface MetricInput {
+  kind: MetricKind;
+  date: string;
+  value: number | null;
+  unit: MetricUnit | null;
+  exercise: string | null;
+  sets: number | null;
+  reps: number | null;
+  confirmed: boolean;
+}
 export interface PendingReminders { due: DueReminder[]; missed: DueReminder[] }
 
 /** Inside the Tauri window; false in a plain browser (Vite dev server), where a mock backend answers. */
@@ -86,6 +124,16 @@ export const api = {
   setupVault: (path: string, lang: string) => call<VaultInfo>("setup_vault", { path, lang }),
   setLanguage: (lang: string) => call<void>("set_language", { lang }),
   finishSetup: () => call<void>("finish_setup"),
+  metricsOverview: () => call<MetricCard[]>("metrics_overview"),
+  metricsSummary: (kind: MetricKind, days: number) => call<Summary>("metrics_summary", { kind, days }),
+  metricRecords: (kind: MetricKind, days: number) => call<MetricRecord[]>("metric_records", { kind, days }),
+  /** Errors are codes, e.g. `out_of_range|450` (see `metricError`). */
+  metricLog: (input: MetricInput) => call<string>("metric_log", { input }),
+  metricEdit: (id: string, input: MetricInput) => call<void>("metric_edit", { id, input }),
+  metricDelete: (id: string) => call<void>("metric_delete", { id }),
+  metricResolve: (keepId: string) => call<void>("metric_resolve", { keepId }),
+  onMetricsChanged: (cb: () => void) => on<unknown>("metrics-changed", () => cb()),
+  onOpenQuickMetric: (cb: () => void) => on<unknown>("open-quick-metric", () => cb()),
   settingsGet: () => call<SettingsView>("settings_get"),
   /** Applies at once; errors are `invalid_setting|<key>|<value>`. */
   settingsSet: (key: "language" | "theme", value: string | null) => call<SettingsView>("settings_set", { key, value }),
