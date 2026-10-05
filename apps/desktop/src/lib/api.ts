@@ -75,6 +75,7 @@ export interface MetricRecord {
   user_modified: boolean;
   note_path: string | null;
   block_text: string | null;
+  source_missing: boolean;
   created_at: string;
 }
 export interface Summary {

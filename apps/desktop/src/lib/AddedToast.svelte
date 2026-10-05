@@ -2,7 +2,8 @@
   import { onMount } from "svelte";
   import { api, type AddedItem } from "./api";
   import { ToastQueue, type Toast } from "./toasts";
-  import { t } from "./i18n";
+  import { t, type Key } from "./i18n";
+  import { KINDS, type MetricKind } from "./metrics";
   import { fade, fly } from "svelte/transition";
   import Sparkles from "@lucide/svelte/icons/sparkles";
   import Undo2 from "@lucide/svelte/icons/undo-2";
@@ -51,7 +52,7 @@
   {#each shown as toast (toast.key)}
     <div class="toast" in:fly={{ x: 24, duration: motion(BASE) }} out:fade={{ duration: motion(FAST) }}>
       <span class="lead"><Icon icon={Sparkles} size="md" /></span>
-      <span class="text"><span class="label">{t("toast.added")}</span><strong>{toast.item.title}</strong></span>
+      <span class="text"><span class="label">{t("toast.added")}</span><strong>{toast.item.kind === "metric" && KINDS.includes(toast.item.title as MetricKind) ? t(`metrics.kind.${toast.item.title}` as Key) : toast.item.title}</strong></span>
       <Button variant="quiet" icon={Undo2} onclick={() => void undo(toast)}>{t("toast.undo")}</Button>
     </div>
   {/each}

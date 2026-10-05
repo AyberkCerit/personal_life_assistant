@@ -27,11 +27,32 @@ export function formatValue(kind: MetricKind, value: number, lang: string, sets:
   return `${num(value, lang, kind === "steps" || kind === "water" ? 0 : 1)} ${UNITS[l][kind]}`;
 }
 
-/** A typed amount: "7,5" and "7.5" are the same; for steps a dot or comma groups thousands. */
+/** One field of an unusual entry, in its own unit (`out_of_range|<field>|<value>`). */
+export function formatField(kind: MetricKind, field: string, value: number, lang: string): string {
+  const tr = lang.startsWith("tr");
+  if (field === "reps") return `${num(value, lang, 0)} ${tr ? "tekrar" : value === 1 ? "rep" : "reps"}`;
+  if (field === "sets") return `${num(value, lang, 0)} ${tr ? "set" : value === 1 ? "set" : "sets"}`;
+  if (field === "kg") return `${num(value, lang, 1)} kg`;
+  return formatValue(kind, value, lang);
+}
+
+/** A change with its sign; a workout change is a plain number of sessions (it may be 0.5). */
+export function formatDelta(kind: MetricKind, delta: number, lang: string): string {
+  const sign = delta > 0 ? "+" : delta < 0 ? "-" : "";
+  const size = Math.abs(delta);
+  if (kind === "workout") return `${sign}${num(size, lang, 1)} ${lang.startsWith("tr") ? "oturum" : "sessions"}`;
+  return `${sign}${formatValue(kind, size, lang)}`;
+}
+
+/**
+ * A typed amount: "7,5" and "7.5" are the same; for steps a dot or comma groups thousands, and
+ * anywhere "1.500" (dots before groups of three digits) is fifteen hundred, as Turkish writes it.
+ */
 export function parseAmount(text: string, kind: MetricKind): number | null {
   const t = text.trim().replace(/\s/g, "");
   if (t === "") return null;
-  const n = kind === "steps" ? Number(t.replace(/[.,]/g, "")) : Number(t.replace(",", "."));
+  const grouped = /^\d{1,3}(\.\d{3})+$/.test(t);
+  const n = kind === "steps" || grouped ? Number(t.replace(/[.,]/g, "")) : Number(t.replace(",", "."));
   return Number.isFinite(n) ? n : null;
 }
 
@@ -82,11 +103,11 @@ export function trendDirection(trend: number | null, average: number | null): "u
   return Math.abs(trend) < threshold ? "flat" : trend > 0 ? "up" : "down";
 }
 
-const CODES = ["out_of_range", "missing_value", "empty_workout", "invalid_date", "not_found", "no_vault"];
+const CODES = ["out_of_range", "missing_value", "empty_workout", "invalid_date", "invalid_value", "not_found", "no_vault"];
 
-/** Reads the metrics commands' errors, e.g. `out_of_range|450` (ask the user to confirm). */
-export function metricError(err: string): { key: Key; value: number | null; detail?: string } {
-  const [code, value] = err.split("|");
-  if (CODES.includes(code)) return { key: `metrics.error.${code}` as Key, value: value !== undefined ? Number(value) : null };
-  return { key: "metrics.error.other", value: null, detail: err };
+/** Reads the metrics commands' errors, e.g. `out_of_range|reps|600` (ask the user to confirm). */
+export function metricError(err: string): { key: Key; field: string | null; value: number | null; detail?: string } {
+  const [code, field, value] = err.split("|");
+  if (!CODES.includes(code)) return { key: "metrics.error.other", field: null, value: null, detail: err };
+  return { key: `metrics.error.${code}` as Key, field: field ?? null, value: value !== undefined ? Number(value) : null };
 }

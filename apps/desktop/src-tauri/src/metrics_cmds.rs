@@ -62,7 +62,7 @@ pub fn metric_log(app: AppHandle, state: State<AppState>, input: MetricInput) ->
 
 #[tauri::command]
 pub fn metric_edit(app: AppHandle, state: State<AppState>, id: String, input: MetricInput) -> Result<(), String> {
-    with_db(&state, |db| metrics::edit_metric(db, &id, &input, &ValidationSettings::default()))?;
+    with_db(&state, |db| metrics::edit_metric(db, &id, &input, &ValidationSettings::default(), Local::now().fixed_offset()))?;
     changed(&app);
     Ok(())
 }

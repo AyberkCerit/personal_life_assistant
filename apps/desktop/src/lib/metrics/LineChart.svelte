@@ -5,9 +5,10 @@
   // FR-MET-009: daily values over the period; gaps where nothing was recorded, conflicts marked.
   let { days, kind }: { days: ChartDay[]; kind: MetricKind } = $props();
 
-  let width = $state(600);
+  let measured = $state(600);
   const H = 180;
   const PAD = 14;
+  const width = $derived(Math.max(measured, 2 * PAD + 1)); // a hidden pane measures 0
   const g = $derived(chartGeometry(days.map((d) => d.value), width, H, PAD));
   const known = $derived(days.filter((d) => d.value !== null).map((d) => d.value as number));
   const hi = $derived(known.length ? Math.max(...known) : null);
@@ -19,7 +20,7 @@
   );
 </script>
 
-<figure bind:clientWidth={width}>
+<figure bind:clientWidth={measured}>
   <svg viewBox="0 0 {width} {H}" width={width} height={H} role="img" aria-label={label}>
     <line class="grid" x1={PAD} x2={width - PAD} y1={PAD} y2={PAD} />
     <line class="grid" x1={PAD} x2={width - PAD} y1={H - PAD} y2={H - PAD} />

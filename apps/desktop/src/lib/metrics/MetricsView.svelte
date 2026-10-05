@@ -3,7 +3,7 @@
   import CircleAlert from "@lucide/svelte/icons/circle-alert";
   import Plus from "@lucide/svelte/icons/plus";
   import { api, type MetricCard, type MetricRecord } from "../api";
-  import { lang, t, tf, type Key } from "../i18n";
+  import { lang, t, type Key } from "../i18n";
   import { formatValue, type MetricKind } from "../metrics";
   import Button from "../ui/Button.svelte";
   import Icon from "../ui/Icon.svelte";
@@ -29,7 +29,11 @@
   let cards = $state<MetricCard[]>([]);
 
   async function load() {
-    cards = await api.metricsOverview();
+    try {
+      cards = await api.metricsOverview();
+    } catch {
+      cards = []; // no vault open (yet): the cards come with the next change
+    }
   }
 
   $effect(() => {
@@ -55,7 +59,7 @@
       {#each cards as c (c.kind)}
         <li>
           <button class="card" onclick={() => (selected = c.kind)}>
-            <span class="name">{t(`metrics.kind.${c.kind}` as Key)}{#if c.conflicts > 0}<span class="flag" title={tf("metrics.conflict", { date: "" })}><Icon icon={CircleAlert} size="sm" /></span>{/if}</span>
+            <span class="name">{t(`metrics.kind.${c.kind}` as Key)}{#if c.conflicts > 0}<span class="flag" title={t("metrics.conflictFlag")}><Icon icon={CircleAlert} size="sm" /></span>{/if}</span>
             {#if c.last}
               <span class="value">{formatValue(c.kind, c.last.value, lang, c.last.sets)}</span>
               <span class="meta">{t("metrics.last")} · {new Intl.DateTimeFormat(lang, { day: "numeric", month: "short" }).format(new Date(`${c.last.date}T12:00:00`))}</span>

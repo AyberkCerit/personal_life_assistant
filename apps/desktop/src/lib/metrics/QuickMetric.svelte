@@ -10,7 +10,7 @@
   import X from "@lucide/svelte/icons/x";
   import { api, type MetricInput, type MetricRecord, type MetricUnit } from "../api";
   import { lang, t, tf, type Key } from "../i18n";
-  import { KINDS, formatValue, metricError, parseAmount, type MetricKind } from "../metrics";
+  import { KINDS, formatField, metricError, parseAmount, type MetricKind } from "../metrics";
   import { todayIso } from "../tasks";
   import { trapIndex } from "../settings";
 
@@ -26,7 +26,7 @@
   // svelte-ignore state_referenced_locally
   const start = record;
   let kind = $state<MetricKind>(start?.kind ?? lastKind);
-  let amount = $state(start?.value != null ? String(start.value).replace(".", lang === "tr" ? "," : ".") : "");
+  let amount = $state(start?.value != null ? String(Math.round(start.value * 100) / 100).replace(".", lang === "tr" ? "," : ".") : "");
   let unit = $state<MetricUnit>(start ? (UNITS[start.kind][0] === "glass" ? "ml" : UNITS[start.kind][0]) : UNITS[lastKind][0]);
   let date = $state(start?.date ?? todayIso());
   let exercise = $state(start?.exercise ?? "");
@@ -37,6 +37,12 @@
   let busy = $state(false);
   let dialog: HTMLDivElement | undefined = $state();
   let valueInput: HTMLInputElement | undefined = $state();
+
+  // A confirmation is for the value it was asked about: any change asks again (metrics final review I2).
+  $effect(() => {
+    void [kind, amount, unit, date, exercise, sets, reps];
+    askConfirm = null;
+  });
 
   function pick(k: MetricKind) {
     kind = k;
@@ -61,6 +67,11 @@
   }
 
   async function save(confirmed = false) {
+    const notWhole = (s: string) => s.trim() !== "" && !/^\d+$/.test(s.trim());
+    if (kind === "workout" && (notWhole(sets) || notWhole(reps))) {
+      error = t("metrics.error.not_number");
+      return;
+    }
     busy = true;
     error = null;
     try {
@@ -70,10 +81,10 @@
       onSaved();
       onClose();
     } catch (e) {
-      const { key, value, detail } = metricError(String(e));
+      const { key, field, value, detail } = metricError(String(e));
       if (key === "metrics.error.out_of_range" && value !== null) {
-        askConfirm = value;
-        error = tf(key, { value: formatValue(kind, value, lang) });
+        error = tf(key, { value: formatField(kind, field ?? "value", value, lang) });
+        askConfirm = value; // after the reset above: this value is the one to confirm
       } else {
         error = tf(key, { detail: detail ?? "" });
       }
@@ -118,7 +129,7 @@
       </div>
     {:else}
       <div class="row">
-        <label class="grow">{t("metrics.value")}<input bind:this={valueInput} inputmode="decimal" bind:value={amount} oninput={() => (askConfirm = null)} /></label>
+        <label class="grow">{t("metrics.value")}<input bind:this={valueInput} inputmode="decimal" bind:value={amount} /></label>
         {#if UNITS[kind].length > 1}
           <label>{t("metrics.unit")}<select bind:value={unit}>{#each UNITS[kind] as u (u)}<option value={u}>{t(`metrics.unit.${u}` as Key)}</option>{/each}</select></label>
         {/if}

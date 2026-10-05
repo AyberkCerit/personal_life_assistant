@@ -23,9 +23,13 @@ pub enum MetricError {
     MissingValue,
     #[error("empty_workout")]
     EmptyWorkout,
-    /// FR-MET-008: outside the plausible range; the user must confirm (value in canonical units).
-    #[error("out_of_range|{0}")]
-    OutOfRange(f64),
+    /// FR-MET-008: outside the plausible range; the user must confirm. The field (`value`, `sets`,
+    /// `reps`, `kg`) and its value in canonical units.
+    #[error("out_of_range|{0}|{1}")]
+    OutOfRange(&'static str, f64),
+    /// Negative or not a number: no confirmation makes it a measurement.
+    #[error("invalid_value")]
+    InvalidValue,
 }
 
 /// One stored record, as the detail list shows it.
@@ -43,6 +47,8 @@ pub struct MetricRecord {
     pub user_modified: bool,
     pub note_path: Option<String>,
     pub block_text: Option<String>,
+    /// The note it came from no longer says it (SRS C.1): kept, marked "source deleted".
+    pub source_missing: bool,
     pub created_at: String,
 }
 
@@ -127,7 +133,7 @@ fn canonical_unit_name(kind: MetricKind) -> &'static str {
 pub fn records(conn: &Connection, kind: MetricKind, from: NaiveDate, to: NaiveDate) -> Result<Vec<MetricRecord>, MetricError> {
     let rows = conn
         .prepare(
-            "SELECT m.metric_id, m.type, m.date, m.value_json, m.unit, m.origin, m.user_modified, b.note_path, b.text, m.created_at
+            "SELECT m.metric_id, m.type, m.date, m.value_json, m.unit, m.origin, m.user_modified, b.note_path, b.text, m.created_at, m.source_missing
              FROM metric_record m LEFT JOIN block b ON b.block_id = m.block_id
              WHERE m.type = ?1 AND m.date BETWEEN ?2 AND ?3
              ORDER BY m.date DESC, m.created_at DESC, m.rowid DESC",
@@ -148,6 +154,7 @@ pub fn records(conn: &Connection, kind: MetricKind, from: NaiveDate, to: NaiveDa
                 note_path: r.get(7)?,
                 block_text: r.get(8)?,
                 created_at: r.get(9)?,
+                source_missing: r.get(10)?,
             })
         })?
         .collect::<Result<_, _>>()?;
@@ -244,7 +251,7 @@ pub fn overview(conn: &Connection, today: NaiveDate) -> Result<Vec<Card>, Metric
             let week_start = (today - Duration::days(6)).format(DATE).to_string();
             let last = match values.last() {
                 Some(v) => Some(v.clone()),
-                None => daily_values(conn, kind, NaiveDate::MIN, today)?.pop(),
+                None => last_older_day(conn, kind, from)?,
             };
             Ok(Card {
                 kind,
@@ -257,37 +264,58 @@ pub fn overview(conn: &Connection, today: NaiveDate) -> Result<Vec<Card>, Metric
         .collect()
 }
 
+/// The latest day with a record before `before`, for a card whose last two weeks are empty.
+fn last_older_day(conn: &Connection, kind: MetricKind, before: NaiveDate) -> Result<Option<DayValue>, MetricError> {
+    let date: Option<String> = conn.query_row(
+        "SELECT max(date) FROM metric_record WHERE type = ?1 AND date < ?2",
+        params![metric_kind_name(kind), before.format(DATE).to_string()],
+        |r| r.get(0),
+    )?;
+    let Some(date) = date.and_then(|d| NaiveDate::parse_from_str(&d, DATE).ok()) else { return Ok(None) };
+    Ok(daily_values(conn, kind, date, date)?.pop())
+}
+
 /// A checked record in canonical units: value, exercise, sets, reps.
 type Checked = (Option<f64>, Option<String>, Option<i64>, Option<i64>);
 
-fn check(input: &MetricInput, settings: &ValidationSettings) -> Result<(NaiveDate, Checked), MetricError> {
+fn check(input: &MetricInput, settings: &ValidationSettings, today: NaiveDate) -> Result<(NaiveDate, Checked), MetricError> {
     let date = NaiveDate::parse_from_str(input.date.trim(), DATE).map_err(|_| MetricError::InvalidDate)?;
+    if date > today {
+        return Err(MetricError::InvalidDate); // a future record would sit unseen until that day
+    }
+    let impossible = |v: f64| !v.is_finite() || v < 0.0;
+    if input.value.is_some_and(impossible) || [input.sets, input.reps].iter().flatten().any(|n| *n < 0) {
+        return Err(MetricError::InvalidValue);
+    }
     let exercise = input.exercise.as_deref().map(str::trim).filter(|e| !e.is_empty()).map(str::to_owned);
     let raw = RawMetric { kind: Some(input.kind), exercise: exercise.clone(), sets: input.sets, reps: input.reps, value: input.value, unit: input.unit };
     let value = canonical_value(&raw, settings);
-    let out = |v: f64| if input.confirmed { Ok(()) } else { Err(MetricError::OutOfRange(v)) };
+    if value.is_some_and(impossible) {
+        return Err(MetricError::InvalidValue);
+    }
+    let out = |field: &'static str, v: f64| if input.confirmed { Ok(()) } else { Err(MetricError::OutOfRange(field, v)) };
     if input.kind == MetricKind::Workout {
         if input.sets.is_none() && input.reps.is_none() && value.is_none() {
             return Err(MetricError::EmptyWorkout);
         }
         // SRS §3.8.1: sets 1-50, reps 1-500, kg 0-500
-        for (v, lo, hi) in [(input.sets.map(|s| s as f64), 1.0, 50.0), (input.reps.map(|r| r as f64), 1.0, 500.0), (value, 0.0, 500.0)] {
+        for (field, v, lo, hi) in [("sets", input.sets.map(|s| s as f64), 1.0, 50.0), ("reps", input.reps.map(|r| r as f64), 1.0, 500.0), ("kg", value, 0.0, 500.0)] {
             if let Some(v) = v.filter(|v| !(lo..=hi).contains(v)) {
-                out(v)?;
+                out(field, v)?;
             }
         }
     } else {
         let v = value.ok_or(MetricError::MissingValue)?;
         let (lo, hi) = crate::extraction::plausible_range(input.kind);
         if !(lo..=hi).contains(&v) {
-            out(v)?;
+            out("value", v)?;
         }
     }
     Ok((date, (value, exercise, input.sets, input.reps)))
 }
 
 pub fn log_metric(conn: &Connection, input: &MetricInput, settings: &ValidationSettings, now: DateTime<FixedOffset>) -> Result<String, MetricError> {
-    let (date, (value, exercise, sets, reps)) = check(input, settings)?;
+    let (date, (value, exercise, sets, reps)) = check(input, settings, now.date_naive())?;
     let id = uuid::Uuid::new_v4().simple().to_string();
     conn.execute(
         "INSERT INTO metric_record (metric_id, type, value_json, unit, date, origin, created_at) VALUES (?1, ?2, ?3, ?4, ?5, 'manual', ?6)",
@@ -304,8 +332,8 @@ pub fn log_metric(conn: &Connection, input: &MetricInput, settings: &ValidationS
 }
 
 /// FR-MET-011: an edited record is the user's from now on; the pipeline leaves it alone.
-pub fn edit_metric(conn: &Connection, id: &str, input: &MetricInput, settings: &ValidationSettings) -> Result<(), MetricError> {
-    let (date, (value, exercise, sets, reps)) = check(input, settings)?;
+pub fn edit_metric(conn: &Connection, id: &str, input: &MetricInput, settings: &ValidationSettings, now: DateTime<FixedOffset>) -> Result<(), MetricError> {
+    let (date, (value, exercise, sets, reps)) = check(input, settings, now.date_naive())?;
     let changed = conn.execute(
         "UPDATE metric_record SET type = ?1, value_json = ?2, unit = ?3, date = ?4, user_modified = 1 WHERE metric_id = ?5",
         params![
@@ -343,14 +371,19 @@ pub fn resolve_conflict(conn: &Connection, keep_id: &str, now: DateTime<FixedOff
     let found: Option<(String, String)> =
         conn.query_row("SELECT type, date FROM metric_record WHERE metric_id = ?1", [keep_id], |r| Ok((r.get(0)?, r.get(1)?))).optional()?;
     let (kind, date) = found.ok_or(MetricError::NotFound)?;
-    let others: Vec<String> = conn
+    if kind == "water" || kind == "workout" {
+        return Err(MetricError::NotFound); // these add up per day: there is nothing to choose between
+    }
+    let tx = conn.unchecked_transaction()?; // the worker writes on its own connection meanwhile
+    let others: Vec<String> = tx
         .prepare("SELECT metric_id FROM metric_record WHERE type = ?1 AND date = ?2 AND metric_id <> ?3 AND origin = 'extracted' AND user_modified = 0")?
         .query_map(params![kind, date, keep_id], |r| r.get(0))?
         .collect::<Result<_, _>>()?;
     for id in others {
-        reject_item(conn, &ItemRef::Metric(id), now)?;
+        reject_item(&tx, &ItemRef::Metric(id), now)?;
     }
-    conn.execute("UPDATE metric_record SET user_modified = 1 WHERE metric_id = ?1", [keep_id])?;
+    tx.execute("UPDATE metric_record SET user_modified = 1 WHERE metric_id = ?1", [keep_id])?;
+    tx.commit()?;
     Ok(())
 }
 
@@ -484,7 +517,7 @@ mod tests {
         assert!((kg - 79.83).abs() < 0.01, "{kg}");
 
         let heavy = input(MetricKind::Weight, Some(450.0), Some(Unit::Kg));
-        assert!(matches!(log_metric(&conn, &heavy, &s, now()), Err(MetricError::OutOfRange(v)) if v == 450.0));
+        assert!(matches!(log_metric(&conn, &heavy, &s, now()), Err(MetricError::OutOfRange("value", v)) if v == 450.0));
         assert_eq!(records(&conn, MetricKind::Weight, d("2026-10-06"), d("2026-10-06")).unwrap().len(), 1, "not stored");
         log_metric(&conn, &MetricInput { confirmed: true, ..heavy }, &s, now()).unwrap();
         assert_eq!(records(&conn, MetricKind::Weight, d("2026-10-06"), d("2026-10-06")).unwrap().len(), 2);
@@ -505,10 +538,10 @@ mod tests {
         let (_tmp, conn) = setup();
         let s = ValidationSettings::default();
         put(&conn, "e1", "sleep", "2026-10-05", r#"{"value":6}"#, "extracted", NOW, false);
-        edit_metric(&conn, "e1", &MetricInput { date: "2026-10-05".into(), ..input(MetricKind::Sleep, Some(6.5), None) }, &s).unwrap();
+        edit_metric(&conn, "e1", &MetricInput { date: "2026-10-05".into(), ..input(MetricKind::Sleep, Some(6.5), None) }, &s, now()).unwrap();
         let r = &records(&conn, MetricKind::Sleep, d("2026-10-05"), d("2026-10-05")).unwrap()[0];
         assert_eq!((r.value, r.user_modified), (Some(6.5), true));
-        assert!(matches!(edit_metric(&conn, "e1", &input(MetricKind::Sleep, Some(30.0), None), &s), Err(MetricError::OutOfRange(_))));
+        assert!(matches!(edit_metric(&conn, "e1", &input(MetricKind::Sleep, Some(30.0), None), &s, now()), Err(MetricError::OutOfRange(..))));
 
         put(&conn, "e2", "water", "2026-10-05", r#"{"value":500}"#, "extracted", NOW, false);
         delete_metric(&conn, "e2", now()).unwrap();
@@ -518,6 +551,91 @@ mod tests {
         delete_metric(&conn, "e3", now()).unwrap();
         assert!(records(&conn, MetricKind::Water, d("2026-10-05"), d("2026-10-05")).unwrap().is_empty());
         assert!(matches!(delete_metric(&conn, "nope", now()), Err(MetricError::NotFound)));
+    }
+
+    #[test]
+    fn impossible_values_and_future_days_are_refused_even_when_confirmed() {
+        // metrics final review: confirmation is for unusual values, not impossible ones
+        let (_tmp, conn) = setup();
+        let s = ValidationSettings::default();
+        let yes = |i: MetricInput| MetricInput { confirmed: true, ..i };
+        assert!(matches!(log_metric(&conn, &yes(input(MetricKind::Sleep, Some(-2.0), None)), &s, now()), Err(MetricError::InvalidValue)));
+        assert!(matches!(log_metric(&conn, &yes(input(MetricKind::Water, Some(1e308), Some(Unit::L))), &s, now()), Err(MetricError::InvalidValue)));
+        let tomorrow = MetricInput { date: "2026-10-07".into(), ..input(MetricKind::Sleep, Some(7.0), None) };
+        assert!(matches!(log_metric(&conn, &tomorrow, &s, now()), Err(MetricError::InvalidDate)));
+        assert!(records(&conn, MetricKind::Sleep, d("2026-10-01"), d("2026-10-10")).unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_workout_warning_names_the_field_that_is_unusual() {
+        // metrics final review I3
+        let (_tmp, conn) = setup();
+        let s = ValidationSettings::default();
+        let w = |sets, reps, kg| MetricInput { sets, reps, ..input(MetricKind::Workout, kg, Some(Unit::Kg)) };
+        assert!(matches!(log_metric(&conn, &w(Some(3), Some(600), None), &s, now()), Err(MetricError::OutOfRange("reps", v)) if v == 600.0));
+        assert!(matches!(log_metric(&conn, &w(Some(60), Some(10), None), &s, now()), Err(MetricError::OutOfRange("sets", _))));
+        assert!(matches!(log_metric(&conn, &w(Some(3), Some(10), Some(600.0)), &s, now()), Err(MetricError::OutOfRange("kg", _))));
+        assert_eq!(MetricError::OutOfRange("reps", 600.0).to_string(), "out_of_range|reps|600");
+        // sleep in minutes and a workout weight in pounds arrive in canonical units
+        log_metric(&conn, &input(MetricKind::Sleep, Some(450.0), Some(Unit::Min)), &s, now()).unwrap();
+        assert_eq!(records(&conn, MetricKind::Sleep, d("2026-10-06"), d("2026-10-06")).unwrap()[0].value, Some(7.5));
+        log_metric(&conn, &w(Some(3), Some(8), Some(100.0)).clone_with_unit(Unit::Lb), &s, now()).unwrap();
+        let kg = records(&conn, MetricKind::Workout, d("2026-10-06"), d("2026-10-06")).unwrap()[0].value.unwrap();
+        assert!((kg - 45.36).abs() < 0.01, "{kg}");
+    }
+
+    impl MetricInput {
+        fn clone_with_unit(&self, unit: Unit) -> Self {
+            Self { unit: Some(unit), ..self.clone() }
+        }
+    }
+
+    #[test]
+    fn only_single_value_kinds_have_conflicts_to_resolve() {
+        let (_tmp, conn) = setup();
+        put(&conn, "w1", "water", "2026-10-05", r#"{"value":500}"#, "extracted", NOW, false);
+        put(&conn, "w2", "water", "2026-10-05", r#"{"value":750}"#, "extracted", NOW, false);
+        assert!(matches!(resolve_conflict(&conn, "w1", now()), Err(MetricError::NotFound)));
+        assert_eq!(records(&conn, MetricKind::Water, d("2026-10-05"), d("2026-10-05")).unwrap().len(), 2, "both waters stay");
+    }
+
+    #[test]
+    fn a_record_whose_note_is_gone_says_so_and_the_overview_finds_old_values() {
+        let (_tmp, conn) = setup();
+        put(&conn, "s1", "weight", "2026-08-01", r#"{"value":81}"#, "extracted", NOW, false);
+        conn.execute("UPDATE metric_record SET source_missing = 1 WHERE metric_id = 's1'", []).unwrap();
+        assert!(records(&conn, MetricKind::Weight, d("2026-08-01"), d("2026-08-01")).unwrap()[0].source_missing);
+        let weight = &overview(&conn, d("2026-10-06")).unwrap()[1];
+        assert_eq!(weight.last.as_ref().map(|v| (v.date.as_str(), v.value)), Some(("2026-08-01", 81.0)), "older than two weeks");
+        assert_eq!(weight.average7, None);
+    }
+
+    fn extract_again(conn: &Connection, json: &str) {
+        let ex = crate::extraction::parse_extraction(json).unwrap();
+        crate::pipeline::items::apply_block_items(conn, "b1", d("2026-10-05"), &ex, &ValidationSettings::default(), None, now()).unwrap();
+    }
+
+    #[test]
+    fn a_deleted_extraction_stays_deleted_when_its_note_is_read_again() {
+        // metrics final review I1, Review Focus 2: two values of one kind in one paragraph
+        let (_tmp, conn) = setup();
+        let water = r#"{"items": [{"type": "metric", "metric": {"kind": "water", "value": 2, "unit": "glass"}},
+                                  {"type": "metric", "metric": {"kind": "water", "value": 3, "unit": "glass"}}]}"#;
+        extract_again(&conn, water);
+        let day = |c: &Connection| records(c, MetricKind::Water, d("2026-10-05"), d("2026-10-05")).unwrap();
+        let first = day(&conn).into_iter().find(|r| r.value == Some(500.0)).unwrap();
+        delete_metric(&conn, &first.metric_id, now()).unwrap();
+        extract_again(&conn, water);
+        assert_eq!(day(&conn).iter().map(|r| r.value).collect::<Vec<_>>(), vec![Some(750.0)], "the 500 ml stays deleted, the 750 ml stays");
+
+        let sleep = r#"{"items": [{"type": "metric", "when": {"day_offset": -1}, "metric": {"kind": "sleep", "value": 6, "unit": "h"}},
+                                  {"type": "metric", "when": {"day_offset": 0}, "metric": {"kind": "sleep", "value": 7, "unit": "h"}}]}"#;
+        extract_again(&conn, sleep);
+        let monday = records(&conn, MetricKind::Sleep, d("2026-10-04"), d("2026-10-04")).unwrap();
+        delete_metric(&conn, &monday[0].metric_id, now()).unwrap();
+        extract_again(&conn, sleep);
+        let left = records(&conn, MetricKind::Sleep, d("2026-10-01"), d("2026-10-06")).unwrap();
+        assert_eq!(left.iter().map(|r| (r.date.as_str(), r.value)).collect::<Vec<_>>(), vec![("2026-10-05", Some(7.0))]);
     }
 
     #[test]

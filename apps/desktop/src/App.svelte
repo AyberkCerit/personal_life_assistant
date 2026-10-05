@@ -65,7 +65,7 @@
   }
 
   function openSettings() {
-    if (wizard || settingsOpen) return;
+    if (wizard || settingsOpen || quickMetric) return; // one window at a time: Esc and Tab belong to it
     settingsOpener = document.activeElement as HTMLElement | null;
     settingsOpen = true;
   }
@@ -142,9 +142,17 @@
     center = "metrics";
   }
 
+  let quickOpener: HTMLElement | null = null;
+
   function openQuickMetric(record: MetricRecord | null = null) {
-    if (wizard || vaultPath === null) return;
+    if (wizard || vaultPath === null || settingsOpen || quickMetric) return;
+    quickOpener = document.activeElement as HTMLElement | null;
     quickMetric = { record };
+  }
+
+  function closeQuickMetric() {
+    quickMetric = null;
+    if (quickOpener?.isConnected) quickOpener.focus();
   }
 
   async function openNote(path: string, text: string | null = null) {
@@ -215,7 +223,8 @@
       if (e.ctrlKey && e.key === ",") {
         e.preventDefault();
         openSettings();
-      } else if (e.ctrlKey && e.shiftKey && e.code === "KeyM") {
+      } else if (e.ctrlKey && e.shiftKey && e.key.toLocaleLowerCase("tr") === "m") {
+        // by the letter, not the key position: on a Turkish F keyboard M sits elsewhere
         e.preventDefault(); // FR-MET-003
         openQuickMetric();
       }
@@ -298,7 +307,7 @@
   </div>
 {/if}
 {#if quickMetric && !wizard}
-  <QuickMetric record={quickMetric.record} onClose={() => (quickMetric = null)} onSaved={() => metricsVersion++} />
+  <QuickMetric record={quickMetric.record} onClose={closeQuickMetric} onSaved={() => metricsVersion++} />
 {/if}
 {#if settingsOpen && !wizard}
   <Settings

@@ -4,14 +4,13 @@
   import CircleAlert from "@lucide/svelte/icons/circle-alert";
   import FileText from "@lucide/svelte/icons/file-text";
   import Pencil from "@lucide/svelte/icons/pencil";
-  import Sparkles from "@lucide/svelte/icons/sparkles";
   import Trash2 from "@lucide/svelte/icons/trash-2";
   import TrendingDown from "@lucide/svelte/icons/trending-down";
   import TrendingUp from "@lucide/svelte/icons/trending-up";
   import Minus from "@lucide/svelte/icons/minus";
   import { api, type MetricRecord, type Summary } from "../api";
   import { lang, t, tf, type Key } from "../i18n";
-  import { fillDays, formatValue, metricError, trendDirection, type MetricKind } from "../metrics";
+  import { fillDays, formatDelta, formatValue, metricError, trendDirection, type MetricKind } from "../metrics";
   import { todayIso } from "../tasks";
   import Badge from "../ui/Badge.svelte";
   import Banner from "../ui/Banner.svelte";
@@ -40,11 +39,17 @@
     return new Date(Date.UTC(y, m - 1, d + n)).toISOString().slice(0, 10);
   }
 
+  let request = 0;
+
+  // Only the newest answer is shown: a slow one must not overwrite a newer period (final review).
   async function load() {
+    const mine = ++request;
     try {
-      [summary, records] = await Promise.all([api.metricsSummary(kind, days), api.metricRecords(kind, days)]);
+      const [s, r] = await Promise.all([api.metricsSummary(kind, days), api.metricRecords(kind, days)]);
+      if (mine !== request) return;
+      [summary, records] = [s, r];
     } catch (e) {
-      error = tf(metricError(String(e)).key, { detail: String(e) });
+      if (mine === request) error = tf(metricError(String(e)).key, { detail: String(e) });
     }
   }
 
@@ -72,7 +77,8 @@
   const trend = $derived(summary ? trendDirection(summary.trend, summary.average) : "flat");
   const describe = (r: MetricRecord) => {
     if (kind !== "workout") return r.value === null ? "—" : formatValue(kind, r.value, lang);
-    const parts = [r.exercise, r.sets !== null && r.reps !== null ? `${r.sets}×${r.reps}` : r.sets !== null ? `${r.sets} ${t("metrics.sets")}` : null, r.value ? `${r.value} kg` : null];
+    const kg = r.value ? `${new Intl.NumberFormat(lang, { maximumFractionDigits: 1 }).format(r.value)} kg` : null;
+    const parts = [r.exercise, r.sets !== null && r.reps !== null ? `${r.sets}×${r.reps}` : r.sets !== null ? `${r.sets} ${t("metrics.sets")}` : null, kg];
     return parts.filter(Boolean).join(" · ") || "—";
   };
 
@@ -116,8 +122,10 @@
         <div>
           <dt>{t("metrics.trend")}</dt>
           <dd class="trend {trend}">
-            <Icon icon={trend === "up" ? TrendingUp : trend === "down" ? TrendingDown : Minus} />
-            {summary.trend === null ? "—" : `${summary.trend > 0 ? "+" : ""}${fmt(summary.trend)}`}
+            {#if summary.trend === null}—{:else}
+              <Icon icon={trend === "up" ? TrendingUp : trend === "down" ? TrendingDown : Minus} />
+              {formatDelta(kind, summary.trend, lang)}
+            {/if}
           </dd>
         </div>
       </dl>
@@ -140,14 +148,15 @@
         <li>
           <span class="date">{longDate(r.date)}</span>
           <span class="value">{describe(r)}</span>
-          {#if r.origin === "extracted" && !r.user_modified}<Badge kind="ai"><Icon icon={Sparkles} size="sm" />AI</Badge>{/if}
+          {#if r.origin === "extracted" && !r.user_modified}<Badge kind="ai">AI</Badge>{/if}
+          {#if r.source_missing}<span class="gone">{t("tasks.sourceMissing")}</span>{/if}
           <span class="actions">
             {#if confirming === r.metric_id}
               <span class="ask">{t("metrics.confirmDelete")}</span>
               <Button variant="danger" onclick={() => void act(() => api.metricDelete(r.metric_id))}>{t("metrics.delete")}</Button>
               <Button variant="quiet" onclick={() => (confirming = null)}>{t("metrics.cancel")}</Button>
             {:else}
-              {#if r.note_path}<IconButton icon={FileText} label={t("metrics.source")} onclick={() => onOpenSource(r.note_path as string, r.block_text)} />{/if}
+              {#if r.note_path && !r.source_missing}<IconButton icon={FileText} label={t("metrics.source")} onclick={() => onOpenSource(r.note_path as string, r.block_text)} />{/if}
               <IconButton icon={Pencil} label={t("metrics.edit")} onclick={() => onEdit(r)} />
               <IconButton icon={Trash2} label={t("metrics.delete")} onclick={() => (confirming = r.metric_id)} />
             {/if}
@@ -184,4 +193,5 @@
   .value { font-variant-numeric: tabular-nums; }
   .actions { margin-left: auto; display: flex; gap: var(--space-1); align-items: center; }
   .ask { font-size: var(--text-sm); color: var(--color-text-muted); }
+  .gone { font-size: var(--text-xs); color: var(--color-text-muted); }
 </style>

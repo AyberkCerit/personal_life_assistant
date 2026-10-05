@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { KINDS, chartGeometry, fillDays, formatValue, metricError, parseAmount, trendDirection } from "./metrics";
+import { KINDS, chartGeometry, fillDays, formatDelta, formatField, formatValue, metricError, parseAmount, trendDirection } from "./metrics";
 
 describe("metrics view helpers", () => {
   it("lists the kinds in the overview order", () => {
@@ -25,6 +25,9 @@ describe("metrics view helpers", () => {
     expect(parseAmount("8,432", "steps")).toBe(8432);
     expect(parseAmount("", "sleep")).toBeNull();
     expect(parseAmount("abc", "weight")).toBeNull();
+    // metrics final review: "1.500" ml is fifteen hundred in Turkish, not one and a half
+    expect(parseAmount("1.500", "water")).toBe(1500);
+    expect(parseAmount("1,5", "water")).toBe(1.5);
   });
 
   it("lays the days out on a continuous axis with gaps", () => {
@@ -56,9 +59,26 @@ describe("metrics view helpers", () => {
     expect(trendDirection(null, 7)).toBe("flat");
   });
 
+  it("names an unusual workout field in its own unit", () => {
+    // metrics final review I3
+    expect(formatField("workout", "reps", 600, "tr")).toBe("600 tekrar");
+    expect(formatField("workout", "sets", 60, "en")).toBe("60 sets");
+    expect(formatField("workout", "kg", 600, "tr")).toBe("600 kg");
+    expect(formatField("weight", "value", 450, "tr")).toBe("450 kg");
+  });
+
+  it("shows a change with its sign, workouts as plain numbers", () => {
+    expect(formatDelta("sleep", 0.5, "tr")).toBe("+0,5 sa");
+    expect(formatDelta("weight", -1.25, "en")).toBe("-1.3 kg");
+    expect(formatDelta("workout", 0.5, "tr")).toBe("+0,5 oturum");
+    expect(formatDelta("water", -300, "tr")).toBe("-300 ml");
+  });
+
   it("reads the commands' error codes", () => {
-    expect(metricError("out_of_range|450")).toEqual({ key: "metrics.error.out_of_range", value: 450 });
-    expect(metricError("missing_value")).toEqual({ key: "metrics.error.missing_value", value: null });
-    expect(metricError("boom")).toEqual({ key: "metrics.error.other", value: null, detail: "boom" });
+    expect(metricError("out_of_range|value|450")).toEqual({ key: "metrics.error.out_of_range", field: "value", value: 450 });
+    expect(metricError("out_of_range|reps|600")).toEqual({ key: "metrics.error.out_of_range", field: "reps", value: 600 });
+    expect(metricError("missing_value")).toEqual({ key: "metrics.error.missing_value", field: null, value: null });
+    expect(metricError("invalid_value")).toMatchObject({ key: "metrics.error.invalid_value" });
+    expect(metricError("boom")).toEqual({ key: "metrics.error.other", field: null, value: null, detail: "boom" });
   });
 });
