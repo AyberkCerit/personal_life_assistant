@@ -95,6 +95,84 @@ function tree() {
   return entries;
 }
 
+// Metrics stand-in for the browser check. The real merge rules and statistics live in Rust; this
+// only imitates their shape with simple rules (last value per day, water summed, workouts counted).
+type MockMetric = { metric_id: string; kind: string; date: string; value: number | null; unit: string | null; exercise: string | null; sets: number | null; reps: number | null; origin: string; user_modified: boolean; note_path: string | null; block_text: string | null; created_at: string };
+let metricsDb: MockMetric[] = (() => {
+  const out: MockMetric[] = [];
+  const rec = (kind: string, offset: number, value: number | null, extra: Partial<MockMetric> = {}) =>
+    out.push({ metric_id: `m${out.length}`, kind, date: day(-offset), value, unit: null, exercise: null, sets: null, reps: null, origin: offset % 3 === 0 ? "extracted" : "manual", user_modified: false, note_path: offset % 3 === 0 ? "daily/2026/2026-10-06.md" : null, block_text: offset % 3 === 0 ? "Dün 7 saat uyudum." : null, created_at: `${day(-offset)}T08:00:00+03:00`, ...extra });
+  for (let i = 0; i < 40; i++) {
+    if (i % 5 !== 4) rec("sleep", i, 6 + ((i * 7) % 5) / 2);
+    if (i % 2 === 0) rec("weight", i, 80 - i * 0.05);
+    rec("steps", i, 4000 + ((i * 1337) % 7000));
+    if (i < 12) rec("water", i, 250 * (2 + (i % 4)));
+    if (i % 3 === 1) rec("workout", i, null, { exercise: "şınav", sets: 3, reps: 12 });
+  }
+  rec("sleep", 2, 5, { origin: "extracted", created_at: `${day(-2)}T09:00:00+03:00` }); // a conflict
+  out[out.length - 1].origin = "extracted";
+  return out;
+})();
+
+function mockDaily(kind: string, from: string, to: string) {
+  const days = new Map<string, { date: string; value: number; sets: number | null; conflict: boolean }>();
+  for (const r of [...metricsDb].filter((r) => r.kind === kind && r.date >= from && r.date <= to).sort((a, b) => a.created_at.localeCompare(b.created_at))) {
+    const d = days.get(r.date);
+    if (kind === "water") days.set(r.date, { date: r.date, value: (d?.value ?? 0) + (r.value ?? 0), sets: null, conflict: false });
+    else if (kind === "workout") days.set(r.date, { date: r.date, value: (d?.value ?? 0) + 1, sets: (d?.sets ?? 0) + (r.sets ?? 0), conflict: false });
+    else days.set(r.date, { date: r.date, value: r.value ?? 0, sets: null, conflict: !!d && d.value !== r.value });
+  }
+  return [...days.values()].sort((a, b) => a.date.localeCompare(b.date));
+}
+const avg = (xs: number[]) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null);
+
+function mockMetrics(cmd: string, args: Record<string, unknown>): unknown {
+  switch (cmd) {
+    case "metrics_overview":
+      return ["sleep", "weight", "steps", "water", "workout"].map((kind) => {
+        const values = mockDaily(kind, day(-13), day(0));
+        const spark = Array.from({ length: 14 }, (_, i) => values.find((v) => v.date === day(i - 13))?.value ?? null);
+        return { kind, last: values.at(-1) ?? null, average7: avg(values.filter((v) => v.date >= day(-6)).map((v) => v.value)), spark, conflicts: values.filter((v) => v.conflict).length };
+      });
+    case "metrics_summary": {
+      const n = Number(args.days);
+      const values = mockDaily(String(args.kind), day(1 - n), day(0));
+      const nums = values.map((v) => v.value);
+      return { kind: args.kind, days: values, average: avg(nums), min: nums.length ? Math.min(...nums) : null, max: nums.length ? Math.max(...nums) : null, trend: 0.3, weekly: [{ week_start: day(-6), average: avg(nums) ?? 0 }], conflicts: values.filter((v) => v.conflict).length };
+    }
+    case "metric_records": {
+      const n = Number(args.days);
+      return metricsDb.filter((r) => r.kind === args.kind && r.date >= day(1 - n)).sort((a, b) => b.date.localeCompare(a.date) || b.created_at.localeCompare(a.created_at));
+    }
+    case "metric_log":
+    case "metric_edit": {
+      const input = args.input as { kind: string; date: string; value: number | null; unit: string | null; exercise: string | null; sets: number | null; reps: number | null; confirmed: boolean };
+      const value = input.kind === "water" && input.unit === "glass" ? (input.value ?? 0) * 250 : input.value;
+      if (input.kind !== "workout" && value === null) throw "missing_value";
+      if (input.kind === "weight" && value !== null && value > 400 && !input.confirmed) throw `out_of_range|${value}`;
+      const fields = { kind: input.kind, date: input.date, value, exercise: input.exercise, sets: input.sets, reps: input.reps };
+      if (cmd === "metric_edit") {
+        metricsDb = metricsDb.map((r) => (r.metric_id === args.id ? { ...r, ...fields, user_modified: true } : r));
+      } else {
+        metricsDb.push({ metric_id: `m${metricsDb.length + 100}`, unit: null, origin: "manual", user_modified: false, note_path: null, block_text: null, created_at: new Date().toISOString(), ...fields });
+      }
+      emit("metrics-changed", null);
+      return "ok";
+    }
+    case "metric_delete":
+      metricsDb = metricsDb.filter((r) => r.metric_id !== args.id);
+      emit("metrics-changed", null);
+      return undefined;
+    case "metric_resolve": {
+      const keep = metricsDb.find((r) => r.metric_id === args.keepId);
+      metricsDb = metricsDb.filter((r) => !(keep && r.kind === keep.kind && r.date === keep.date && r.metric_id !== keep.metric_id && r.origin === "extracted"));
+      emit("metrics-changed", null);
+      return undefined;
+    }
+  }
+  return undefined;
+}
+
 export async function mockBackend<T>(cmd: string, args: Record<string, unknown>): Promise<T> {
   const path = String(args.path ?? "");
   switch (cmd) {
@@ -115,6 +193,14 @@ export async function mockBackend<T>(cmd: string, args: Record<string, unknown>)
     case "set_language":
       mockLang = args.lang as "tr" | "en";
       return undefined as T;
+    case "metrics_overview":
+    case "metrics_summary":
+    case "metric_records":
+    case "metric_log":
+    case "metric_edit":
+    case "metric_delete":
+    case "metric_resolve":
+      return mockMetrics(cmd, args) as T;
     case "settings_get":
       return { language: mockLang, theme: mockTheme, autostart: mockAutostart, paused: false, vault_path: vault } as T;
     case "settings_set":

@@ -19,6 +19,11 @@
   import StatusBar from "./lib/StatusBar.svelte";
   import Wizard from "./lib/Wizard.svelte";
   import Settings from "./lib/Settings.svelte";
+  import MetricsView from "./lib/metrics/MetricsView.svelte";
+  import QuickMetric from "./lib/metrics/QuickMetric.svelte";
+  import ChartLine from "@lucide/svelte/icons/chart-line";
+  import type { MetricKind } from "./lib/metrics";
+  import type { MetricRecord } from "./lib/api";
   import type { Section } from "./lib/settings";
   import type { Progress } from "./lib/wizard";
   import { t, lang, setLang, type Lang } from "./lib/i18n";
@@ -40,6 +45,11 @@
   let editor: ReturnType<typeof Editor> | undefined = $state();
   let error = $state<string | null>(null);
   let settingsOpen = $state(false);
+  // The middle pane: the note editor or the metrics view (SRS S-06).
+  let center = $state<"editor" | "metrics">("editor");
+  let metricKind = $state<MetricKind | null>(null);
+  let metricsVersion = $state(0);
+  let quickMetric = $state<{ record: MetricRecord | null } | null>(null);
   let settingsSection = $state<Section>("general"); // kept here: a language switch re-mounts the window
   let settingsRefocus = $state<string | null>(null);
   let settingsOpener: HTMLElement | null = null;
@@ -55,7 +65,7 @@
   }
 
   function openSettings() {
-    if (wizard || settingsOpen) return;
+    if (wizard || settingsOpen || quickMetric) return; // one window at a time: Esc and Tab belong to it
     settingsOpener = document.activeElement as HTMLElement | null;
     settingsOpen = true;
   }
@@ -122,7 +132,31 @@
     }
   }
 
+  async function showMetrics() {
+    try {
+      await editor?.close(); // the note is saved before the editor leaves the middle pane
+    } catch (e) {
+      error = String(e);
+      return;
+    }
+    center = "metrics";
+  }
+
+  let quickOpener: HTMLElement | null = null;
+
+  function openQuickMetric(record: MetricRecord | null = null) {
+    if (wizard || vaultPath === null || settingsOpen || quickMetric) return;
+    quickOpener = document.activeElement as HTMLElement | null;
+    quickMetric = { record };
+  }
+
+  function closeQuickMetric() {
+    quickMetric = null;
+    if (quickOpener?.isConnected) quickOpener.focus();
+  }
+
   async function openNote(path: string, text: string | null = null) {
+    center = "editor";
     if (path === current && text === null) return; // already open: keep cursor, scroll and undo history
     try {
       await editor?.close(); // save, queue if edited (FR-EXT-002); text is never dropped
@@ -181,10 +215,18 @@
     const unPaused = api.onPausedChanged((p) => (status = { ...status, paused: p }));
     const unModel = api.onModelDownload((s) => (modelDownload = s));
     const unSettings = api.onOpenSettings(openSettings);
+    const unQuick = api.onOpenQuickMetric(() => openQuickMetric());
+    const unAdded = api.onItemsAdded((items) => {
+      if (items.some((i) => i.kind === "metric")) metricsVersion++;
+    });
     const shortcut = (e: KeyboardEvent) => {
       if (e.ctrlKey && e.key === ",") {
         e.preventDefault();
         openSettings();
+      } else if (e.ctrlKey && e.shiftKey && e.key.toLocaleLowerCase("tr") === "m") {
+        // by the letter, not the key position: on a Turkish F keyboard M sits elsewhere
+        e.preventDefault(); // FR-MET-003
+        openQuickMetric();
       }
     };
     window.addEventListener("keydown", shortcut);
@@ -206,6 +248,8 @@
       void unPaused.then((f) => f());
       void unModel.then((f) => f());
       void unSettings.then((f) => f());
+      void unQuick.then((f) => f());
+      void unAdded.then((f) => f());
       window.removeEventListener("keydown", shortcut);
     };
   });
@@ -228,13 +272,26 @@
 {:else}
   <div class="layout">
     <aside class="sidebar">
-      <FileTree {entries} selected={current} onOpen={openNote} onCreate={createNote} />
+      <nav class="shortcuts" aria-label={t("metrics.title")}>
+        <button class:on={center === "metrics"} aria-current={center === "metrics" ? "page" : undefined} onclick={showMetrics}>
+          <ChartLine size={16} strokeWidth={1.75} aria-hidden="true" />{t("metrics.title")}
+        </button>
+      </nav>
+      <FileTree {entries} selected={center === "editor" ? current : null} onOpen={openNote} onCreate={createNote} />
     </aside>
     <section class="main">
       <ModelBanner queued={status.queued} forceOpen={showModel} onOpened={() => (showModel = false)} />
       <ReminderBanner version={tasksVersion + panelEdits} onChanged={() => tasksVersion++} />
       {#if error}<Banner kind="danger" icon={CircleAlert} role="alert">{t("error.generic")}: {error}</Banner>{/if}
-      {#if current}
+      {#if center === "metrics"}
+        <MetricsView
+          bind:selected={metricKind}
+          version={metricsVersion + tasksVersion}
+          onQuick={() => openQuickMetric()}
+          onEdit={(r) => openQuickMetric(r)}
+          onOpenSource={openSource}
+        />
+      {:else if current}
         {#key current}
           <Editor bind:this={editor} path={current} {reveal} onSavedCopy={() => void refresh()} />
         {/key}
@@ -249,6 +306,9 @@
     <AddedToast onChanged={() => tasksVersion++} />
   </div>
 {/if}
+{#if quickMetric && !wizard}
+  <QuickMetric record={quickMetric.record} onClose={closeQuickMetric} onSaved={() => metricsVersion++} />
+{/if}
 {#if settingsOpen && !wizard}
   <Settings
     bind:section={settingsSection}
@@ -262,6 +322,14 @@
 {/key}
 
 <style>
+  .shortcuts { padding: var(--space-2) var(--space-2) 0; }
+  .shortcuts button {
+    width: 100%; display: flex; align-items: center; gap: var(--space-2); padding: var(--space-1) var(--space-2);
+    border: 0; border-radius: var(--radius-md); background: none; color: var(--color-text); font: inherit; font-size: var(--text-md); cursor: pointer;
+  }
+  .shortcuts button:hover { background: var(--color-surface-hover); }
+  .shortcuts button.on { background: var(--color-accent-subtle); }
+  .shortcuts button:focus-visible { outline: 2px solid var(--color-accent); outline-offset: -2px; }
   .welcome { margin: auto; max-width: 26rem; padding: var(--space-8) var(--space-4); display: flex; flex-direction: column; align-items: center; gap: var(--space-3); text-align: center; }
   h1 { margin: var(--space-2) 0 0; font-size: var(--text-2xl); font-weight: 600; }
   p { margin: 0; }

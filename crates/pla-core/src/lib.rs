@@ -8,6 +8,7 @@ pub mod fs_atomic;
 pub mod vault;
 pub mod db;
 pub mod llm;
+pub mod metrics;
 pub mod models;
 pub mod notes;
 pub mod pipeline;

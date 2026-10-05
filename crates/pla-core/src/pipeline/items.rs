@@ -70,10 +70,14 @@ pub fn action_signature(title: &str) -> String {
 pub fn item_signature(item: &ValidItem) -> String {
     match item {
         ValidItem::Action { title, .. } => action_signature(title),
-        ValidItem::Metric { kind: MetricKind::Workout, exercise, .. } => {
-            format!("metric:workout:{}", normalize(exercise.as_deref().unwrap_or_default()))
+        // The day is part of a metric (metrics final review I1): "Monday 6 h, Tuesday 7 h" in one
+        // paragraph are two items, and deleting one must not hand its place to the other.
+        ValidItem::Metric { kind: MetricKind::Workout, exercise, date, .. } => {
+            format!("metric:workout:{date}:{}", normalize(exercise.as_deref().unwrap_or_default()))
         }
-        ValidItem::Metric { kind, .. } => format!("metric:{}", metric_kind_name(*kind)),
+        // Water adds up: two amounts on one day are two items too.
+        ValidItem::Metric { kind: MetricKind::Water, date, value, .. } => format!("metric:water:{date}:{}", value.unwrap_or_default()),
+        ValidItem::Metric { kind, date, .. } => format!("metric:{}:{date}", metric_kind_name(*kind)),
     }
 }
 
@@ -84,8 +88,10 @@ const SAME_ITEM_SIMILARITY: f64 = 0.8;
 fn split_signature(signature: &str) -> (&str, &str) {
     if let Some(rest) = signature.strip_prefix("action:") {
         ("action", rest)
-    } else if let Some(rest) = signature.strip_prefix("metric:workout:") {
-        ("metric:workout", rest)
+    } else if signature.starts_with("metric:workout:") {
+        // metric:workout:<date>:<exercise>: the same day groups, the exercise may be reworded
+        let label_at = signature.match_indices(':').nth(2).map_or(signature.len(), |(i, _)| i + 1);
+        (&signature[..label_at.saturating_sub(1)], &signature[label_at..])
     } else {
         (signature, "")
     }
@@ -321,7 +327,7 @@ fn task_fields(reminder: bool, title: &str, date: Option<NaiveDate>, time: Optio
     }
 }
 
-fn metric_value_json(value: Option<f64>, exercise: &Option<String>, sets: Option<i64>, reps: Option<i64>) -> String {
+pub(crate) fn metric_value_json(value: Option<f64>, exercise: &Option<String>, sets: Option<i64>, reps: Option<i64>) -> String {
     let mut map = Map::new();
     if let Some(v) = value {
         map.insert("value".into(), Value::from(v));
@@ -536,10 +542,10 @@ mod tests {
             .unwrap()
             .map(Result::unwrap)
             .collect();
-        assert_eq!(rows[0], ("water".into(), r#"{"value":1000.0}"#.into(), Some("ml".into()), "2026-10-05".into(), "metric:water".into()));
+        assert_eq!(rows[0], ("water".into(), r#"{"value":1000.0}"#.into(), Some("ml".into()), "2026-10-05".into(), "metric:water:2026-10-05:1000".into()));
         assert_eq!(rows[1].1, r#"{"value":80.0,"exercise":"Squat","sets":3,"reps":8}"#);
-        assert_eq!(rows[1].4, "metric:workout:squat");
-        assert_eq!(rows[2].4, "metric:workout:bench");
+        assert_eq!(rows[1].4, format!("metric:workout:{}:squat", rows[1].3));
+        assert_eq!(rows[2].4, format!("metric:workout:{}:bench", rows[2].3));
     }
 
     #[test]

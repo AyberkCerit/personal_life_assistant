@@ -53,12 +53,13 @@ fn menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
     let autostart_on = app.autolaunch().is_enabled().unwrap_or(false);
     let open = MenuItem::with_id(app, "open", s.tray_open, true, None::<&str>)?;
     let new_note = MenuItem::with_id(app, "new_note", s.tray_new_note, true, None::<&str>)?;
+    let quick_metric = MenuItem::with_id(app, "quick_metric", s.tray_quick_metric, true, None::<&str>)?;
     let pause = CheckMenuItem::with_id(app, "pause", s.tray_pause, true, paused, None::<&str>)?;
     let autostart = CheckMenuItem::with_id(app, "autostart", s.tray_autostart, true, autostart_on, None::<&str>)?;
     let settings = MenuItem::with_id(app, "settings", s.tray_settings, true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", s.tray_quit, true, None::<&str>)?;
     let separator = PredefinedMenuItem::separator(app)?;
-    let menu = Menu::with_items(app, &[&open, &new_note, &separator, &pause, &autostart, &settings, &separator, &quit])?;
+    let menu = Menu::with_items(app, &[&open, &new_note, &quick_metric, &separator, &pause, &autostart, &settings, &separator, &quit])?;
     *app.state::<TrayItems>().0.lock().expect("tray lock") = Some((pause, autostart));
     Ok(menu)
 }
@@ -88,6 +89,10 @@ pub fn build(app: &AppHandle) -> tauri::Result<()> {
             "new_note" => {
                 show_main(app);
                 let _ = app.emit("new-note", ());
+            }
+            "quick_metric" => {
+                show_main(app);
+                let _ = app.emit("open-quick-metric", ());
             }
             "settings" => {
                 show_main(app);
