@@ -28,6 +28,7 @@ pub struct Strings {
     pub tray_pause: &'static str,
     pub tray_autostart: &'static str,
     pub tray_settings: &'static str,
+    pub tray_quick_metric: &'static str,
     pub tray_quit: &'static str,
 }
 
@@ -49,6 +50,7 @@ const TR: Strings = Strings {
     tray_pause: "Arka plan YZ'yi duraklat",
     tray_autostart: "Windows ile başlat",
     tray_settings: "Ayarlar",
+    tray_quick_metric: "Hızlı ölçüm",
     tray_quit: "Çık",
 };
 
@@ -70,6 +72,7 @@ const EN: Strings = Strings {
     tray_pause: "Pause background AI",
     tray_autostart: "Start with Windows",
     tray_settings: "Settings",
+    tray_quick_metric: "Quick measurement",
     tray_quit: "Quit",
 };
 
