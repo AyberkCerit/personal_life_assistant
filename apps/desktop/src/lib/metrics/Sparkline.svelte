@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { chartGeometry } from "../metrics";
+  import { chartGeometry, type Point } from "../metrics";
 
   // Two weeks at a glance on an overview card; decorative, the card's text says the numbers.
   let { values }: { values: (number | null)[] } = $props();
@@ -7,13 +7,9 @@
   const H = 32;
   const g = $derived(chartGeometry(values, W, H, 3));
   // Unlike the detail chart, the sparkline joins across missing days: it shows the shape, not gaps.
-  const path = $derived(
-    g.points
-      .filter((p) => p !== null)
-      .map((p, i) => `${i ? "L" : "M"}${p.x.toFixed(1)},${p.y.toFixed(1)}`)
-      .join(" "),
-  );
-  const last = $derived(g.points.findLast((p) => p !== null) ?? null);
+  const known = $derived(g.points.filter((p): p is Point => p !== null));
+  const path = $derived(known.map((p, i) => `${i ? "L" : "M"}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" "));
+  const last = $derived(known.length ? known[known.length - 1] : null);
 </script>
 
 <svg viewBox="0 0 {W} {H}" width={W} height={H} aria-hidden="true">
