@@ -427,6 +427,68 @@ const IN_FOLDER: &str = "(?2 IS NULL OR substr(n.note_path, 1, length(?2) + 1) =
 const HAS_TAG: &str = "(?3 IS NULL OR EXISTS (SELECT 1 FROM json_each(n.tag_keys) WHERE value = ?3 OR substr(value, 1, length(?3) + 1) = ?3 || '/'))";
 
 /// FR-EDT-014/015: ranked full-text results; `folder` and `tag` narrow them. A tag alone lists its notes.
+/// A note's text for the assistant's context (FR-MEM-009).
+#[derive(Debug, Clone, PartialEq)]
+pub struct NoteText {
+    pub note_path: String,
+    pub title: String,
+    pub body: String,
+    /// Last change, milliseconds since the epoch.
+    pub mtime: i64,
+}
+
+/// Words that say nothing about what is asked (Turkish and English question words and fillers).
+const STOPWORDS: &[&str] = &[
+    "ben", "bana", "beni", "benim", "bir", "bu", "şu", "ve", "ile", "için", "ama", "gibi", "kadar", "daha", "çok", "mi", "mı", "mu", "mü", "ne",
+    "neler", "nedir", "nasıl", "neden", "niye", "hangi", "kaç", "var", "yok", "olan", "oldu", "olarak", "da", "de", "ki", "the", "and", "for",
+    "what", "which", "how", "why", "when", "where", "who", "did", "does", "was", "were", "are", "have", "has", "with", "about", "from", "that",
+    "this", "you", "your", "my", "me", "can", "will",
+];
+
+/// The question's words for retrieval: folded, at least three letters, no filler words.
+fn retrieval_words(text: &str) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for w in text.split(|c: char| !(c.is_alphanumeric() || c == '_')).map(fold) {
+        if w.chars().count() >= 3 && !STOPWORDS.contains(&w.as_str()) && !out.contains(&w) {
+            out.push(w);
+        }
+    }
+    out
+}
+
+/// FR-MEM-005 (keyword half): notes sharing any of the question's words, best first. Unlike
+/// `search`, a note does not need every word (a question is not a search box).
+pub fn retrieve(conn: &Connection, question: &str, limit: usize) -> rusqlite::Result<Vec<NoteText>> {
+    let words = retrieval_words(question);
+    if words.is_empty() {
+        return Ok(Vec::new());
+    }
+    let query = words
+        .iter()
+        .map(|w| {
+            let variants: Vec<String> = i_variants(w).into_iter().map(|v| format!("\"{}\"*", v.replace('"', "\"\""))).collect();
+            format!("({})", variants.join(" OR "))
+        })
+        .collect::<Vec<_>>()
+        .join(" OR ");
+    conn.prepare(
+        "SELECT f.note_path, n.title, f.body, n.mtime FROM note_fts f JOIN note_index n ON n.note_path = f.note_path
+         WHERE note_fts MATCH ?1 ORDER BY bm25(note_fts, 0.0, 8.0, 1.0) LIMIT ?2",
+    )?
+    .query_map(params![query, limit as i64], |r| Ok(NoteText { note_path: r.get(0)?, title: r.get(1)?, body: r.get(2)?, mtime: r.get(3)? }))?
+    .collect()
+}
+
+/// FR-MEM-009: the notes changed since `since_ms` (milliseconds since the epoch), newest first.
+pub fn recent(conn: &Connection, since_ms: i64, limit: usize) -> rusqlite::Result<Vec<NoteText>> {
+    conn.prepare(
+        "SELECT n.note_path, n.title, f.body, n.mtime FROM note_index n JOIN note_fts f ON f.note_path = n.note_path
+         WHERE n.mtime >= ?1 ORDER BY n.mtime DESC LIMIT ?2",
+    )?
+    .query_map(params![since_ms, limit as i64], |r| Ok(NoteText { note_path: r.get(0)?, title: r.get(1)?, body: r.get(2)?, mtime: r.get(3)? }))?
+    .collect()
+}
+
 pub fn search(conn: &Connection, text: &str, folder: Option<&str>, tag: Option<&str>, limit: usize) -> rusqlite::Result<Vec<SearchHit>> {
     let folder = folder.map(|f| f.trim_matches('/').to_owned()).filter(|f| !f.is_empty());
     let tag = tag.map(|t| key(t.trim().trim_start_matches('#'))).filter(|t| !t.is_empty());

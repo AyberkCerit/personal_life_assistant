@@ -26,6 +26,10 @@ pub trait Extractor {
     fn is_running(&self) -> bool {
         false
     }
+    /// The same model for the Q&A panel (FR-QA-003), when this extractor has one.
+    fn chat_model(&mut self) -> Option<&mut dyn crate::qa::ChatModel> {
+        None
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]

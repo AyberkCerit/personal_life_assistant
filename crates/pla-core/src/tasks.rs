@@ -158,13 +158,18 @@ pub fn list_tasks(conn: &Connection, list: TaskList, today: NaiveDate) -> Result
 }
 
 pub fn add_task(conn: &Connection, input: &TaskInput, now: DateTime<FixedOffset>) -> Result<String, TaskError> {
+    add_task_as(conn, input, "manual", now)
+}
+
+/// `add_task` with its origin: `manual`, or `assistant` for the Q&A panel's add_task (FR-QA-008).
+pub fn add_task_as(conn: &Connection, input: &TaskInput, origin: &str, now: DateTime<FixedOffset>) -> Result<String, TaskError> {
     let c = clean(input)?;
     let id = new_id();
     let notify_at = if c.remind == Some(true) { notify_for(&c.date, &c.time) } else { None };
     conn.execute(
         "INSERT INTO task (task_id, title, details, date, time, notify_at, status, origin, created_at, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'open', 'manual', ?7, ?7)",
-        params![id, c.title, c.details, c.date, c.time, notify_at, now.to_rfc3339()],
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'open', ?8, ?7, ?7)",
+        params![id, c.title, c.details, c.date, c.time, notify_at, now.to_rfc3339(), origin],
     )?;
     Ok(id)
 }

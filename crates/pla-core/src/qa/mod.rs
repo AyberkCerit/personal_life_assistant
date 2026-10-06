@@ -1,0 +1,175 @@
+//! The Q&A panel (FR-QA-001…016): the model answers from the user's notes and may call a small set
+//! of tools; every turn is kept in pla.db (FR-QA-014) and never indexed (FR-MEM-014).
+
+pub mod context;
+pub mod engine;
+pub mod tools;
+
+use std::sync::atomic::AtomicBool;
+
+use chrono::{DateTime, FixedOffset};
+use rusqlite::{params, Connection, OptionalExtension};
+use serde::Serialize;
+use serde_json::Value;
+
+use crate::llm::LlmError;
+
+/// The model as the Q&A panel uses it: one whole (grammar-bound) answer, or an answer streamed
+/// token by token. Both stop with `LlmError::Cancelled` soon after `cancel` is set (FR-QA-013).
+pub trait ChatModel {
+    fn complete(&mut self, body: &Value, cancel: &AtomicBool) -> Result<String, LlmError>;
+    fn stream(&mut self, body: &Value, cancel: &AtomicBool, on_token: &mut dyn FnMut(&str)) -> Result<String, LlmError>;
+}
+
+/// What undoes one write of the assistant (FR-QA-008).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, serde::Deserialize)]
+pub struct Undo {
+    /// `task` (delete it), `task_done` (open it again), `metric` (delete it) or `note` (to the bin).
+    pub kind: String,
+    pub id: String,
+}
+
+/// One tool call as the panel shows it and the history keeps it.
+#[derive(Debug, Clone, PartialEq, Serialize, serde::Deserialize)]
+pub struct ToolRecord {
+    pub tool: String,
+    pub args: Value,
+    pub ok: bool,
+    /// What the tool gave back (shown to the model and, for writes, to the user).
+    pub result: Value,
+    /// Why the call was refused (FR-QA-016), when it was.
+    pub error: Option<String>,
+    pub undo: Option<Undo>,
+}
+
+/// One stored turn (FR-QA-014).
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct Turn {
+    pub turn_id: String,
+    pub question: String,
+    pub answer: String,
+    pub tools: Vec<ToolRecord>,
+    pub created_at: String,
+    /// `done`, `stopped` or `failed`.
+    pub status: String,
+    pub new_topic: bool,
+}
+
+fn turn_from_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<Turn> {
+    let tools: Option<String> = r.get(3)?;
+    Ok(Turn {
+        turn_id: r.get(0)?,
+        question: r.get(1)?,
+        answer: r.get(2)?,
+        tools: tools.and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default(),
+        created_at: r.get(4)?,
+        status: r.get(5)?,
+        new_topic: r.get(6)?,
+    })
+}
+
+const TURN: &str = "SELECT turn_id, question, answer, tool_calls_json, created_at, status, new_topic FROM qa_turn";
+
+/// FR-QA-014: keeps a finished (or stopped, or failed) turn.
+pub fn save_turn(conn: &Connection, turn: &Turn) -> rusqlite::Result<()> {
+    conn.execute(
+        "INSERT INTO qa_turn (turn_id, question, answer, tool_calls_json, created_at, status, new_topic) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        params![
+            turn.turn_id,
+            turn.question,
+            turn.answer,
+            serde_json::to_string(&turn.tools).unwrap_or_else(|_| "[]".into()),
+            turn.created_at,
+            turn.status,
+            turn.new_topic
+        ],
+    )?;
+    Ok(())
+}
+
+/// The last `limit` turns, oldest first (the panel's history).
+pub fn history(conn: &Connection, limit: usize) -> rusqlite::Result<Vec<Turn>> {
+    let mut turns: Vec<Turn> =
+        conn.prepare(&format!("{TURN} ORDER BY created_at DESC, rowid DESC LIMIT ?1"))?.query_map([limit as i64], turn_from_row)?.collect::<Result<_, _>>()?;
+    turns.reverse();
+    Ok(turns)
+}
+
+/// The turns the model sees again (decision A: up to 3), from the latest new topic on, oldest
+/// first. Only finished answers: a stopped or failed one says nothing to build on.
+pub fn follow_up(conn: &Connection, asking_new_topic: bool) -> rusqlite::Result<Vec<Turn>> {
+    if asking_new_topic {
+        return Ok(Vec::new());
+    }
+    let start: Option<String> =
+        conn.query_row("SELECT max(created_at) FROM qa_turn WHERE new_topic = 1", [], |r| r.get(0)).optional()?.flatten();
+    let mut turns: Vec<Turn> = conn
+        .prepare(&format!("{TURN} WHERE status = 'done' AND created_at >= ?1 ORDER BY created_at DESC, rowid DESC LIMIT 3"))?
+        .query_map([start.unwrap_or_default()], turn_from_row)?
+        .collect::<Result<_, _>>()?;
+    turns.reverse();
+    Ok(turns)
+}
+
+/// FR-QA-015 (the UI asks first): every turn goes.
+pub fn clear_history(conn: &Connection) -> rusqlite::Result<usize> {
+    conn.execute("DELETE FROM qa_turn", [])
+}
+
+/// FR-QA-008: takes back one write of the assistant. A note is the caller's (it goes to the
+/// Recycle Bin, which only the desktop shell can reach).
+pub fn undo(conn: &Connection, undo: &Undo, now: DateTime<FixedOffset>) -> Result<(), String> {
+    match undo.kind.as_str() {
+        "task" => crate::tasks::delete_task(conn, &undo.id, now).map_err(|e| e.to_string()),
+        "task_done" => crate::tasks::set_done(conn, &undo.id, false, now).map_err(|e| e.to_string()),
+        "metric" => crate::metrics::delete_metric(conn, &undo.id, now).map_err(|e| e.to_string()),
+        other => Err(format!("cannot undo {other} here")),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn db() -> (tempfile::TempDir, Connection) {
+        let tmp = tempfile::tempdir().unwrap();
+        let conn = crate::db::open_databases(tmp.path()).unwrap().pla;
+        (tmp, conn)
+    }
+
+    fn turn(id: &str, at: &str, status: &str, new_topic: bool) -> Turn {
+        Turn {
+            turn_id: id.into(),
+            question: format!("soru {id}"),
+            answer: format!("cevap {id}"),
+            tools: Vec::new(),
+            created_at: at.into(),
+            status: status.into(),
+            new_topic,
+        }
+    }
+
+    #[test]
+    fn turns_are_kept_and_cleared() {
+        // FR-QA-014/015
+        let (_t, conn) = db();
+        save_turn(&conn, &turn("a", "2026-10-06T10:00:00+03:00", "done", false)).unwrap();
+        save_turn(&conn, &turn("b", "2026-10-06T10:01:00+03:00", "stopped", false)).unwrap();
+        let all = history(&conn, 50).unwrap();
+        assert_eq!(all.iter().map(|t| t.turn_id.as_str()).collect::<Vec<_>>(), ["a", "b"]);
+        assert_eq!(clear_history(&conn).unwrap(), 2);
+        assert!(history(&conn, 50).unwrap().is_empty());
+    }
+
+    #[test]
+    fn follow_ups_see_the_last_three_answers_of_the_topic() {
+        // decision A
+        let (_t, conn) = db();
+        for (i, (status, topic)) in [("done", false), ("done", true), ("done", false), ("failed", false), ("done", false), ("done", false)].iter().enumerate() {
+            save_turn(&conn, &turn(&i.to_string(), &format!("2026-10-06T10:0{i}:00+03:00"), status, *topic)).unwrap();
+        }
+        let seen: Vec<String> = follow_up(&conn, false).unwrap().into_iter().map(|t| t.turn_id).collect();
+        assert_eq!(seen, ["2", "4", "5"], "from the new topic on, finished ones only, at most three");
+        assert!(follow_up(&conn, true).unwrap().is_empty(), "a new topic starts empty");
+    }
+}

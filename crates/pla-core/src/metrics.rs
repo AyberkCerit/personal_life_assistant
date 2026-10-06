@@ -315,17 +315,23 @@ fn check(input: &MetricInput, settings: &ValidationSettings, today: NaiveDate) -
 }
 
 pub fn log_metric(conn: &Connection, input: &MetricInput, settings: &ValidationSettings, now: DateTime<FixedOffset>) -> Result<String, MetricError> {
+    log_metric_as(conn, input, settings, "manual", now)
+}
+
+/// `log_metric` with its origin: `manual`, or `assistant` for the Q&A panel's log_metric (FR-QA-008).
+pub fn log_metric_as(conn: &Connection, input: &MetricInput, settings: &ValidationSettings, origin: &str, now: DateTime<FixedOffset>) -> Result<String, MetricError> {
     let (date, (value, exercise, sets, reps)) = check(input, settings, now.date_naive())?;
     let id = uuid::Uuid::new_v4().simple().to_string();
     conn.execute(
-        "INSERT INTO metric_record (metric_id, type, value_json, unit, date, origin, created_at) VALUES (?1, ?2, ?3, ?4, ?5, 'manual', ?6)",
+        "INSERT INTO metric_record (metric_id, type, value_json, unit, date, origin, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?7, ?6)",
         params![
             id,
             metric_kind_name(input.kind),
             crate::pipeline::items::metric_value_json(value, &exercise, sets, reps),
             canonical_unit_name(input.kind),
             date.format(DATE).to_string(),
-            now.to_rfc3339()
+            now.to_rfc3339(),
+            origin
         ],
     )?;
     Ok(id)
