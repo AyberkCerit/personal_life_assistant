@@ -194,6 +194,8 @@ pub fn parse_note(rel: &str, text: &str) -> ParsedNote {
     let lines: Vec<&str> = text.lines().collect();
     let title = std::path::Path::new(rel).file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
     let (front, body_start) = split_frontmatter(&lines).unwrap_or((Vec::new(), 0));
+    // FR-EDT-007: invalid YAML counts as no frontmatter (its lines are still not the body)
+    let front = if crate::media::read_frontmatter(text).state == crate::media::FrontState::Invalid { Vec::new() } else { front };
     let aliases = yaml_list(&front, &["aliases", "alias"]);
     let mut tags: Vec<String> = Vec::new();
     for t in yaml_list(&front, &["tags", "tag"]) {
