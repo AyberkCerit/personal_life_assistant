@@ -9,8 +9,8 @@ use crate::fs_atomic::write_atomic;
 use crate::pipeline::blocks::content_hash;
 use crate::vault::Vault;
 
-const FORBIDDEN: [char; 11] = ['[', ']', '#', '^', '|', '\\', '/', ':', '*', '"', '?'];
-const FORBIDDEN_EXTRA: [char; 2] = ['<', '>'];
+pub(crate) const FORBIDDEN: [char; 11] = ['[', ']', '#', '^', '|', '\\', '/', ':', '*', '"', '?'];
+pub(crate) const FORBIDDEN_EXTRA: [char; 2] = ['<', '>'];
 
 /// Name part of the copy PLA writes when the user keeps their text after a conflict. Names on disk
 /// are English whatever the UI language (decision 2026-09-26).
@@ -49,6 +49,8 @@ pub enum FileError {
     Exists(String),
     #[error(transparent)]
     Io(#[from] std::io::Error),
+    #[error(transparent)]
+    Db(#[from] rusqlite::Error),
 }
 
 /// A vault-relative path from the UI → an absolute path that is guaranteed to be inside the vault

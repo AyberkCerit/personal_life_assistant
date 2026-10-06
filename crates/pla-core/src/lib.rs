@@ -3,6 +3,7 @@
 pub mod export;
 pub mod extraction;
 pub mod files;
+pub mod fileops;
 pub mod index;
 pub mod jobs;
 pub mod fs_atomic;
