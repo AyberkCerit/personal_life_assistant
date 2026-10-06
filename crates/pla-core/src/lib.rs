@@ -14,6 +14,7 @@ pub mod media;
 pub mod metrics;
 pub mod models;
 pub mod notes;
+pub mod qa;
 pub mod pipeline;
 pub mod reminders;
 pub mod settings;

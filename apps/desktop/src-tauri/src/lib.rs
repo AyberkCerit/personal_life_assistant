@@ -3,6 +3,7 @@
 mod commands;
 pub mod fileops_cmds;
 pub mod media_cmds;
+pub mod qa_cmds;
 pub mod indexer;
 pub mod links_cmds;
 pub mod metrics_cmds;
@@ -88,6 +89,11 @@ pub fn run() {
             media_cmds::note_meta,
             media_cmds::image_bytes,
             media_cmds::save_image,
+            qa_cmds::qa_ask,
+            qa_cmds::qa_stop,
+            qa_cmds::qa_history,
+            qa_cmds::qa_clear,
+            qa_cmds::qa_undo,
             links_cmds::search_notes,
             links_cmds::quick_open,
             links_cmds::backlinks,

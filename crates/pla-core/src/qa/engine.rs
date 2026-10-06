@@ -1,0 +1,570 @@
+//! One question, start to end (FR-QA-003…016): build the context, let the model call up to three
+//! tools through a grammar, then stream its answer in the question's language with its sources.
+
+use std::sync::atomic::AtomicBool;
+
+use chrono::{DateTime, FixedOffset};
+use serde_json::{json, Value};
+
+use super::context::{self, Context, ANSWER_TOKENS};
+use super::tools::{self, Decision, ToolEnv};
+use super::{ChatModel, ToolRecord, Turn};
+use crate::llm::LlmError;
+
+/// Tool calls one question may make.
+pub const MAX_CALLS: usize = 3;
+
+/// What the panel hears while a question is answered.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Progress {
+    /// The model is choosing (`None`) or running a tool.
+    Working(Option<String>),
+    Tool(Box<ToolRecord>),
+    Token(String),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Answer {
+    pub text: String,
+    pub tools: Vec<ToolRecord>,
+    /// Notes the answer rests on (FR-QA-010).
+    pub sources: Vec<String>,
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum QaError {
+    #[error("stopped")]
+    Stopped { partial: String, tools: Vec<ToolRecord> },
+    /// The model failed; `tools` already ran (their undo must not be lost, final review C1).
+    #[error("{error}")]
+    Model { error: LlmError, tools: Vec<ToolRecord> },
+    #[error(transparent)]
+    Db(#[from] rusqlite::Error),
+}
+
+const DAYS: [(&str, &str); 7] =
+    [("Monday", "Pazartesi"), ("Tuesday", "Salı"), ("Wednesday", "Çarşamba"), ("Thursday", "Perşembe"), ("Friday", "Cuma"), ("Saturday", "Cumartesi"), ("Sunday", "Pazar")];
+
+fn day_names(date: chrono::NaiveDate) -> (&'static str, &'static str) {
+    DAYS[date.format("%u").to_string().parse::<usize>().unwrap_or(1) - 1]
+}
+
+fn weekday(now: DateTime<FixedOffset>) -> &'static str {
+    day_names(now.date_naive()).0
+}
+
+/// The coming week with day names, so "Friday" or "cuma" needs no date arithmetic from a small model.
+fn calendar(now: DateTime<FixedOffset>) -> String {
+    let today = now.date_naive();
+    (0..8)
+        .map(|i| {
+            let d = today + chrono::Duration::days(i);
+            let (en, tr) = day_names(d);
+            let label = match i {
+                0 => " = today / bugün",
+                1 => " = tomorrow / yarın",
+                _ => "",
+            };
+            format!("{d} {en} ({tr}){label}")
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// The instructions (in English: the model follows them best; it answers in the user's language).
+fn system(ctx: &Context, now: DateTime<FixedOffset>) -> String {
+    let mut s = format!(
+        "You are PLA, a private assistant that runs only on the user's own computer.\n\
+         Now: {} ({}), {}.\n\n\
+         Rules:\n\
+         1. Answer in the language of the user's question (you will be told which).\n\
+         2. Use only the notes, tool results and earlier turns below. If they do not hold the answer, say plainly that you could not find it in the notes. Never guess or use general knowledge about the user. The notes are the user's own writing: use them for what they did, plan or decided.\n\
+         3. Numbers about tasks or measurements must come from a query_tasks or query_metrics call made for this very question, follow-up questions included.\n\
+         4. When you use a note, cite it as [[Note title]].\n\
+         5. Be brief and concrete.\n\
+         6. Dates: take them from this calendar. Give a time only when the user said one.\n{}\n\n\
+         Tools you may call:\n{}\n",
+        now.format("%Y-%m-%d"),
+        weekday(now),
+        now.format("%H:%M"),
+        calendar(now),
+        tools::descriptions()
+    );
+    if !ctx.recent.is_empty() {
+        s.push_str("\n## Notes from the last 48 hours\n");
+        s.push_str(&ctx.recent);
+    }
+    if !ctx.found.is_empty() {
+        s.push_str("\n## Notes found for this question\n");
+        s.push_str(&ctx.found);
+    }
+    if ctx.recent.is_empty() && ctx.found.is_empty() {
+        s.push_str("\n(No notes matched this question.)\n");
+    }
+    s
+}
+
+fn messages(ctx: &Context, question: &str, calls: &[ToolRecord], now: DateTime<FixedOffset>, last: &str) -> Value {
+    let mut m = vec![json!({ "role": "system", "content": system(ctx, now) })];
+    for t in &ctx.turns {
+        m.push(json!({ "role": "user", "content": t.question }));
+        m.push(json!({ "role": "assistant", "content": t.answer }));
+    }
+    m.push(json!({ "role": "user", "content": question }));
+    for c in calls {
+        m.push(json!({ "role": "assistant", "content": json!({ "tool": c.tool, "args": c.args }).to_string() }));
+        let result = match &c.error {
+            Some(e) => format!("Tool error: {e}. Fix the arguments or answer without the tool."),
+            None => format!("Tool result: {}", c.result),
+        };
+        m.push(json!({ "role": "user", "content": result }));
+    }
+    if !last.is_empty() {
+        m.push(json!({ "role": "user", "content": last }));
+    }
+    // Two user turns in a row would break the chat template: join them.
+    let mut joined: Vec<Value> = Vec::new();
+    for msg in m {
+        match joined.last_mut() {
+            Some(prev) if prev["role"] == msg["role"] && msg["role"] == "user" => {
+                let text = format!("{}\n\n{}", prev["content"].as_str().unwrap_or_default(), msg["content"].as_str().unwrap_or_default());
+                prev["content"] = Value::String(text);
+            }
+            _ => joined.push(msg),
+        }
+    }
+    Value::Array(joined)
+}
+
+const DECIDE: &str = "Decide the next step. Reply with JSON only: {\"tool\":\"<name>\",\"args\":{...}} to call one tool, or {\"tool\":\"answer\"} when you can answer now.\n\
+Call a tool first when:\n\
+- the user tells you about a plan, appointment or something to do on a day (\"I have a doctor's appointment tomorrow at 10\", \"yarın saat 10'da doktor randevum var\") and no add_task for it is in the tool results yet: call add_task;\n\
+- the question asks for numbers, counts, totals or dates of tasks or measurements, also in a follow-up (\"and in the last 2 days?\", \"peki son 2 günde?\"), and this question has no query result yet: call query_tasks or query_metrics;\n\
+- the user reports a measurement (\"I slept 7 hours\", \"2 litre su içtim\"): call log_metric.\n\
+Answer when the tool results already hold what is needed.\n\
+Examples (dates from the calendar above):\n\
+\"Yarın saat 10'da doktor randevum var\" -> {\"tool\":\"add_task\",\"args\":{\"title\":\"Doktor randevusu\",\"date\":\"<tomorrow>\",\"time\":\"10:00\"}}\n\
+\"Cumartesi markete gitmem gerekiyor\" -> {\"tool\":\"add_task\",\"args\":{\"title\":\"Markete git\",\"date\":\"<Saturday>\"}}\n\
+\"I need to pay the rent on Friday\" -> {\"tool\":\"add_task\",\"args\":{\"title\":\"Pay the rent\",\"date\":\"<Friday>\"}}\n\
+\"Bu hafta kaç saat uyudum?\" -> {\"tool\":\"query_metrics\",\"args\":{\"kind\":\"sleep\",\"days\":7}}\n\
+\"Bugün ne yaptım?\" / \"What did I decide about X?\" -> {\"tool\":\"answer\"} (the notes above tell it)";
+/// FR-QA-012: the question's language, told to the model by name ("the question's language" made
+/// it answer in French in the real window). Turkish letters or common Turkish words: Turkish.
+pub fn language(question: &str) -> &'static str {
+    const WORDS: [&str; 24] = [
+        "ve", "bir", "bu", "ne", "mi", "mı", "mu", "için", "nasıl", "kaç", "hangi", "yarın", "bugün", "dün", "gün", "var", "yok", "ben", "benim",
+        "saat", "lazım", "gerek", "ile", "neler",
+    ];
+    let turkish_letter = question.chars().any(|c| "çğıöşüÇĞİÖŞÜ".contains(c));
+    let words: Vec<String> = question.split(|c: char| !c.is_alphanumeric()).map(crate::index::key).collect();
+    let turkish_word = words.iter().any(|w| WORDS.iter().any(|t| crate::index::key(t) == *w));
+    if turkish_letter || turkish_word { "Turkish" } else { "English" }
+}
+
+fn write_instruction(question: &str) -> String {
+    format!("Now write your answer to my last question. Write it in {}.", language(question))
+}
+
+fn decide_body(ctx: &Context, question: &str, calls: &[ToolRecord], now: DateTime<FixedOffset>) -> Value {
+    json!({
+        "messages": messages(ctx, question, calls, now, DECIDE),
+        "temperature": 0,
+        "max_tokens": 400,
+        "cache_prompt": true,
+        "response_format": { "type": "json_schema", "json_schema": { "name": "decision", "schema": tools::decision_schema() } },
+        "chat_template_kwargs": { "enable_thinking": false }
+    })
+}
+
+fn answer_body(ctx: &Context, question: &str, calls: &[ToolRecord], now: DateTime<FixedOffset>) -> Value {
+    json!({
+        "messages": messages(ctx, question, calls, now, &write_instruction(question)),
+        "temperature": 0.3,
+        "max_tokens": ANSWER_TOKENS,
+        "cache_prompt": true,
+        "chat_template_kwargs": { "enable_thinking": false }
+    })
+}
+
+/// A tool result for the model, cut to what is left of the tool share.
+fn trimmed(rec: &ToolRecord, left: &mut usize) -> ToolRecord {
+    let mut rec = rec.clone();
+    let text = rec.result.to_string();
+    let cost = context::tokens(&text) + 30; // with the call and the "Tool result:" wrapper
+    if cost > *left {
+        let keep: String = text.chars().take(*left * 2).collect();
+        rec.result = Value::String(format!("{keep}… (cut: too long)"));
+        *left = 0;
+    } else {
+        *left -= cost;
+    }
+    rec
+}
+
+/// A small model copies the time of an earlier task into a new one ("cuma annemi ara" became a
+/// 10:00 reminder in the real window). A time needs a number in the question; without one it goes.
+fn without_made_up_time(tool: &str, mut args: Value, question: &str) -> Value {
+    if tool == "add_task" && !question.chars().any(|c| c.is_ascii_digit()) {
+        if let Some(o) = args.as_object_mut() {
+            o.remove("time");
+            o.remove("remind");
+        }
+    }
+    args
+}
+
+/// Whether this call was made already for this question: the same call, or a task with the same
+/// title and date (a write must not happen twice because a small model asked twice).
+fn repeats(done: &[ToolRecord], tool: &str, args: &Value) -> bool {
+    let same_task = |r: &ToolRecord| {
+        tool == "add_task"
+            && r.tool == "add_task"
+            && r.args["date"] == args["date"]
+            && crate::index::key(r.args["title"].as_str().unwrap_or_default()) == crate::index::key(args["title"].as_str().unwrap_or_default())
+    };
+    done.iter().any(|r| r.ok && ((r.tool == tool && r.args == *args) || same_task(r)))
+}
+
+/// `[[…]]` targets in `text`, in order, once each.
+pub fn cited(text: &str) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    let mut rest = text;
+    while let Some(open) = rest.find("[[") {
+        let Some(close) = rest[open + 2..].find("]]") else { break };
+        let target = rest[open + 2..open + 2 + close].split(['|', '#']).next().unwrap_or_default().trim().to_owned();
+        if !target.is_empty() && !out.contains(&target) {
+            out.push(target);
+        }
+        rest = &rest[open + 2 + close + 2..];
+    }
+    out
+}
+
+/// FR-QA-003…016 for one question. `turns` are the follow-ups (oldest first).
+pub fn answer(
+    model: &mut dyn ChatModel,
+    env: &ToolEnv<'_>,
+    question: &str,
+    turns: &[Turn],
+    cancel: &AtomicBool,
+    on: &mut dyn FnMut(Progress),
+) -> Result<Answer, QaError> {
+    let ctx = context::build(env.cache, question, turns, env.now)?;
+    let mut calls: Vec<ToolRecord> = Vec::new(); // as the model sees them
+    let mut shown: Vec<ToolRecord> = Vec::new(); // as the user sees them
+    let mut tool_left = ctx.tool_budget;
+    let mut refused_once = false;
+    let stopped = |shown: &[ToolRecord], partial: String| QaError::Stopped { partial, tools: shown.to_vec() };
+    while calls.iter().filter(|c| c.error.is_none()).count() < MAX_CALLS {
+        on(Progress::Working(None));
+        let raw = match model.complete(&decide_body(&ctx, question, &calls, env.now), cancel) {
+            Err(LlmError::Cancelled) => return Err(stopped(&shown, String::new())),
+            Err(error) => return Err(QaError::Model { error, tools: shown }),
+            Ok(raw) => raw,
+        };
+        let (tool, args) = match tools::parse_decision(&raw) {
+            Ok(Decision::Answer) => break,
+            Ok(Decision::Call { tool, args }) => (tool, args),
+            Err(_) => break, // the grammar makes this rare; answer without tools
+        };
+        let args = without_made_up_time(&tool, args, question);
+        if cancel.load(std::sync::atomic::Ordering::SeqCst) {
+            return Err(stopped(&shown, String::new())); // no write after Stop
+        }
+        if repeats(&shown, &tool, &args) {
+            break; // done already (the real window saw one task added three times): answer now
+        }
+        on(Progress::Working(Some(tool.clone())));
+        match tools::run(env, &tool, &args) {
+            Ok(rec) => {
+                calls.push(trimmed(&rec, &mut tool_left));
+                on(Progress::Tool(Box::new(rec.clone())));
+                shown.push(rec);
+            }
+            Err(error) => {
+                // FR-QA-016: the model hears the error once; a second refusal goes to the user.
+                let rec = ToolRecord { tool, args, ok: false, result: Value::Null, error: Some(error), undo: None };
+                calls.push(rec.clone());
+                if refused_once {
+                    on(Progress::Tool(Box::new(rec.clone())));
+                    shown.push(rec);
+                    break;
+                }
+                refused_once = true;
+            }
+        }
+        if tool_left == 0 {
+            break;
+        }
+    }
+    let mut text = String::new();
+    let streamed = model.stream(&answer_body(&ctx, question, &calls, env.now), cancel, &mut |t: &str| {
+        text.push_str(t);
+        on(Progress::Token(t.to_owned()));
+    });
+    match streamed {
+        Err(LlmError::Cancelled) => return Err(stopped(&shown, text)),
+        Err(error) => return Err(QaError::Model { error, tools: shown }),
+        Ok(whole) if text.is_empty() => text = whole,
+        Ok(_) => {}
+    }
+    // FR-QA-010: the notes it cites; when it cites none, the notes its context came from.
+    let mut sources: Vec<String> = Vec::new();
+    for target in cited(&text) {
+        if let Ok(Some(path)) = crate::index::resolve_link(env.cache, &target) {
+            if !sources.contains(&path) {
+                sources.push(path);
+            }
+        }
+    }
+    // Only an answer from the notes falls back on them: not one about what a tool wrote or counted.
+    let from_notes = shown.iter().all(|c| c.tool == "search_notes");
+    if sources.is_empty() && from_notes {
+        let from_search = shown.iter().filter(|c| c.tool == "search_notes").flat_map(|c| c.result["notes"].as_array().cloned().unwrap_or_default());
+        for path in from_search.filter_map(|n| n["note"].as_str().map(str::to_owned)).chain(ctx.sources.iter().cloned()) {
+            if !sources.contains(&path) && sources.len() < 3 {
+                sources.push(path);
+            }
+        }
+    }
+    Ok(Answer { text: text.trim().to_owned(), tools: shown, sources })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::extraction::ValidationSettings;
+    use std::collections::VecDeque;
+    use std::sync::atomic::Ordering;
+
+    /// Answers from a script: decisions first, then the streamed answer.
+    struct Scripted {
+        decisions: VecDeque<String>,
+        answer: String,
+        bodies: Vec<Value>,
+    }
+
+    impl ChatModel for Scripted {
+        fn complete(&mut self, body: &Value, cancel: &AtomicBool) -> Result<String, LlmError> {
+            if cancel.load(Ordering::SeqCst) {
+                return Err(LlmError::Cancelled);
+            }
+            self.bodies.push(body.clone());
+            Ok(self.decisions.pop_front().unwrap_or_else(|| "{\"tool\":\"answer\"}".into()))
+        }
+        fn stream(&mut self, body: &Value, cancel: &AtomicBool, on_token: &mut dyn FnMut(&str)) -> Result<String, LlmError> {
+            self.bodies.push(body.clone());
+            for word in self.answer.split_inclusive(' ') {
+                if cancel.load(Ordering::SeqCst) {
+                    return Err(LlmError::Cancelled);
+                }
+                on_token(word);
+            }
+            Ok(self.answer.clone())
+        }
+    }
+
+    fn scripted(decisions: &[&str], answer: &str) -> Scripted {
+        Scripted { decisions: decisions.iter().map(|s| s.to_string()).collect(), answer: answer.into(), bodies: Vec::new() }
+    }
+
+    struct Env {
+        _tmp: tempfile::TempDir,
+        vault: crate::vault::Vault,
+        pla: rusqlite::Connection,
+        cache: rusqlite::Connection,
+    }
+
+    fn env() -> Env {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(tmp.path().join("kasa")).unwrap();
+        let vault = crate::vault::open_vault(&tmp.path().join("kasa")).unwrap();
+        let dbs = crate::db::open_databases(&tmp.path().join("data")).unwrap();
+        Env { _tmp: tmp, vault, pla: dbs.pla, cache: dbs.cache }
+    }
+
+    fn now() -> DateTime<FixedOffset> {
+        DateTime::parse_from_rfc3339("2026-10-06T09:00:00+03:00").unwrap()
+    }
+
+    #[test]
+    fn a_reminder_from_a_sentence() {
+        // The owner's example: the model adds the reminder, then says so in the question's language.
+        let e = env();
+        let tool_env = ToolEnv { vault: &e.vault, pla: &e.pla, cache: &e.cache, now: now(), validation: ValidationSettings::default() };
+        let mut model = scripted(
+            &["{\"tool\":\"add_task\",\"args\":{\"title\":\"Doktor randevusu\",\"date\":\"2026-10-07\",\"time\":\"10:00\",\"remind\":true}}"],
+            "Yarın 10:00 için hatırlatıcı ekledim.",
+        );
+        let mut events = Vec::new();
+        let a = answer(&mut model, &tool_env, "Yarın saat 10'da doktor randevum var, hatırlat", &[], &AtomicBool::new(false), &mut |p| events.push(p)).unwrap();
+        assert_eq!(a.tools.len(), 1);
+        assert_eq!(a.tools[0].undo.as_ref().unwrap().kind, "task");
+        assert_eq!(a.text, "Yarın 10:00 için hatırlatıcı ekledim.");
+        assert!(events.iter().any(|p| matches!(p, Progress::Tool(r) if r.tool == "add_task")));
+        assert!(events.iter().filter(|p| matches!(p, Progress::Token(_))).count() > 1, "streamed");
+        // the decision is bound by the grammar; the date to resolve "yarın" is in the instructions
+        let decide = &model.bodies[0];
+        assert!(decide["response_format"]["json_schema"]["schema"]["anyOf"].is_array());
+        let system = decide["messages"][0]["content"].as_str().unwrap();
+        assert!(system.contains("2026-10-06 (Tuesday)"));
+        assert!(system.contains("2026-10-07 Wednesday (Çarşamba) = tomorrow / yarın"));
+        assert!(system.contains("2026-10-09 Friday (Cuma)"), "\"cuma\" needs no arithmetic");
+        assert!(a.sources.is_empty(), "an answer about what a tool did names no notes");
+    }
+
+    #[test]
+    fn a_time_the_user_did_not_say_is_dropped() {
+        let e = env();
+        let tool_env = ToolEnv { vault: &e.vault, pla: &e.pla, cache: &e.cache, now: now(), validation: ValidationSettings::default() };
+        let call = "{\"tool\":\"add_task\",\"args\":{\"title\":\"Annemi ara\",\"date\":\"2026-10-09\",\"time\":\"10:00\",\"remind\":true}}";
+        let mut model = scripted(&[call], "Tamam.");
+        let a = answer(&mut model, &tool_env, "Cuma günü annemi aramam lazım", &[], &AtomicBool::new(false), &mut |_| {}).unwrap();
+        assert_eq!((a.tools[0].result["time"].clone(), a.tools[0].result["remind"].clone()), (Value::Null, Value::Bool(false)));
+        let mut model = scripted(&[call], "Tamam.");
+        let a = answer(&mut model, &tool_env, "Cuma 10'da annemi ara", &[], &AtomicBool::new(false), &mut |_| {}).unwrap();
+        assert_eq!(a.tools[0].result["time"], "10:00", "said, so kept");
+    }
+
+    /// Decides once, then fails while answering (llama-server died).
+    struct Breaks;
+    impl ChatModel for Breaks {
+        fn complete(&mut self, _: &Value, _: &AtomicBool) -> Result<String, LlmError> {
+            Ok("{\"tool\":\"add_task\",\"args\":{\"title\":\"Doktor\",\"date\":\"2026-10-07\"}}".into())
+        }
+        fn stream(&mut self, _: &Value, _: &AtomicBool, _: &mut dyn FnMut(&str)) -> Result<String, LlmError> {
+            Err(LlmError::Http("the answer stream broke off".into()))
+        }
+    }
+
+    #[test]
+    fn a_failed_answer_keeps_what_its_tools_did() {
+        // final review C1: the task stays, so its undo must too
+        let e = env();
+        let tool_env = ToolEnv { vault: &e.vault, pla: &e.pla, cache: &e.cache, now: now(), validation: ValidationSettings::default() };
+        let err = answer(&mut Breaks, &tool_env, "Yarın doktor", &[], &AtomicBool::new(false), &mut |_| {}).unwrap_err();
+        let QaError::Model { tools, .. } = err else { panic!("expected a model error") };
+        assert_eq!(tools.len(), 1);
+        assert!(tools[0].undo.is_some());
+    }
+
+    #[test]
+    fn nothing_is_written_after_stop() {
+        let e = env();
+        let tool_env = ToolEnv { vault: &e.vault, pla: &e.pla, cache: &e.cache, now: now(), validation: ValidationSettings::default() };
+        let cancel = AtomicBool::new(false);
+        let mut model = scripted(&["{\"tool\":\"add_task\",\"args\":{\"title\":\"x\",\"date\":\"2026-10-07\"}}"], "");
+        let err = answer(&mut model, &tool_env, "x ekle", &[], &cancel, &mut |p| {
+            if matches!(p, Progress::Working(None)) {
+                cancel.store(true, Ordering::SeqCst); // Stop lands while the model decides
+            }
+        });
+        assert!(matches!(err, Err(QaError::Stopped { .. })));
+        let n: i64 = e.pla.query_row("SELECT count(*) FROM task", [], |r| r.get(0)).unwrap();
+        assert_eq!(n, 0);
+    }
+
+    #[test]
+    fn a_task_asked_for_twice_is_added_once() {
+        let e = env();
+        let tool_env = ToolEnv { vault: &e.vault, pla: &e.pla, cache: &e.cache, now: now(), validation: ValidationSettings::default() };
+        let call = "{\"tool\":\"add_task\",\"args\":{\"title\":\"Market alışverişi\",\"date\":\"2026-10-10\"}}";
+        let again = "{\"tool\":\"add_task\",\"args\":{\"title\":\"market ALIŞVERİŞİ\",\"date\":\"2026-10-10\"}}";
+        let mut model = scripted(&[call, again, call], "Ekledim.");
+        let a = answer(&mut model, &tool_env, "Cumartesi markete gitmem gerekiyor", &[], &AtomicBool::new(false), &mut |_| {}).unwrap();
+        assert_eq!(a.tools.len(), 1);
+        let n: i64 = e.pla.query_row("SELECT count(*) FROM task", [], |r| r.get(0)).unwrap();
+        assert_eq!(n, 1);
+    }
+
+    #[test]
+    fn a_bad_call_is_returned_once_then_shown_to_the_user() {
+        // FR-QA-016
+        let e = env();
+        let tool_env = ToolEnv { vault: &e.vault, pla: &e.pla, cache: &e.cache, now: now(), validation: ValidationSettings::default() };
+        let bad = "{\"tool\":\"add_task\",\"args\":{\"title\":\"x\",\"date\":\"yarın\"}}";
+        let mut model = scripted(&[bad, bad], "Ekleyemedim.");
+        let a = answer(&mut model, &tool_env, "x ekle", &[], &AtomicBool::new(false), &mut |_| {}).unwrap();
+        assert_eq!(a.tools.len(), 1, "only the second refusal reaches the user");
+        assert!(a.tools[0].error.as_deref().unwrap().contains("not a date"));
+        let second = model.bodies[1]["messages"].as_array().unwrap();
+        assert!(second.last().unwrap()["content"].as_str().unwrap().contains("Tool error"), "the model heard the first one");
+    }
+
+    #[test]
+    fn at_most_three_tool_calls() {
+        let e = env();
+        let tool_env = ToolEnv { vault: &e.vault, pla: &e.pla, cache: &e.cache, now: now(), validation: ValidationSettings::default() };
+        let q = |list: &str| format!("{{\"tool\":\"query_tasks\",\"args\":{{\"list\":\"{list}\"}}}}");
+        let calls = [q("today"), q("upcoming"), q("completed"), q("all"), q("today")];
+        let mut model = scripted(&calls.iter().map(String::as_str).collect::<Vec<_>>(), "Tamam.");
+        let a = answer(&mut model, &tool_env, "görevlerim", &[], &AtomicBool::new(false), &mut |_| {}).unwrap();
+        assert_eq!(a.tools.len(), MAX_CALLS);
+    }
+
+    #[test]
+    fn stop_keeps_what_was_said_and_done() {
+        // FR-QA-013
+        let e = env();
+        let tool_env = ToolEnv { vault: &e.vault, pla: &e.pla, cache: &e.cache, now: now(), validation: ValidationSettings::default() };
+        let cancel = AtomicBool::new(false);
+        let mut model = scripted(&[], "bir iki üç dört beş");
+        let mut seen = 0;
+        let err = answer(&mut model, &tool_env, "say", &[], &cancel, &mut |p| {
+            if matches!(p, Progress::Token(_)) {
+                seen += 1;
+                if seen == 2 {
+                    cancel.store(true, Ordering::SeqCst);
+                }
+            }
+        })
+        .unwrap_err();
+        let QaError::Stopped { partial, .. } = err else { panic!("expected Stopped") };
+        assert_eq!(partial, "bir iki ");
+    }
+
+    #[test]
+    fn answers_name_their_sources() {
+        // FR-QA-010
+        let e = env();
+        crate::index::index_note(&e.cache, "notes/PLA.md", "# PLA\n\nKarar: Tauri kullanılacak.", 0, 1).unwrap();
+        let tool_env = ToolEnv { vault: &e.vault, pla: &e.pla, cache: &e.cache, now: now(), validation: ValidationSettings::default() };
+        let mut model = scripted(&[], "Tauri seçildi ([[PLA]]).");
+        let a = answer(&mut model, &tool_env, "PLA kararları neler", &[], &AtomicBool::new(false), &mut |_| {}).unwrap();
+        assert_eq!(a.sources, ["notes/PLA.md"]);
+        let mut model = scripted(&[], "Tauri seçildi.");
+        let a = answer(&mut model, &tool_env, "PLA kararları neler", &[], &AtomicBool::new(false), &mut |_| {}).unwrap();
+        assert_eq!(a.sources, ["notes/PLA.md"], "uncited: the notes its context came from");
+        assert_eq!(cited("[[A|x]] ve [[B#h]] ve [[A]]"), ["A", "B"]);
+    }
+
+    #[test]
+    fn the_answer_language_is_named() {
+        // FR-QA-012
+        assert_eq!(language("Bugün ne yaptım?"), "Turkish");
+        assert_eq!(language("Yarin doktora gidecegim"), "Turkish", "Turkish words without Turkish letters");
+        assert_eq!(language("How many hours did I sleep?"), "English");
+        assert_eq!(language("I have to send the report to Ali tomorrow"), "English");
+    }
+
+    #[test]
+    fn follow_ups_go_back_to_the_model() {
+        let e = env();
+        let tool_env = ToolEnv { vault: &e.vault, pla: &e.pla, cache: &e.cache, now: now(), validation: ValidationSettings::default() };
+        let earlier = Turn {
+            turn_id: "1".into(),
+            question: "Yarın ne işim var?".into(),
+            answer: "Dişçi.".into(),
+            tools: Vec::new(),
+            created_at: String::new(),
+            status: "done".into(),
+            new_topic: false,
+        };
+        let mut model = scripted(&[], "Cuma boş.");
+        answer(&mut model, &tool_env, "Peki ya cuma?", &[earlier], &AtomicBool::new(false), &mut |_| {}).unwrap();
+        let msgs = model.bodies[1]["messages"].as_array().unwrap();
+        assert_eq!(msgs[1]["content"], "Yarın ne işim var?");
+        assert_eq!(msgs[2]["content"], "Dişçi.");
+        assert!(msgs.last().unwrap()["content"].as_str().unwrap().starts_with("Peki ya cuma?"));
+    }
+}
