@@ -111,6 +111,30 @@ pub fn follow_up(conn: &Connection, asking_new_topic: bool) -> rusqlite::Result<
     Ok(turns)
 }
 
+/// The undo of tool call `index` in turn `turn_id`, still to be done. Once taken it is gone from the
+/// stored turn, so a reopened panel does not offer it again (FR-QA-008).
+pub fn take_undo(conn: &Connection, turn_id: &str, index: usize) -> rusqlite::Result<Option<Undo>> {
+    let Some(mut turn) = conn.query_row(&format!("{TURN} WHERE turn_id = ?1"), [turn_id], turn_from_row).optional()? else { return Ok(None) };
+    let Some(record) = turn.tools.get_mut(index) else { return Ok(None) };
+    let Some(undo) = record.undo.take() else { return Ok(None) };
+    record.result["undone"] = Value::Bool(true);
+    conn.execute("UPDATE qa_turn SET tool_calls_json = ?2 WHERE turn_id = ?1", params![turn_id, serde_json::to_string(&turn.tools).unwrap_or_default()])?;
+    Ok(Some(undo))
+}
+
+/// Puts an undo back when carrying it out failed, so the user can try again.
+pub fn restore_undo(conn: &Connection, turn_id: &str, index: usize, undo: Undo) -> rusqlite::Result<()> {
+    let Some(mut turn) = conn.query_row(&format!("{TURN} WHERE turn_id = ?1"), [turn_id], turn_from_row).optional()? else { return Ok(()) };
+    if let Some(record) = turn.tools.get_mut(index) {
+        record.undo = Some(undo);
+        if let Some(o) = record.result.as_object_mut() {
+            o.remove("undone");
+        }
+    }
+    conn.execute("UPDATE qa_turn SET tool_calls_json = ?2 WHERE turn_id = ?1", params![turn_id, serde_json::to_string(&turn.tools).unwrap_or_default()])?;
+    Ok(())
+}
+
 /// FR-QA-015 (the UI asks first): every turn goes.
 pub fn clear_history(conn: &Connection) -> rusqlite::Result<usize> {
     conn.execute("DELETE FROM qa_turn", [])
@@ -157,7 +181,24 @@ mod tests {
         save_turn(&conn, &turn("b", "2026-10-06T10:01:00+03:00", "stopped", false)).unwrap();
         let all = history(&conn, 50).unwrap();
         assert_eq!(all.iter().map(|t| t.turn_id.as_str()).collect::<Vec<_>>(), ["a", "b"]);
-        assert_eq!(clear_history(&conn).unwrap(), 2);
+        // an undo is offered once
+        let mut with_tool = turn("c", "2026-10-06T10:02:00+03:00", "done", false);
+        with_tool.tools.push(ToolRecord {
+            tool: "add_task".into(),
+            args: Value::Null,
+            ok: true,
+            result: serde_json::json!({ "task_id": "x" }),
+            error: None,
+            undo: Some(Undo { kind: "task".into(), id: "x".into() }),
+        });
+        save_turn(&conn, &with_tool).unwrap();
+        let undo = take_undo(&conn, "c", 0).unwrap().unwrap();
+        assert_eq!(undo.id, "x");
+        assert_eq!(take_undo(&conn, "c", 0).unwrap(), None);
+        assert_eq!(history(&conn, 50).unwrap()[2].tools[0].result["undone"], true);
+        restore_undo(&conn, "c", 0, undo).unwrap();
+        assert!(take_undo(&conn, "c", 0).unwrap().is_some(), "a failed undo can be tried again");
+        assert_eq!(clear_history(&conn).unwrap(), 3);
         assert!(history(&conn, 50).unwrap().is_empty());
     }
 

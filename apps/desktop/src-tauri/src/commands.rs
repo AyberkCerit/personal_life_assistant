@@ -43,6 +43,8 @@ pub struct Session {
     pub indexer: crate::indexer::IndexerHandle,
     /// The UI's reading connection to `cache.db` (search, backlinks, tags).
     pub cache: Mutex<Connection>,
+    /// For the worker's own reading connection while it answers a question (FR-QA-003).
+    pub cache_path: std::path::PathBuf,
     pub worker: WorkerHandle,
 }
 
@@ -163,7 +165,7 @@ fn start_session(app: &AppHandle, root: &Path, settings: &AppSettings, own: Arc<
             }
         }
     });
-    Ok(Session { vault, scheduler, pending, db: Mutex::new(ui_db), status, _watch: watch_handle, indexer, cache: Mutex::new(cache), worker: handle })
+    Ok(Session { vault, scheduler, pending, db: Mutex::new(ui_db), status, _watch: watch_handle, indexer, cache: Mutex::new(cache), cache_path: dir.join("cache.db"), worker: handle })
 }
 
 fn with_vault<T>(state: &State<AppState>, f: impl FnOnce(&Vault) -> Result<T, FileError>) -> Result<T, String> {

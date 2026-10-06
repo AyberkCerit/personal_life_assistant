@@ -14,6 +14,9 @@ use chrono::NaiveDate;
 use pla_core::llm::LlmError;
 use pla_core::pipeline::items::ItemRef;
 use pla_core::pipeline::{enqueue, enqueue_all, process_queue_with, queued_notes, Extractor, Outcome, PipelineSettings};
+use pla_core::qa::engine::{self, Progress, QaError};
+use pla_core::qa::tools::ToolEnv;
+use pla_core::qa::{self, ToolRecord, Turn};
 use pla_core::vault::Vault;
 use rusqlite::Connection;
 use serde::Serialize;
@@ -24,7 +27,7 @@ const EXTERNAL_DELAY: Duration = Duration::from_secs(45);
 /// FR-MDL-013: the model process stops after this long without requests.
 const MODEL_IDLE_AFTER: Duration = Duration::from_secs(60);
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub enum Command {
     Enqueue(String),
     EnqueueLater(String),
@@ -36,7 +39,38 @@ pub enum Command {
     UseModel(pla_core::llm::ServerConfig),
     /// FR-MDL-019: stop and forget the model (ends llama-server), then answer, so the file can go.
     DropModel(std::sync::mpsc::Sender<()>),
+    /// FR-QA-003: answer a question with the same model; extraction waits (see `WorkerHandle::ask`).
+    Ask(AskJob),
     Shutdown,
+}
+
+/// One question for the assistant. `on` hears the progress; `cancel` is the Stop button.
+pub struct AskJob {
+    pub turn_id: String,
+    pub question: String,
+    pub new_topic: bool,
+    pub cache_path: std::path::PathBuf,
+    pub cancel: Arc<AtomicBool>,
+    pub on: Box<dyn Fn(QaEvent) + Send>,
+}
+
+impl std::fmt::Debug for AskJob {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AskJob").field("turn_id", &self.turn_id).finish_non_exhaustive()
+    }
+}
+
+/// What the Q&A panel hears (`qa-event`), all for one `turn_id`.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum QaEvent {
+    /// The model is choosing (no tool) or running a tool.
+    Working { turn_id: String, tool: Option<String> },
+    Tool { turn_id: String, record: Box<ToolRecord> },
+    Token { turn_id: String, text: String },
+    Done { turn_id: String, turn: Box<Turn>, sources: Vec<String> },
+    /// `no_model`, `model` (llama-server failed) or `db`.
+    Failed { turn_id: String, code: String, detail: String },
 }
 
 /// The running worker. Dropping it (or `shutdown`) stops the current run between two model calls,
@@ -46,6 +80,7 @@ pub struct WorkerHandle {
     cancel: Arc<AtomicBool>,
     pause: Arc<AtomicBool>,
     dropping: Arc<AtomicBool>,
+    asking: Arc<AtomicBool>,
     join: Option<JoinHandle<()>>,
 }
 
@@ -65,6 +100,13 @@ impl WorkerHandle {
     pub fn drop_model(&self, done: Sender<()>) {
         self.dropping.store(true, Ordering::SeqCst);
         self.send(Command::DropModel(done));
+    }
+
+    /// FR-QA-003: a question goes before the queue: a running extraction stops between two notes
+    /// (the rest stays queued, as with a pause) and goes on after the answer.
+    pub fn ask(&self, job: AskJob) {
+        self.asking.store(true, Ordering::SeqCst);
+        self.send(Command::Ask(job));
     }
 
     pub fn sender(&self) -> Sender<Command> {
@@ -95,6 +137,7 @@ struct Cancellable<'a> {
     cancel: &'a AtomicBool,
     pause: &'a AtomicBool,
     dropping: &'a AtomicBool,
+    asking: &'a AtomicBool,
 }
 
 impl Extractor for Cancellable<'_> {
@@ -107,6 +150,9 @@ impl Extractor for Cancellable<'_> {
         }
         if self.dropping.load(Ordering::SeqCst) {
             return Err(LlmError::Http("the model is being removed".into()));
+        }
+        if self.asking.load(Ordering::SeqCst) {
+            return Err(LlmError::Http("answering a question first".into()));
         }
         self.inner.extract_raw(reference, text)
     }
@@ -157,6 +203,7 @@ pub struct Worker {
     cancel: Arc<AtomicBool>,
     pause: Arc<AtomicBool>,
     dropping: Arc<AtomicBool>,
+    asking: Arc<AtomicBool>,
     on_added: Option<AddedListener>,
     /// Reads titles of added items while the main connection is busy in the pipeline.
     reader: Option<Connection>,
@@ -178,6 +225,7 @@ impl Worker {
             cancel: Arc::new(AtomicBool::new(false)),
             pause: Arc::new(AtomicBool::new(false)),
             dropping: Arc::new(AtomicBool::new(false)),
+            asking: Arc::new(AtomicBool::new(false)),
             on_added: None,
             reader,
             status: WorkerStatus { queued: 0, model, busy: false, last_error: None, added: 0, paused: false },
@@ -206,9 +254,10 @@ impl Worker {
 
     pub fn spawn(self) -> WorkerHandle {
         let (tx, rx) = mpsc::channel();
-        let (cancel, pause, dropping) = (Arc::clone(&self.cancel), Arc::clone(&self.pause), Arc::clone(&self.dropping));
+        let (cancel, pause, dropping, asking) =
+            (Arc::clone(&self.cancel), Arc::clone(&self.pause), Arc::clone(&self.dropping), Arc::clone(&self.asking));
         let join = std::thread::Builder::new().name("pla-worker".into()).spawn(move || self.run(rx)).expect("spawn worker");
-        WorkerHandle { tx, cancel, pause, dropping, join: Some(join) }
+        WorkerHandle { tx, cancel, pause, dropping, asking, join: Some(join) }
     }
 
     fn run(mut self, rx: Receiver<Command>) {
@@ -250,6 +299,11 @@ impl Worker {
                     self.status.last_error = None; // the interrupted run's "being removed" is no error
                     self.publish();
                     let _ = done.send(());
+                }
+                Ok(Command::Ask(job)) => {
+                    self.ask(job);
+                    self.asking.store(false, Ordering::SeqCst);
+                    self.process(); // what the question interrupted
                 }
                 Ok(Command::Rescan) => {
                     if let Err(e) = enqueue_all(&self.vault, &self.conn, (self.clock)()) {
@@ -307,7 +361,8 @@ impl Worker {
             self.status.queued = queued_notes(&self.conn).map_or(0, |q| q.len());
             (self.notify)(&self.status); // field borrows: the extractor stays borrowed
             let now = (self.clock)();
-            let mut guarded = Cancellable { inner: extractor.as_mut(), cancel: &self.cancel, pause: &self.pause, dropping: &self.dropping };
+            let mut guarded =
+                Cancellable { inner: extractor.as_mut(), cancel: &self.cancel, pause: &self.pause, dropping: &self.dropping, asking: &self.asking };
             let (reader, listener, added) = (&self.reader, &self.on_added, &mut self.status.added);
             // Each note's additions are reported as soon as it is done (FR-EXT-015), not at the end of a long run.
             let mut on_note = |_: &str, outcomes: &[Outcome]| {
@@ -331,10 +386,63 @@ impl Worker {
                 self.status.paused = true; // stopped by a pause, not by a failure
                 self.status.last_error = None;
             }
+            if self.asking.load(Ordering::SeqCst) {
+                self.status.last_error = None; // stopped for a question; it goes on afterwards
+            }
             self.status.busy = false;
         }
         self.status.model = self.model_state();
         self.status.queued = queued_notes(&self.conn).map_or(0, |q| q.len());
+        self.publish();
+    }
+
+    /// FR-QA-003…016 on the worker thread, which owns the model and pla.db (tools write there).
+    fn ask(&mut self, job: AskJob) {
+        let AskJob { turn_id, question, new_topic, cache_path, cancel, on } = job;
+        let fail = |code: &str, detail: String| on(QaEvent::Failed { turn_id: turn_id.clone(), code: code.into(), detail });
+        let Some(model) = self.extractor.as_mut().and_then(|x| x.chat_model()) else {
+            fail("no_model", String::new());
+            return;
+        };
+        let cache = match pla_core::db::connect(&cache_path) {
+            Ok(c) => c,
+            Err(e) => return fail("db", e.to_string()),
+        };
+        let turns = qa::follow_up(&self.conn, new_topic).unwrap_or_default();
+        let now = (self.clock)();
+        let env = ToolEnv { vault: &self.vault, pla: &self.conn, cache: &cache, now, validation: PipelineSettings::default().validation };
+        self.status.busy = true;
+        (self.notify)(&self.status);
+        let result = engine::answer(model, &env, &question, &turns, &cancel, &mut |p| {
+            let event = match p {
+                Progress::Working(tool) => QaEvent::Working { turn_id: turn_id.clone(), tool },
+                Progress::Tool(record) => QaEvent::Tool { turn_id: turn_id.clone(), record },
+                Progress::Token(text) => QaEvent::Token { turn_id: turn_id.clone(), text },
+            };
+            on(event);
+        });
+        let turn = |answer: String, tools: Vec<ToolRecord>, status: &str| Turn {
+            turn_id: turn_id.clone(),
+            question: question.clone(),
+            answer,
+            tools,
+            created_at: now.to_rfc3339(),
+            status: status.into(),
+            new_topic,
+        };
+        let (saved, sources, failure) = match result {
+            Ok(a) => (turn(a.text, a.tools, "done"), a.sources, None),
+            Err(QaError::Stopped { partial, tools }) => (turn(partial, tools, "stopped"), Vec::new(), None),
+            Err(QaError::Model(e)) => (turn(String::new(), Vec::new(), "failed"), Vec::new(), Some(("model", e.to_string()))),
+            Err(QaError::Db(e)) => (turn(String::new(), Vec::new(), "failed"), Vec::new(), Some(("db", e.to_string()))),
+        };
+        let _ = qa::save_turn(&self.conn, &saved); // FR-QA-014, also a stopped or failed one
+        match failure {
+            Some((code, detail)) => fail(code, detail),
+            None => on(QaEvent::Done { turn_id: turn_id.clone(), turn: Box::new(saved), sources }),
+        }
+        self.status.busy = false;
+        self.status.model = self.model_state();
         self.publish();
     }
 
@@ -404,6 +512,108 @@ mod tests {
 
     fn task_count(data: &std::path::Path) -> i64 {
         rusqlite::Connection::open(data.join("pla.db")).unwrap().query_row("SELECT COUNT(*) FROM task", [], |r| r.get(0)).unwrap()
+    }
+
+    /// Extracts slowly (one second a note) and answers questions from a script.
+    struct Chatty {
+        extract_delay: Duration,
+    }
+    impl Extractor for Chatty {
+        fn extract_raw(&mut self, _: NaiveDate, _: &str) -> Result<String, LlmError> {
+            std::thread::sleep(self.extract_delay);
+            Ok(TASK.to_owned())
+        }
+        fn chat_model(&mut self) -> Option<&mut dyn pla_core::qa::ChatModel> {
+            Some(self)
+        }
+    }
+    impl pla_core::qa::ChatModel for Chatty {
+        fn complete(&mut self, _: &serde_json::Value, _: &AtomicBool) -> Result<String, LlmError> {
+            Ok(r#"{"tool":"add_task","args":{"title":"Doktor randevusu","date":"2026-10-07","time":"10:00","remind":true}}"#.into())
+        }
+        fn stream(&mut self, _: &serde_json::Value, _: &AtomicBool, on: &mut dyn FnMut(&str)) -> Result<String, LlmError> {
+            on("Hatırlatıcı ");
+            on("eklendi.");
+            Ok("Hatırlatıcı eklendi.".into())
+        }
+    }
+
+    fn ask(handle: &WorkerHandle, data: &std::path::Path, question: &str) -> std::sync::mpsc::Receiver<QaEvent> {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let tx = Mutex::new(tx);
+        handle.ask(AskJob {
+            turn_id: "t1".into(),
+            question: question.into(),
+            new_topic: false,
+            cache_path: data.join("cache.db"),
+            cancel: Arc::new(AtomicBool::new(false)),
+            on: Box::new(move |e| {
+                let _ = tx.lock().unwrap().send(e);
+            }),
+        });
+        rx
+    }
+
+    fn until_end(rx: &std::sync::mpsc::Receiver<QaEvent>) -> Vec<QaEvent> {
+        let mut events = Vec::new();
+        loop {
+            let e = rx.recv_timeout(Duration::from_secs(10)).expect("the answer never ended");
+            let end = matches!(e, QaEvent::Done { .. } | QaEvent::Failed { .. });
+            events.push(e);
+            if end {
+                return events;
+            }
+        }
+    }
+
+    #[test]
+    fn a_question_is_answered_with_tools_and_kept() {
+        // FR-QA-003/008/014
+        let (_tmp, handle, statuses, data) = setup(Some(Box::new(Chatty { extract_delay: Duration::ZERO })));
+        wait_for(&statuses, |s| !s.busy && s.queued == 0);
+        let events = until_end(&ask(&handle, &data, "Yarın 10'da doktor randevum var, hatırlat"));
+        assert!(events.iter().any(|e| matches!(e, QaEvent::Tool { record, .. } if record.tool == "add_task" && record.ok)));
+        let QaEvent::Done { turn, .. } = events.last().unwrap() else { panic!("{events:?}") };
+        assert_eq!(turn.answer, "Hatırlatıcı eklendi.");
+        let conn = rusqlite::Connection::open(data.join("pla.db")).unwrap();
+        let origin: String = conn.query_row("SELECT origin FROM task WHERE title = 'Doktor randevusu'", [], |r| r.get(0)).unwrap();
+        assert_eq!(origin, "assistant");
+        let kept: i64 = conn.query_row("SELECT count(*) FROM qa_turn", [], |r| r.get(0)).unwrap();
+        assert_eq!(kept, 1);
+        handle.shutdown();
+    }
+
+    #[test]
+    fn without_a_model_the_panel_hears_so() {
+        // FR-QA-002
+        let (_tmp, handle, _statuses, data) = setup(None);
+        let events = until_end(&ask(&handle, &data, "merhaba"));
+        assert!(matches!(&events[..], [QaEvent::Failed { code, .. }] if code == "no_model"));
+        handle.shutdown();
+    }
+
+    #[test]
+    fn a_question_goes_before_a_long_extraction_which_then_goes_on() {
+        // FR-QA-003: the queue waits, nothing is lost and no error is reported for the pause
+        let tmp = tempfile::tempdir().unwrap();
+        let vault = open_vault(tmp.path()).unwrap();
+        for i in 0..6 {
+            std::fs::write(vault.root.join(format!("notes/n{i}.md")), format!("Not {i}: yarın dişçi.")).unwrap();
+        }
+        let data = tmp.path().join(".data");
+        let conn = open_databases(&data).unwrap().pla;
+        let statuses = Arc::new(Mutex::new(Vec::new()));
+        let sink = Arc::clone(&statuses);
+        let handle = Worker::new(vault, conn, Some(Box::new(Chatty { extract_delay: Duration::from_millis(400) })), Box::new(move |s| sink.lock().unwrap().push(s.clone())))
+            .spawn();
+        wait_for(&statuses, |s| s.busy);
+        let started = Instant::now();
+        let events = until_end(&ask(&handle, &data, "hatırlat"));
+        assert!(matches!(events.last(), Some(QaEvent::Done { .. })));
+        assert!(started.elapsed() < Duration::from_secs(2), "answered after {:?}, not after the whole queue", started.elapsed());
+        let done = wait_for(&statuses, |s| !s.busy && s.queued == 0);
+        assert_eq!(done.last_error, None);
+        handle.shutdown();
     }
 
     #[test]

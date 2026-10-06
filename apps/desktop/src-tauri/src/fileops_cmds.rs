@@ -191,7 +191,7 @@ pub fn delete_entry(app: AppHandle, state: State<AppState>, path: String) -> Res
 }
 
 #[cfg(windows)]
-fn to_recycle_bin(path: &Path) -> Result<(), String> {
+pub(crate) fn to_recycle_bin(path: &Path) -> Result<(), String> {
     use windows_sys::Win32::UI::Shell::{SHFileOperationW, FOF_ALLOWUNDO, FOF_NOCONFIRMATION, FOF_NOERRORUI, FOF_SILENT, FOF_WANTNUKEWARNING, FO_DELETE, SHFILEOPSTRUCTW};
     // a list of paths, each NUL-terminated, ended by one more NUL
     let from: Vec<u16> = path.as_os_str().to_string_lossy().encode_utf16().chain([0, 0]).collect();
@@ -216,7 +216,7 @@ fn to_recycle_bin(path: &Path) -> Result<(), String> {
 }
 
 #[cfg(not(windows))]
-fn to_recycle_bin(path: &Path) -> Result<(), String> {
+pub(crate) fn to_recycle_bin(path: &Path) -> Result<(), String> {
     Err(format!("no Recycle Bin here for {}", path.display()))
 }
 
