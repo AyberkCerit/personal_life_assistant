@@ -1,7 +1,7 @@
 // Browser-only stand-in for the Rust commands, so the UI can be checked with `npm run dev`.
 const files = new Map<string, string>([
   ["daily/2026/2026-10-06.md", "Yarın 9'da dişçi var.\n\nDün 7 saat uyudum.\n"],
-  ["notes/Fikirler.md", "# Fikirler\n\n- [ ] Blog yazısı\n"],
+  ["notes/Fikirler.md", "# Fikirler\n\n- [ ] Blog yazısı #yazı\n\nDişçi notu: [[2026-10-06]] günü.\n"],
   ["inbox/Hoş geldin.md", "Bu, PLA'nın tarayıcıdaki deneme kasası.\n"],
 ]);
 import type { Task } from "./tasks";
@@ -173,6 +173,55 @@ function mockMetrics(cmd: string, args: Record<string, unknown>): unknown {
   return undefined;
 }
 
+// Links and search stand-in: plain substring search over the mock files, same shapes as Rust.
+function mockLinks(cmd: string, args: Record<string, unknown>): unknown {
+  const title = (p: string) => p.split("/").pop()!.replace(/\.md$/i, "");
+  const fold = (s: string) => s.toLocaleLowerCase("tr");
+  switch (cmd) {
+    case "search_notes": {
+      const words = fold(String(args.query)).split(/\s+/).filter(Boolean);
+      if (!words.length && !args.tag) return [];
+      return [...files.entries()]
+        .filter(([p, text]) => (!args.folder || p.startsWith(`${args.folder}/`)) && (!args.tag || fold(text).includes(`#${fold(String(args.tag))}`)) && words.every((w) => fold(text + " " + title(p)).includes(w)))
+        .map(([p, text]) => {
+          const line = text.split("\n").find((l) => words.some((w) => fold(l).includes(w))) ?? null;
+          const snippet = words.reduce((s, w) => s.replace(new RegExp(w, "i"), (m) => `\u0002${m}\u0003`), (line ?? text).slice(0, 100));
+          return { note_path: p, title: title(p), snippet, line_text: line };
+        });
+    }
+    case "quick_open": {
+      const q = fold(String(args.query));
+      return [...files.keys()].filter((p) => fold(p).includes(q)).slice(0, 20).map((p) => ({ note_path: p, title: title(p), alias: null }));
+    }
+    case "backlinks": {
+      const name = fold(title(String(args.path)));
+      const out: unknown[] = [];
+      for (const [p, text] of files) {
+        if (p === args.path) continue;
+        text.split("\n").forEach((l, i) => {
+          if (fold(l).includes(`[[${name}`)) out.push({ source_path: p, source_title: title(p), line: i + 1, line_text: l });
+        });
+      }
+      return out;
+    }
+    case "list_tags": {
+      const counts = new Map<string, number>();
+      for (const text of files.values()) for (const m of new Set(text.match(/#[\p{L}\p{N}_/-]+/gu) ?? [])) counts.set(fold(m.slice(1)), (counts.get(fold(m.slice(1))) ?? 0) + 1);
+      return [...counts].sort().map(([tag, count]) => ({ tag, count }));
+    }
+    case "open_link": {
+      const target = fold(String(args.target).split("#")[0]);
+      const hit = [...files.keys()].find((p) => fold(title(p)) === target || fold(p.replace(/\.md$/i, "")) === target);
+      if (hit) return { path: hit, created: false };
+      const path = `inbox/${String(args.target).split("#")[0].split("/").pop()}.md`;
+      files.set(path, "");
+      emit("tree-changed", null);
+      return { path, created: true };
+    }
+  }
+  return undefined;
+}
+
 export async function mockBackend<T>(cmd: string, args: Record<string, unknown>): Promise<T> {
   const path = String(args.path ?? "");
   switch (cmd) {
@@ -201,6 +250,12 @@ export async function mockBackend<T>(cmd: string, args: Record<string, unknown>)
     case "metric_delete":
     case "metric_resolve":
       return mockMetrics(cmd, args) as T;
+    case "search_notes":
+    case "quick_open":
+    case "backlinks":
+    case "list_tags":
+    case "open_link":
+      return mockLinks(cmd, args) as T;
     case "settings_get":
       return { language: mockLang, theme: mockTheme, autostart: mockAutostart, paused: false, vault_path: vault } as T;
     case "settings_set":

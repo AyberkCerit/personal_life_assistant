@@ -5,16 +5,59 @@
   import { editorExtensions } from "./editorTheme";
   import Banner from "./ui/Banner.svelte";
   import Button from "./ui/Button.svelte";
-  import { EditorState } from "@codemirror/state";
+  import { EditorState, Prec } from "@codemirror/state";
   import { EditorView } from "@codemirror/view";
   import { markdown } from "@codemirror/lang-markdown";
   import { api } from "./api";
   import { NoteDoc } from "./saving";
   import { NoteSession } from "./triggers";
   import { revealRange } from "./tasks";
+  import { completionQuery, linkAt, linkRest } from "./links";
+  import { autocompletion, type CompletionContext } from "@codemirror/autocomplete";
+  import { keymap } from "@codemirror/view";
   import { t } from "./i18n";
 
-  let { path, reveal = null, onSavedCopy }: { path: string; reveal?: string | null; onSavedCopy: (rel: string) => void } = $props();
+  let {
+    path,
+    reveal = null,
+    onSavedCopy,
+    onOpenLink = () => {},
+    suggest = async () => [],
+  }: {
+    path: string;
+    reveal?: string | null;
+    onSavedCopy: (rel: string) => void;
+    /** FR-EDT-008: Ctrl+click or Ctrl+Enter on a wikilink. */
+    onOpenLink?: (target: string) => void;
+    /** FR-EDT-010: note names for `[[` completion. */
+    suggest?: (query: string) => Promise<{ label: string; detail: string | null; insert: string }[]>;
+  } = $props();
+
+  /** The wikilink at a document position, if any. */
+  function linkAtPos(v: EditorView, pos: number): string | null {
+    const line = v.state.doc.lineAt(pos);
+    return linkAt(line.text, pos - line.from);
+  }
+
+  const linkCompletion = autocompletion({
+    activateOnTyping: true,
+    override: [
+      async (ctx: CompletionContext) => {
+        const line = ctx.state.doc.lineAt(ctx.pos);
+        const found = completionQuery(line.text.slice(0, ctx.pos - line.from));
+        if (!found) return null;
+        // inside an existing link, the rest of its name is replaced too (links final review M3)
+        const rest = linkRest(line.text.slice(ctx.pos - line.from));
+        const names = await suggest(found.query);
+        return {
+          from: line.from + found.offset,
+          to: ctx.pos + rest.length,
+          filter: false,
+          options: names.map((n) => ({ label: n.label, detail: n.detail ?? undefined, apply: rest.closed ? n.insert : `${n.insert}]]` })),
+        };
+      },
+    ],
+  });
 
   let host: HTMLDivElement | undefined = $state();
   let view: EditorView | undefined;
@@ -51,7 +94,28 @@
             blur: () => {
               void session?.blurred();
             },
+            mousedown: (event, v) => {
+              if (!(event.ctrlKey || event.metaKey)) return false;
+              const pos = v.posAtCoords({ x: event.clientX, y: event.clientY });
+              const target = pos === null ? null : linkAtPos(v, pos);
+              if (!target) return false;
+              event.preventDefault();
+              onOpenLink(target);
+              return true;
+            },
           }),
+          // above the default keymap, whose Mod-Enter inserts a blank line
+          Prec.high(keymap.of([
+            {
+              key: "Mod-Enter",
+              run: (v) => {
+                const target = linkAtPos(v, v.state.selection.main.head);
+                if (target) onOpenLink(target);
+                return target !== null;
+              },
+            },
+          ])),
+          linkCompletion,
         ],
       }),
     });

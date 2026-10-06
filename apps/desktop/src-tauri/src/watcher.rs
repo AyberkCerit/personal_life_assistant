@@ -83,11 +83,26 @@ pub struct WatchHandle {
     _debouncer: Debouncer<RecommendedWatcher, RecommendedCache>,
 }
 
-pub fn watch(vault: Vault, own: Arc<SelfWrites>, worker: Sender<Command>, app: AppHandle) -> notify_debouncer_full::notify::Result<WatchHandle> {
+pub fn watch(
+    vault: Vault,
+    own: Arc<SelfWrites>,
+    worker: Sender<Command>,
+    indexer: Sender<crate::indexer::IndexCommand>,
+    app: AppHandle,
+) -> notify_debouncer_full::notify::Result<WatchHandle> {
     let root = vault.root.clone();
+    let index_root = vault.root.clone();
     let mut debouncer = new_debouncer(Duration::from_secs(2), None, move |result: DebounceEventResult| {
         let Ok(events) = result else { return };
         let paths: Vec<PathBuf> = events.iter().flat_map(|e| e.paths.iter().cloned()).collect();
+        // The index follows every note, PLA's own saves included (M3).
+        let (notes, rescan) = crate::indexer::index_events(&index_root, &paths);
+        for note in notes {
+            let _ = indexer.send(crate::indexer::IndexCommand::Touch(note));
+        }
+        if rescan {
+            let _ = indexer.send(crate::indexer::IndexCommand::Rescan);
+        }
         let changes = classify(&vault, &paths, &own);
         for note in changes.vanished {
             let _ = worker.send(Command::Enqueue(note));

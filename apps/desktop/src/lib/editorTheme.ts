@@ -31,6 +31,17 @@ export const EDITOR_THEME = {
     backgroundImage: "none", backgroundColor: "var(--color-surface-reading)", color: "var(--color-text)",
     border: "1px solid var(--color-border)", borderRadius: "var(--radius-md)",
   },
+  ".cm-tooltip.cm-tooltip-autocomplete": {
+    backgroundColor: "var(--color-surface-raised)",
+    border: "1px solid var(--color-border)",
+    borderRadius: "var(--radius-md)",
+    boxShadow: "var(--shadow-raised)",
+    fontFamily: "var(--font-ui)",
+    fontSize: "var(--text-md)",
+  },
+  ".cm-tooltip.cm-tooltip-autocomplete > ul > li": { padding: "var(--space-1) var(--space-2)", color: "var(--color-text)" },
+  ".cm-tooltip.cm-tooltip-autocomplete > ul > li[aria-selected]": { backgroundColor: "var(--color-accent-subtle)", color: "var(--color-text)" },
+  ".cm-completionDetail": { color: "var(--color-text-muted)", fontStyle: "normal", marginLeft: "var(--space-2)" },
   ".cm-wikilink": { color: "var(--color-link)", textDecoration: "underline", textDecorationColor: "var(--color-link-underline)", textUnderlineOffset: "3px" },
 };
 

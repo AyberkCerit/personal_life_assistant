@@ -39,6 +39,10 @@ pub struct Session {
     pub db: Mutex<Connection>,
     pub status: Arc<Mutex<WorkerStatus>>,
     pub _watch: Option<WatchHandle>,
+    /// After the watcher, which feeds it (M3).
+    pub indexer: crate::indexer::IndexerHandle,
+    /// The UI's reading connection to `cache.db` (search, backlinks, tags).
+    pub cache: Mutex<Connection>,
     pub worker: WorkerHandle,
 }
 
@@ -138,7 +142,12 @@ fn start_session(app: &AppHandle, root: &Path, settings: &AppSettings, own: Arc<
     if paused {
         handle.set_paused(true);
     }
-    let watch_handle = watch(vault.clone(), own, handle.sender(), app.clone()).ok();
+    let index_app = app.clone();
+    let indexer = crate::indexer::spawn(vault.root.clone(), dir.join("cache.db"), Box::new(move || {
+        let _ = index_app.emit("index-changed", ());
+    }));
+    let cache = dbs.cache;
+    let watch_handle = watch(vault.clone(), own, handle.sender(), indexer.sender(), app.clone()).ok();
     let sched_db = connect(&dir.join("pla.db")).map_err(|e| e.to_string())?;
     let (cmd_tx, cmd_rx) = std::sync::mpsc::channel::<SchedCommand>();
     let notifier = AppNotifier::new(app.clone(), cmd_tx.clone());
@@ -154,7 +163,7 @@ fn start_session(app: &AppHandle, root: &Path, settings: &AppSettings, own: Arc<
             }
         }
     });
-    Ok(Session { vault, scheduler, pending, db: Mutex::new(ui_db), status, _watch: watch_handle, worker: handle })
+    Ok(Session { vault, scheduler, pending, db: Mutex::new(ui_db), status, _watch: watch_handle, indexer, cache: Mutex::new(cache), worker: handle })
 }
 
 fn with_vault<T>(state: &State<AppState>, f: impl FnOnce(&Vault) -> Result<T, FileError>) -> Result<T, String> {
