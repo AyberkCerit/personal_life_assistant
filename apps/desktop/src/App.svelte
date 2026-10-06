@@ -13,6 +13,8 @@
   import { open } from "@tauri-apps/plugin-dialog";
   import { api, inTauri, type DownloadState, type TreeEntry, type WorkerStatus } from "./lib/api";
   import FileTree from "./lib/FileTree.svelte";
+  import CalendarDays from "@lucide/svelte/icons/calendar-days";
+  import { followMove, treeError, type TreeActions } from "./lib/tree";
   import TaskPanel from "./lib/TaskPanel.svelte";
   import Editor from "./lib/Editor.svelte";
   import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -58,6 +60,7 @@
   let leftView = $state<"tree" | "search">("tree");
   let sideTab = $state<"tasks" | "links">("tasks");
   let quickOpen = $state(false);
+  let treeDialog = $state(false); // a tree dialog (move, delete, template…) is open
   let searchPanel: ReturnType<typeof SearchPanel> | undefined = $state();
   let settingsSection = $state<Section>("general"); // kept here: a language switch re-mounts the window
   let settingsRefocus = $state<string | null>(null);
@@ -74,7 +77,7 @@
   }
 
   function anyWindowOpen() {
-    return settingsOpen || quickMetric !== null || quickOpen;
+    return settingsOpen || quickMetric !== null || quickOpen || treeDialog;
   }
 
   function openSearch() {
@@ -230,13 +233,79 @@
   }
 
 
-  async function createNote(title: string) {
+  function treeFailed(e: unknown) {
+    const { key, detail, reason } = treeError(String(e));
+    error = tf(key, { detail, reason });
+  }
+
+  /**
+   * FR-EDT-004: the open note is saved before a tree action can move, rename or rewrite it, and the
+   * editor re-opens it afterwards from wherever it is now (a link update may have changed its text).
+   */
+  async function treeChange(work: () => Promise<{ from: string; to: string | null } | null>) {
     try {
-      const rel = await api.createNote(inbox, title);
+      await editor?.close();
+    } catch (e) {
+      error = String(e); // never lose what could not be saved
+      return;
+    }
+    const open = current;
+    current = null;
+    await tick();
+    try {
+      const moved = await work();
+      error = null;
+      await refresh();
+      if (moved === null) current = open;
+      else current = moved.to === null ? (open === moved.from || open?.startsWith(`${moved.from}/`) ? null : open) : followMove(open, moved.from, moved.to);
+    } catch (e) {
+      current = open;
+      treeFailed(e);
+    }
+  }
+
+  const treeActions: TreeActions = {
+    createNote: async (folder, title, template) => {
+      try {
+        const rel = template === null ? await api.createNote(folder, title) : await api.createNoteIn(folder, title, template);
+        error = null;
+        await refresh();
+        await openNote(rel);
+      } catch (e) {
+        treeFailed(e);
+      }
+    },
+    createFolder: async (parent, name) => {
+      try {
+        await api.createFolder(parent, name);
+        error = null;
+        await refresh();
+      } catch (e) {
+        treeFailed(e);
+      }
+    },
+    renameNote: (path, name, updateLinks) =>
+      treeChange(async () => ({ from: path, to: await api.renameNote(path, name, updateLinks) })),
+    renameFolder: (path, name) => treeChange(async () => ({ from: path, to: await api.renameFolder(path, name) })),
+    move: (path, folder) => treeChange(async () => ({ from: path, to: await api.moveEntry(path, folder) })),
+    remove: (path) =>
+      treeChange(async () => {
+        await api.deleteEntry(path);
+        return { from: path, to: null };
+      }),
+    linkCount: (path) => api.linkCount(path),
+    templates: () => api.listTemplates(),
+  };
+
+  /** FR-EDT-015: today's daily note, created from the daily template when it is missing. */
+  async function openToday() {
+    if (wizard || vaultPath === null || anyWindowOpen()) return;
+    try {
+      const rel = await api.openToday(lang);
       await refresh();
       await openNote(rel);
     } catch (e) {
-      error = String(e);
+      treeFailed(e);
     }
   }
 
@@ -281,6 +350,9 @@
       } else if (e.ctrlKey && e.shiftKey && e.key.toLocaleLowerCase("tr") === "f") {
         e.preventDefault(); // FR-EDT-014
         openSearch();
+      } else if (e.ctrlKey && e.shiftKey && e.key.toLocaleLowerCase("tr") === "d") {
+        e.preventDefault(); // FR-EDT-015
+        void openToday();
       } else if (e.ctrlKey && e.shiftKey && e.key.toLocaleLowerCase("tr") === "m") {
         // by the letter, not the key position: on a Turkish F keyboard M sits elsewhere
         e.preventDefault(); // FR-MET-003
@@ -337,11 +409,14 @@
         <button class:on={leftView === "search"} title={t("search.open")} onclick={() => (leftView === "search" ? (leftView = "tree") : openSearch())}>
           <SearchIcon size={16} strokeWidth={1.75} aria-hidden="true" />{t("search.title")}
         </button>
+        <button title={t("tree.todayHint")} onclick={() => void openToday()}>
+          <CalendarDays size={16} strokeWidth={1.75} aria-hidden="true" />{t("tree.today")}
+        </button>
       </nav>
       {#if leftView === "search"}
         <SearchPanel bind:this={searchPanel} {entries} onOpen={(p, line) => void openNote(p, line)} onClose={() => (leftView = "tree")} />
       {:else}
-        <FileTree {entries} selected={center === "editor" ? current : null} onOpen={openNote} onCreate={createNote} />
+        <FileTree {entries} selected={center === "editor" ? current : null} {inbox} onOpen={openNote} actions={treeActions} bind:windowOpen={treeDialog} />
       {/if}
     </aside>
     <section class="main">
