@@ -1,6 +1,7 @@
 //! PLA desktop app: Tauri shell around pla-core.
 
 mod commands;
+pub mod fileops_cmds;
 pub mod indexer;
 pub mod links_cmds;
 pub mod metrics_cmds;
@@ -74,6 +75,15 @@ pub fn run() {
             commands::settings_set,
             commands::set_autostart,
             commands::send_test_notification,
+            fileops_cmds::link_count,
+            fileops_cmds::rename_note,
+            fileops_cmds::move_entry,
+            fileops_cmds::rename_folder,
+            fileops_cmds::delete_entry,
+            fileops_cmds::create_folder,
+            fileops_cmds::list_templates,
+            fileops_cmds::create_note_in,
+            fileops_cmds::open_today,
             links_cmds::search_notes,
             links_cmds::quick_open,
             links_cmds::backlinks,
