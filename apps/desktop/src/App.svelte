@@ -22,11 +22,15 @@
   import MetricsView from "./lib/metrics/MetricsView.svelte";
   import QuickMetric from "./lib/metrics/QuickMetric.svelte";
   import ChartLine from "@lucide/svelte/icons/chart-line";
+  import SearchIcon from "@lucide/svelte/icons/search";
+  import Backlinks from "./lib/Backlinks.svelte";
+  import QuickOpen from "./lib/QuickOpen.svelte";
+  import SearchPanel from "./lib/SearchPanel.svelte";
   import type { MetricKind } from "./lib/metrics";
   import type { MetricRecord } from "./lib/api";
   import type { Section } from "./lib/settings";
   import type { Progress } from "./lib/wizard";
-  import { t, lang, setLang, type Lang } from "./lib/i18n";
+  import { t, tf, lang, setLang, type Lang } from "./lib/i18n";
   import type { VaultInfo } from "./lib/api";
 
   let loaded = $state(false);
@@ -50,6 +54,11 @@
   let metricKind = $state<MetricKind | null>(null);
   let metricsVersion = $state(0);
   let quickMetric = $state<{ record: MetricRecord | null } | null>(null);
+  // M3: the left sidebar shows the folders or the search; the right panel tasks or backlinks.
+  let leftView = $state<"tree" | "search">("tree");
+  let sideTab = $state<"tasks" | "links">("tasks");
+  let quickOpen = $state(false);
+  let searchPanel: ReturnType<typeof SearchPanel> | undefined = $state();
   let settingsSection = $state<Section>("general"); // kept here: a language switch re-mounts the window
   let settingsRefocus = $state<string | null>(null);
   let settingsOpener: HTMLElement | null = null;
@@ -64,8 +73,40 @@
     uiLang = l;
   }
 
+  function anyWindowOpen() {
+    return settingsOpen || quickMetric !== null || quickOpen;
+  }
+
+  function openSearch() {
+    if (wizard || vaultPath === null) return;
+    leftView = "search";
+    void tick().then(() => searchPanel?.focus());
+  }
+
+  function openQuickOpen() {
+    if (wizard || vaultPath === null || anyWindowOpen()) return;
+    quickOpen = true;
+  }
+
+  /** FR-EDT-008/009: follow a wikilink; a missing target note is created in the inbox. */
+  async function followLink(target: string) {
+    try {
+      const opened = await api.openLink(target);
+      if (opened.created) await refresh();
+      await openNote(opened.path);
+    } catch (e) {
+      error = tf("links.error", { reason: String(e) });
+    }
+  }
+
+  /** FR-EDT-010: titles (or the alias that matched) for `[[` completion. */
+  async function suggestLinks(query: string) {
+    const hits = await api.quickOpen(query).catch(() => []);
+    return hits.slice(0, 8).map((h) => ({ label: h.alias ?? h.title, detail: h.note_path.split("/").slice(0, -1).join("/") || null }));
+  }
+
   function openSettings() {
-    if (wizard || settingsOpen || quickMetric) return; // one window at a time: Esc and Tab belong to it
+    if (wizard || anyWindowOpen()) return; // one window at a time: Esc and Tab belong to it
     settingsOpener = document.activeElement as HTMLElement | null;
     settingsOpen = true;
   }
@@ -145,7 +186,7 @@
   let quickOpener: HTMLElement | null = null;
 
   function openQuickMetric(record: MetricRecord | null = null) {
-    if (wizard || vaultPath === null || settingsOpen || quickMetric) return;
+    if (wizard || vaultPath === null || anyWindowOpen()) return;
     quickOpener = document.activeElement as HTMLElement | null;
     quickMetric = { record };
   }
@@ -223,6 +264,12 @@
       if (e.ctrlKey && e.key === ",") {
         e.preventDefault();
         openSettings();
+      } else if (e.ctrlKey && !e.shiftKey && e.key.toLocaleLowerCase("tr") === "o") {
+        e.preventDefault(); // FR-EDT-005
+        openQuickOpen();
+      } else if (e.ctrlKey && e.shiftKey && e.key.toLocaleLowerCase("tr") === "f") {
+        e.preventDefault(); // FR-EDT-014
+        openSearch();
       } else if (e.ctrlKey && e.shiftKey && e.key.toLocaleLowerCase("tr") === "m") {
         // by the letter, not the key position: on a Turkish F keyboard M sits elsewhere
         e.preventDefault(); // FR-MET-003
@@ -276,8 +323,15 @@
         <button class:on={center === "metrics"} aria-current={center === "metrics" ? "page" : undefined} onclick={showMetrics}>
           <ChartLine size={16} strokeWidth={1.75} aria-hidden="true" />{t("metrics.title")}
         </button>
+        <button class:on={leftView === "search"} title={t("search.open")} onclick={() => (leftView === "search" ? (leftView = "tree") : openSearch())}>
+          <SearchIcon size={16} strokeWidth={1.75} aria-hidden="true" />{t("search.title")}
+        </button>
       </nav>
-      <FileTree {entries} selected={center === "editor" ? current : null} onOpen={openNote} onCreate={createNote} />
+      {#if leftView === "search"}
+        <SearchPanel bind:this={searchPanel} {entries} onOpen={(p, line) => void openNote(p, line)} onClose={() => (leftView = "tree")} />
+      {:else}
+        <FileTree {entries} selected={center === "editor" ? current : null} onOpen={openNote} onCreate={createNote} />
+      {/if}
     </aside>
     <section class="main">
       <ModelBanner queued={status.queued} forceOpen={showModel} onOpened={() => (showModel = false)} />
@@ -293,18 +347,29 @@
         />
       {:else if current}
         {#key current}
-          <Editor bind:this={editor} path={current} {reveal} onSavedCopy={() => void refresh()} />
+          <Editor bind:this={editor} path={current} {reveal} onSavedCopy={() => void refresh()} onOpenLink={(target) => void followLink(target)} suggest={suggestLinks} />
         {/key}
       {:else}
         <EmptyState icon={FileText} title={t("editor.empty")} />
       {/if}
     </section>
     <aside class="side-panel">
-      <TaskPanel version={tasksVersion} onOpenSource={openSource} onChanged={() => panelEdits++} />
+      <div class="side-tabs" role="tablist" aria-label={t("links.tab.tasks")}>
+        <button role="tab" aria-selected={sideTab === "tasks"} class:on={sideTab === "tasks"} onclick={() => (sideTab = "tasks")}>{t("links.tab.tasks")}</button>
+        <button role="tab" aria-selected={sideTab === "links"} class:on={sideTab === "links"} onclick={() => (sideTab = "links")}>{t("links.tab.links")}</button>
+      </div>
+      {#if sideTab === "tasks"}
+        <TaskPanel version={tasksVersion} onOpenSource={openSource} onChanged={() => panelEdits++} />
+      {:else}
+        <Backlinks path={center === "editor" ? current : null} onOpen={(p, line) => void openNote(p, line)} />
+      {/if}
     </aside>
     <StatusBar {status} onResume={() => void api.setPaused(false)} download={modelDownload} onShowModel={() => (showModel = true)} onSettings={openSettings} />
     <AddedToast onChanged={() => tasksVersion++} />
   </div>
+{/if}
+{#if quickOpen && !wizard}
+  <QuickOpen onOpen={(p) => void openNote(p)} onClose={() => (quickOpen = false)} />
 {/if}
 {#if quickMetric && !wizard}
   <QuickMetric record={quickMetric.record} onClose={closeQuickMetric} onSaved={() => metricsVersion++} />
@@ -322,7 +387,14 @@
 {/key}
 
 <style>
-  .shortcuts { padding: var(--space-2) var(--space-2) 0; }
+  .shortcuts { padding: var(--space-2) var(--space-2) 0; display: flex; flex-direction: column; gap: 2px; }
+  .side-tabs { display: flex; gap: var(--space-3); padding: var(--space-2) var(--space-3) 0; border-bottom: 1px solid var(--color-border); }
+  .side-tabs button {
+    border: 0; background: none; padding: var(--space-1) 0 var(--space-2); color: var(--color-text-muted); font: inherit; font-size: var(--text-md);
+    border-bottom: 2px solid transparent; margin-bottom: -1px; cursor: pointer;
+  }
+  .side-tabs button.on { color: var(--color-text); border-bottom-color: var(--color-accent); }
+  .side-tabs button:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
   .shortcuts button {
     width: 100%; display: flex; align-items: center; gap: var(--space-2); padding: var(--space-1) var(--space-2);
     border: 0; border-radius: var(--radius-md); background: none; color: var(--color-text); font: inherit; font-size: var(--text-md); cursor: pointer;

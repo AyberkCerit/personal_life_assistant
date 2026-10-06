@@ -100,6 +100,10 @@ export interface MetricInput {
   reps: number | null;
   confirmed: boolean;
 }
+export interface SearchHit { note_path: string; title: string; snippet: string; line_text: string | null }
+export interface QuickHit { note_path: string; title: string; alias: string | null }
+export interface Backlink { source_path: string; source_title: string; line: number; line_text: string }
+export interface TagCount { tag: string; count: number }
 export interface PendingReminders { due: DueReminder[]; missed: DueReminder[] }
 
 /** Inside the Tauri window; false in a plain browser (Vite dev server), where a mock backend answers. */
@@ -125,6 +129,13 @@ export const api = {
   setupVault: (path: string, lang: string) => call<VaultInfo>("setup_vault", { path, lang }),
   setLanguage: (lang: string) => call<void>("set_language", { lang }),
   finishSetup: () => call<void>("finish_setup"),
+  searchNotes: (query: string, folder: string | null, tag: string | null) => call<SearchHit[]>("search_notes", { query, folder, tag }),
+  quickOpen: (query: string) => call<QuickHit[]>("quick_open", { query }),
+  backlinks: (path: string) => call<Backlink[]>("backlinks", { path }),
+  listTags: () => call<TagCount[]>("list_tags"),
+  /** Resolves a wikilink; a missing target is created in the inbox (FR-EDT-009). */
+  openLink: (target: string) => call<{ path: string; created: boolean }>("open_link", { target }),
+  onIndexChanged: (cb: () => void) => on<unknown>("index-changed", () => cb()),
   metricsOverview: () => call<MetricCard[]>("metrics_overview"),
   metricsSummary: (kind: MetricKind, days: number) => call<Summary>("metrics_summary", { kind, days }),
   metricRecords: (kind: MetricKind, days: number) => call<MetricRecord[]>("metric_records", { kind, days }),
