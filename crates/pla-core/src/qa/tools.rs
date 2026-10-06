@@ -23,7 +23,7 @@ pub fn descriptions() -> &'static str {
      - add_task {title, date?: YYYY-MM-DD, time?: HH:MM, remind?: true|false}: add one task; with a time it is a reminder unless remind is false.\n\
      - complete_task {task_id}: mark one open task done (take the task_id from query_tasks).\n\
      - log_metric {kind, date: YYYY-MM-DD, value, unit?: h|min|ml|l|glass|kg|lb|count, exercise?}: record one measurement.\n\
-     - create_note {title, body}: write one new note to the inbox."
+     - create_note {title, body (at most 600 characters)}: write one new note to the inbox."
 }
 
 fn obj(tool: &str, props: Value, required: &[&str]) -> Value {
@@ -49,7 +49,7 @@ pub fn decision_schema() -> Value {
         obj("add_task", json!({ "title": { "type": "string", "minLength": 1, "maxLength": 200 }, "date": date, "time": time, "remind": { "type": "boolean" } }), &["title"]),
         obj("complete_task", json!({ "task_id": { "type": "string", "minLength": 1, "maxLength": 64 } }), &["task_id"]),
         obj("log_metric", json!({ "kind": { "enum": KINDS }, "date": date, "value": { "type": "number" }, "unit": { "enum": UNITS }, "exercise": { "type": "string", "maxLength": 100 } }), &["kind", "date", "value"]),
-        obj("create_note", json!({ "title": { "type": "string", "minLength": 1, "maxLength": 120 }, "body": { "type": "string", "maxLength": 4000 } }), &["title", "body"]),
+        obj("create_note", json!({ "title": { "type": "string", "minLength": 1, "maxLength": 120 }, "body": { "type": "string", "maxLength": 600 } }), &["title", "body"]),
     ]})
 }
 
@@ -235,12 +235,16 @@ pub fn run(env: &ToolEnv<'_>, tool: &str, args: &Value) -> Result<ToolRecord, St
         "create_note" => {
             unknown_keys(args, &["title", "body"])?;
             let title = required(args, "title", 120)?;
-            let body = text(args, "body", 4000)?.unwrap_or_default();
+            let body = text(args, "body", 600)?.unwrap_or_default();
+            crate::fileops::check_name(&title).map_err(|e| e.to_string())?;
             let rel = crate::files::create_note(env.vault, &env.vault.config.folders.inbox, &title).map_err(|e| e.to_string())?;
             // FR-QA-009: marked as written by PLA, so it is never mined for tasks
             let path = crate::files::resolve(env.vault, &rel).map_err(|e| e.to_string())?;
             let content = format!("---\npla_generated: true\n---\n# {title}\n\n{body}\n");
-            crate::fs_atomic::write_atomic(&path, content.as_bytes()).map_err(|e| e.to_string())?;
+            if let Err(e) = crate::fs_atomic::write_atomic(&path, content.as_bytes()) {
+                let _ = std::fs::remove_file(&path); // not an empty note left behind
+                return Err(e.to_string());
+            }
             Ok(done(json!({ "note": rel, "title": title }), Some(Undo { kind: "note".into(), id: rel })))
         }
         other => Err(format!("unknown tool {other:?}")),

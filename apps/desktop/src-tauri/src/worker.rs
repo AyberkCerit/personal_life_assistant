@@ -3,9 +3,9 @@
 //! the model host stop an idle model (FR-MDL-013). The UI learns everything through `WorkerStatus`.
 
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
@@ -80,7 +80,9 @@ pub struct WorkerHandle {
     cancel: Arc<AtomicBool>,
     pause: Arc<AtomicBool>,
     dropping: Arc<AtomicBool>,
-    asking: Arc<AtomicBool>,
+    asking: Arc<AtomicUsize>,
+    /// The Stop switch of the question being answered: closing the session flips it (final review C2).
+    ask_cancel: Arc<Mutex<Option<Arc<AtomicBool>>>>,
     join: Option<JoinHandle<()>>,
 }
 
@@ -105,7 +107,8 @@ impl WorkerHandle {
     /// FR-QA-003: a question goes before the queue: a running extraction stops between two notes
     /// (the rest stays queued, as with a pause) and goes on after the answer.
     pub fn ask(&self, job: AskJob) {
-        self.asking.store(true, Ordering::SeqCst);
+        self.asking.fetch_add(1, Ordering::SeqCst);
+        *self.ask_cancel.lock().expect("ask lock") = Some(Arc::clone(&job.cancel));
         self.send(Command::Ask(job));
     }
 
@@ -117,6 +120,9 @@ impl WorkerHandle {
 
     fn stop(&mut self) {
         self.cancel.store(true, Ordering::SeqCst);
+        if let Some(c) = self.ask_cancel.lock().expect("ask lock").as_ref() {
+            c.store(true, Ordering::SeqCst); // a question must not hold up a vault switch or quitting
+        }
         let _ = self.tx.send(Command::Shutdown);
         if let Some(join) = self.join.take() {
             let _ = join.join();
@@ -137,7 +143,7 @@ struct Cancellable<'a> {
     cancel: &'a AtomicBool,
     pause: &'a AtomicBool,
     dropping: &'a AtomicBool,
-    asking: &'a AtomicBool,
+    asking: &'a AtomicUsize,
 }
 
 impl Extractor for Cancellable<'_> {
@@ -151,7 +157,7 @@ impl Extractor for Cancellable<'_> {
         if self.dropping.load(Ordering::SeqCst) {
             return Err(LlmError::Http("the model is being removed".into()));
         }
-        if self.asking.load(Ordering::SeqCst) {
+        if self.asking.load(Ordering::SeqCst) > 0 {
             return Err(LlmError::Http("answering a question first".into()));
         }
         self.inner.extract_raw(reference, text)
@@ -203,7 +209,7 @@ pub struct Worker {
     cancel: Arc<AtomicBool>,
     pause: Arc<AtomicBool>,
     dropping: Arc<AtomicBool>,
-    asking: Arc<AtomicBool>,
+    asking: Arc<AtomicUsize>,
     on_added: Option<AddedListener>,
     /// Reads titles of added items while the main connection is busy in the pipeline.
     reader: Option<Connection>,
@@ -225,7 +231,7 @@ impl Worker {
             cancel: Arc::new(AtomicBool::new(false)),
             pause: Arc::new(AtomicBool::new(false)),
             dropping: Arc::new(AtomicBool::new(false)),
-            asking: Arc::new(AtomicBool::new(false)),
+            asking: Arc::new(AtomicUsize::new(0)),
             on_added: None,
             reader,
             status: WorkerStatus { queued: 0, model, busy: false, last_error: None, added: 0, paused: false },
@@ -257,7 +263,7 @@ impl Worker {
         let (cancel, pause, dropping, asking) =
             (Arc::clone(&self.cancel), Arc::clone(&self.pause), Arc::clone(&self.dropping), Arc::clone(&self.asking));
         let join = std::thread::Builder::new().name("pla-worker".into()).spawn(move || self.run(rx)).expect("spawn worker");
-        WorkerHandle { tx, cancel, pause, dropping, asking, join: Some(join) }
+        WorkerHandle { tx, cancel, pause, dropping, asking, ask_cancel: Arc::new(Mutex::new(None)), join: Some(join) }
     }
 
     fn run(mut self, rx: Receiver<Command>) {
@@ -302,7 +308,7 @@ impl Worker {
                 }
                 Ok(Command::Ask(job)) => {
                     self.ask(job);
-                    self.asking.store(false, Ordering::SeqCst);
+                    self.asking.fetch_sub(1, Ordering::SeqCst);
                     self.process(); // what the question interrupted
                 }
                 Ok(Command::Rescan) => {
@@ -386,7 +392,7 @@ impl Worker {
                 self.status.paused = true; // stopped by a pause, not by a failure
                 self.status.last_error = None;
             }
-            if self.asking.load(Ordering::SeqCst) {
+            if self.asking.load(Ordering::SeqCst) > 0 {
                 self.status.last_error = None; // stopped for a question; it goes on afterwards
             }
             self.status.busy = false;
@@ -433,7 +439,7 @@ impl Worker {
         let (saved, sources, failure) = match result {
             Ok(a) => (turn(a.text, a.tools, "done"), a.sources, None),
             Err(QaError::Stopped { partial, tools }) => (turn(partial, tools, "stopped"), Vec::new(), None),
-            Err(QaError::Model(e)) => (turn(String::new(), Vec::new(), "failed"), Vec::new(), Some(("model", e.to_string()))),
+            Err(QaError::Model { error, tools }) => (turn(String::new(), tools, "failed"), Vec::new(), Some(("model", error.to_string()))),
             Err(QaError::Db(e)) => (turn(String::new(), Vec::new(), "failed"), Vec::new(), Some(("db", e.to_string()))),
         };
         let _ = qa::save_turn(&self.conn, &saved); // FR-QA-014, also a stopped or failed one
@@ -581,6 +587,41 @@ mod tests {
         let kept: i64 = conn.query_row("SELECT count(*) FROM qa_turn", [], |r| r.get(0)).unwrap();
         assert_eq!(kept, 1);
         handle.shutdown();
+    }
+
+    /// Thinks until stopped.
+    struct Ponders;
+    impl Extractor for Ponders {
+        fn extract_raw(&mut self, _: NaiveDate, _: &str) -> Result<String, LlmError> {
+            Ok(TASK.to_owned())
+        }
+        fn chat_model(&mut self) -> Option<&mut dyn pla_core::qa::ChatModel> {
+            Some(self)
+        }
+    }
+    impl pla_core::qa::ChatModel for Ponders {
+        fn complete(&mut self, _: &serde_json::Value, cancel: &AtomicBool) -> Result<String, LlmError> {
+            while !cancel.load(Ordering::SeqCst) {
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            Err(LlmError::Cancelled)
+        }
+        fn stream(&mut self, _: &serde_json::Value, _: &AtomicBool, _: &mut dyn FnMut(&str)) -> Result<String, LlmError> {
+            Err(LlmError::Cancelled)
+        }
+    }
+
+    #[test]
+    fn closing_does_not_wait_for_a_question() {
+        // final review C2: a vault switch or quitting stops the answer
+        let (_tmp, handle, statuses, data) = setup(Some(Box::new(Ponders)));
+        wait_for(&statuses, |s| !s.busy && s.queued == 0);
+        let rx = ask(&handle, &data, "uzun düşün");
+        std::thread::sleep(Duration::from_millis(200));
+        let started = Instant::now();
+        drop(handle);
+        assert!(started.elapsed() < Duration::from_secs(2), "closing took {:?}", started.elapsed());
+        assert!(rx.try_iter().any(|e| matches!(e, QaEvent::Done { .. })), "the stopped turn still ends");
     }
 
     #[test]

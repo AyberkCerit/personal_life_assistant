@@ -35,8 +35,9 @@ pub struct Answer {
 pub enum QaError {
     #[error("stopped")]
     Stopped { partial: String, tools: Vec<ToolRecord> },
-    #[error(transparent)]
-    Model(LlmError),
+    /// The model failed; `tools` already ran (their undo must not be lost, final review C1).
+    #[error("{error}")]
+    Model { error: LlmError, tools: Vec<ToolRecord> },
     #[error(transparent)]
     Db(#[from] rusqlite::Error),
 }
@@ -168,7 +169,7 @@ fn decide_body(ctx: &Context, question: &str, calls: &[ToolRecord], now: DateTim
     json!({
         "messages": messages(ctx, question, calls, now, DECIDE),
         "temperature": 0,
-        "max_tokens": 300,
+        "max_tokens": 400,
         "cache_prompt": true,
         "response_format": { "type": "json_schema", "json_schema": { "name": "decision", "schema": tools::decision_schema() } },
         "chat_template_kwargs": { "enable_thinking": false }
@@ -189,9 +190,9 @@ fn answer_body(ctx: &Context, question: &str, calls: &[ToolRecord], now: DateTim
 fn trimmed(rec: &ToolRecord, left: &mut usize) -> ToolRecord {
     let mut rec = rec.clone();
     let text = rec.result.to_string();
-    let cost = context::tokens(&text);
+    let cost = context::tokens(&text) + 30; // with the call and the "Tool result:" wrapper
     if cost > *left {
-        let keep: String = text.chars().take(*left * 7 / 2).collect();
+        let keep: String = text.chars().take(*left * 2).collect();
         rec.result = Value::String(format!("{keep}… (cut: too long)"));
         *left = 0;
     } else {
@@ -258,7 +259,8 @@ pub fn answer(
         on(Progress::Working(None));
         let raw = match model.complete(&decide_body(&ctx, question, &calls, env.now), cancel) {
             Err(LlmError::Cancelled) => return Err(stopped(&shown, String::new())),
-            other => other.map_err(QaError::Model)?,
+            Err(error) => return Err(QaError::Model { error, tools: shown }),
+            Ok(raw) => raw,
         };
         let (tool, args) = match tools::parse_decision(&raw) {
             Ok(Decision::Answer) => break,
@@ -266,6 +268,9 @@ pub fn answer(
             Err(_) => break, // the grammar makes this rare; answer without tools
         };
         let args = without_made_up_time(&tool, args, question);
+        if cancel.load(std::sync::atomic::Ordering::SeqCst) {
+            return Err(stopped(&shown, String::new())); // no write after Stop
+        }
         if repeats(&shown, &tool, &args) {
             break; // done already (the real window saw one task added three times): answer now
         }
@@ -299,7 +304,7 @@ pub fn answer(
     });
     match streamed {
         Err(LlmError::Cancelled) => return Err(stopped(&shown, text)),
-        Err(e) => return Err(QaError::Model(e)),
+        Err(error) => return Err(QaError::Model { error, tools: shown }),
         Ok(whole) if text.is_empty() => text = whole,
         Ok(_) => {}
     }
@@ -316,8 +321,11 @@ pub fn answer(
     let from_notes = shown.iter().all(|c| c.tool == "search_notes");
     if sources.is_empty() && from_notes {
         let from_search = shown.iter().filter(|c| c.tool == "search_notes").flat_map(|c| c.result["notes"].as_array().cloned().unwrap_or_default());
-        sources = from_search.filter_map(|n| n["note"].as_str().map(str::to_owned)).chain(ctx.sources.iter().cloned()).take(3).collect();
-        sources.dedup();
+        for path in from_search.filter_map(|n| n["note"].as_str().map(str::to_owned)).chain(ctx.sources.iter().cloned()) {
+            if !sources.contains(&path) && sources.len() < 3 {
+                sources.push(path);
+            }
+        }
     }
     Ok(Answer { text: text.trim().to_owned(), tools: shown, sources })
 }
@@ -416,6 +424,44 @@ mod tests {
         let mut model = scripted(&[call], "Tamam.");
         let a = answer(&mut model, &tool_env, "Cuma 10'da annemi ara", &[], &AtomicBool::new(false), &mut |_| {}).unwrap();
         assert_eq!(a.tools[0].result["time"], "10:00", "said, so kept");
+    }
+
+    /// Decides once, then fails while answering (llama-server died).
+    struct Breaks;
+    impl ChatModel for Breaks {
+        fn complete(&mut self, _: &Value, _: &AtomicBool) -> Result<String, LlmError> {
+            Ok("{\"tool\":\"add_task\",\"args\":{\"title\":\"Doktor\",\"date\":\"2026-10-07\"}}".into())
+        }
+        fn stream(&mut self, _: &Value, _: &AtomicBool, _: &mut dyn FnMut(&str)) -> Result<String, LlmError> {
+            Err(LlmError::Http("the answer stream broke off".into()))
+        }
+    }
+
+    #[test]
+    fn a_failed_answer_keeps_what_its_tools_did() {
+        // final review C1: the task stays, so its undo must too
+        let e = env();
+        let tool_env = ToolEnv { vault: &e.vault, pla: &e.pla, cache: &e.cache, now: now(), validation: ValidationSettings::default() };
+        let err = answer(&mut Breaks, &tool_env, "Yarın doktor", &[], &AtomicBool::new(false), &mut |_| {}).unwrap_err();
+        let QaError::Model { tools, .. } = err else { panic!("expected a model error") };
+        assert_eq!(tools.len(), 1);
+        assert!(tools[0].undo.is_some());
+    }
+
+    #[test]
+    fn nothing_is_written_after_stop() {
+        let e = env();
+        let tool_env = ToolEnv { vault: &e.vault, pla: &e.pla, cache: &e.cache, now: now(), validation: ValidationSettings::default() };
+        let cancel = AtomicBool::new(false);
+        let mut model = scripted(&["{\"tool\":\"add_task\",\"args\":{\"title\":\"x\",\"date\":\"2026-10-07\"}}"], "");
+        let err = answer(&mut model, &tool_env, "x ekle", &[], &cancel, &mut |p| {
+            if matches!(p, Progress::Working(None)) {
+                cancel.store(true, Ordering::SeqCst); // Stop lands while the model decides
+            }
+        });
+        assert!(matches!(err, Err(QaError::Stopped { .. })));
+        let n: i64 = e.pla.query_row("SELECT count(*) FROM task", [], |r| r.get(0)).unwrap();
+        assert_eq!(n, 0);
     }
 
     #[test]

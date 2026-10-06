@@ -494,6 +494,7 @@
       {/if}
     </aside>
     <StatusBar {status} onResume={() => void api.setPaused(false)} download={modelDownload} onShowModel={() => (showModel = true)} onSettings={openSettings} onAssistant={openAssistant} />
+    {#key vaultPath}<!-- another vault: its own history, its own undo (final review I6) -->
     <AssistantDrawer
       open={assistantOpen}
       modelMissing={status.model === "not_installed"}
@@ -508,6 +509,7 @@
         showModel = true;
       }}
     />
+    {/key}
     <AddedToast onChanged={() => tasksVersion++} />
   </div>
 {/if}

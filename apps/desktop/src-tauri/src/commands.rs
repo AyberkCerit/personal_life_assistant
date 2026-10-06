@@ -683,6 +683,7 @@ fn install_model(app: &AppHandle, model_path: &Path, model_id: Option<&str>, ins
 /// user chose (settings Review Focus 2). AI features turn off; notes keep queueing.
 #[tauri::command(async)]
 pub fn model_remove(app: AppHandle, state: State<AppState>) -> Result<(), String> {
+    crate::qa_cmds::qa_stop(); // a question in progress would hold the model (final review)
     let root = app_root()?;
     let settings = load_settings(&root).map_err(|e| e.to_string())?.settings;
     let models_dir = models::models_dir();

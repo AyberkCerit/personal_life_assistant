@@ -192,6 +192,9 @@ pub struct LlamaServer {
     agent: ureq::Agent,
     stderr_tail: Arc<Mutex<VecDeque<String>>>,
     stderr_reader: Option<JoinHandle<()>>,
+    /// A stopped chat request still running in llama-server (`-np 1`): the next request waits for
+    /// it, so a resumed extraction does not time out behind it (final review I4).
+    in_flight: Mutex<Option<JoinHandle<()>>>,
 }
 
 impl LlamaServer {
@@ -245,6 +248,7 @@ impl LlamaServer {
             agent: http_agent(),
             stderr_tail,
             stderr_reader,
+            in_flight: Mutex::new(None),
         };
         match wait_until_healthy(&mut server.child, &health_agent(), &server.base_url, cfg.startup_timeout) {
             Ok(()) => Ok(server),
@@ -269,6 +273,7 @@ impl LlamaServer {
 
     /// The model's raw JSON answer for one block of text.
     pub fn extract_raw(&self, reference: NaiveDate, text: &str) -> Result<String, LlmError> {
+        self.settle();
         let mut response = self
             .agent
             .post(format!("{}/v1/chat/completions", self.base_url))
@@ -304,6 +309,13 @@ fn http_error(e: ureq::Error) -> LlmError {
 }
 
 impl LlamaServer {
+    /// Waits for a stopped request to leave the server (a stream ends at its next token).
+    fn settle(&self) {
+        if let Some(handle) = self.in_flight.lock().expect("in-flight lock").take() {
+            let _ = handle.join();
+        }
+    }
+
     /// FR-QA-003/013: runs one chat request on its own thread and waits for it, looking at `cancel`
     /// every 100 ms, so Stop answers within a second even while the model still reads the prompt.
     /// When stopped, the request thread finds no one listening and drops the connection, which
@@ -313,8 +325,9 @@ impl LlamaServer {
         let stream = on_token.is_some();
         let mut body = body.clone();
         body["stream"] = Value::Bool(stream);
+        self.settle();
         let (agent, url, key) = (chat_agent(), format!("{}/v1/chat/completions", self.base_url), self.api_key.clone());
-        std::thread::spawn(move || {
+        let handle = std::thread::spawn(move || {
             let response = agent.post(url).header("Authorization", &format!("Bearer {key}")).send_json(&body);
             let mut response = match response {
                 Ok(r) => r,
@@ -333,6 +346,7 @@ impl LlamaServer {
             }
             let reader = BufReader::new(response.body_mut().as_reader());
             let mut whole = String::new();
+            let mut finished = false;
             for line in reader.lines() {
                 let Ok(line) = line else {
                     let _ = tx.send(Piece::Failed(LlmError::Http("the answer stream broke off".into())));
@@ -340,6 +354,7 @@ impl LlamaServer {
                 };
                 let Some(data) = line.strip_prefix("data:").map(str::trim) else { continue };
                 if data == "[DONE]" {
+                    finished = true;
                     break;
                 }
                 let Ok(chunk) = serde_json::from_str::<Value>(data) else { continue };
@@ -350,10 +365,12 @@ impl LlamaServer {
                     }
                 }
             }
-            let _ = tx.send(Piece::Done(whole));
+            // a stream that ends without [DONE] was cut off (the server died): not a whole answer
+            let _ = tx.send(if finished { Piece::Done(whole) } else { Piece::Failed(LlmError::Http("the answer stream broke off".into())) });
         });
         loop {
             if cancel.load(Ordering::SeqCst) {
+                *self.in_flight.lock().expect("in-flight lock") = Some(handle);
                 return Err(LlmError::Cancelled);
             }
             match rx.recv_timeout(Duration::from_millis(100)) {

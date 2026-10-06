@@ -10,26 +10,35 @@ use crate::index::{self, NoteText};
 
 /// The model's window (`ServerConfig::ctx_size`).
 pub const WINDOW: usize = 8192;
-/// Kept for the instructions, the question and the answer.
-pub const RESERVED: usize = 2048;
+/// Kept for the instructions (rules, calendar, tools, examples: about 1 300), the message
+/// wrappers and the 900-token answer (final review I5: 2 048 was too thin).
+pub const RESERVED: usize = 3000;
 pub const ANSWER_TOKENS: usize = 900;
 
-/// A rough token count for Turkish and English text with this model's tokenizer (about 3.5
-/// characters a token); the shares keep a margin.
+/// A cautious token count: about 3 characters a token for words, one token for each digit (the
+/// tokenizer splits numbers, and tool results are full of dates and ids).
 pub fn tokens(s: &str) -> usize {
-    (s.chars().count() * 2).div_ceil(7)
+    let digits = s.chars().filter(char::is_ascii_digit).count();
+    (s.chars().count() - digits).div_ceil(3) + digits
 }
 
 /// `s` cut to about `budget` tokens, at a line end when there is one near.
 fn cut(s: &str, budget: usize) -> String {
-    let max_chars = budget * 7 / 2;
-    if s.chars().count() <= max_chars {
+    if tokens(s) <= budget {
         return s.to_owned();
     }
-    let head: String = s.chars().take(max_chars).collect();
-    match head.rfind('\n') {
-        Some(i) if i > head.len() / 2 => format!("{}\n…", &head[..i]),
-        _ => format!("{head}…"),
+    // measured, not guessed: digits count one token each, so the character count alone can overshoot
+    let mut max_chars = budget * 3;
+    loop {
+        let head: String = s.chars().take(max_chars).collect();
+        let out = match head.rfind('\n') {
+            Some(i) if i > head.len() / 2 => format!("{}\n…", &head[..i]),
+            _ => format!("{head}…"),
+        };
+        if tokens(&out) <= budget || max_chars == 0 {
+            return out;
+        }
+        max_chars = max_chars * 9 / 10;
     }
 }
 
@@ -79,7 +88,7 @@ fn question_words(question: &str) -> Vec<String> {
 
 /// Builds the context for `question` with the earlier `turns` (oldest first).
 pub fn build(cache: &Connection, question: &str, turns: &[Turn], now: DateTime<FixedOffset>) -> rusqlite::Result<Context> {
-    let room = WINDOW - RESERVED - tokens(question).min(500);
+    let room = WINDOW - RESERVED - tokens(question).min(700);
     let (mut recent_budget, mut found_budget, tool_budget) = (room * 2 / 5, room * 2 / 5, room / 5);
 
     // Follow-ups first (from the recent share), newest kept when they do not all fit.

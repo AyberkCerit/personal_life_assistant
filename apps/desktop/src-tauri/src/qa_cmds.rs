@@ -17,6 +17,23 @@ static NEXT: AtomicU64 = AtomicU64::new(0);
 
 const MAX_QUESTION: usize = 2000;
 
+/// Ends a turn that never got its last event (the worker was gone, or the job was dropped): the
+/// panel hears `Failed` and the next question is not refused as `busy` forever (final review I1).
+struct EndGuard {
+    turn_id: String,
+    ended: Arc<AtomicBool>,
+    app: AppHandle,
+}
+
+impl Drop for EndGuard {
+    fn drop(&mut self) {
+        if !self.ended.swap(true, Ordering::SeqCst) {
+            finished(&self.turn_id);
+            let _ = self.app.emit("qa-event", &QaEvent::Failed { turn_id: self.turn_id.clone(), code: "model".into(), detail: "interrupted".into() });
+        }
+    }
+}
+
 fn finished(turn_id: &str) {
     let mut current = CURRENT.lock().expect("qa lock");
     if current.as_ref().is_some_and(|(id, _)| id == turn_id) {
@@ -43,6 +60,8 @@ pub fn qa_ask(app: AppHandle, state: State<AppState>, question: String, new_topi
     *current = Some((turn_id.clone(), Arc::clone(&cancel)));
     drop(current);
     let events = app.clone();
+    let ended = Arc::new(AtomicBool::new(false));
+    let guard = EndGuard { turn_id: turn_id.clone(), ended: Arc::clone(&ended), app: app.clone() };
     session.worker.ask(AskJob {
         turn_id: turn_id.clone(),
         question,
@@ -50,6 +69,7 @@ pub fn qa_ask(app: AppHandle, state: State<AppState>, question: String, new_topi
         cache_path: session.cache_path.clone(),
         cancel,
         on: Box::new(move |event| {
+            let _ = &guard; // lives as long as the job
             match &event {
                 // what the assistant wrote shows at once in the task panel, metrics and tree
                 QaEvent::Tool { record, .. } if record.ok => match record.undo.as_ref().map(|u| u.kind.as_str()) {
@@ -61,7 +81,10 @@ pub fn qa_ask(app: AppHandle, state: State<AppState>, question: String, new_topi
                     }
                     None => {}
                 },
-                QaEvent::Done { turn_id, .. } | QaEvent::Failed { turn_id, .. } => finished(turn_id),
+                QaEvent::Done { turn_id, .. } | QaEvent::Failed { turn_id, .. } => {
+                    ended.store(true, Ordering::SeqCst);
+                    finished(turn_id);
+                }
                 _ => {}
             }
             let _ = events.emit("qa-event", &event);

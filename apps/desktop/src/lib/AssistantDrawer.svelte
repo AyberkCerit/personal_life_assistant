@@ -11,7 +11,7 @@
   import X from "@lucide/svelte/icons/x";
   import { api } from "./api";
   import { t, tf, type Key } from "./i18n";
-  import { answerParts, apply, qaError, shown, started, toolLine, type ShownTurn } from "./qa";
+  import { answerParts, apply, qaError, shown, started, toolLine, type QaEvent, type ShownTurn } from "./qa";
   import Button from "./ui/Button.svelte";
   import IconButton from "./ui/IconButton.svelte";
   import { motion } from "./ui/motion";
@@ -42,6 +42,9 @@
   let input: HTMLTextAreaElement | undefined = $state();
   let list: HTMLDivElement | undefined = $state();
 
+  // Events can come before `qaAsk` returns the turn id (a quick failure): kept until it does (I7).
+  let early: QaEvent[] = [];
+
   const live = $derived(turns.find((x) => x.status === "running") ?? null);
 
   async function scrollDown() {
@@ -60,7 +63,10 @@
     notice = null;
     try {
       const id = await api.qaAsk(q, newTopic);
-      turns = [...turns, started(id, q, newTopic)];
+      let turn = started(id, q, newTopic);
+      for (const e of early.filter((x) => x.turn_id === id)) turn = apply(turn, e);
+      early = [];
+      turns = [...turns, turn];
       question = "";
       newTopic = false;
       void scrollDown();
@@ -119,6 +125,7 @@
   onMount(() => {
     void load();
     const un = api.onQaEvent((e) => {
+      if (!turns.some((x) => x.turn_id === e.turn_id)) early = [...early.slice(-50), e];
       turns = turns.map((x) => apply(x, e));
       if (e.kind === "token" || e.kind === "tool" || e.kind === "done") void scrollDown();
     });
@@ -173,7 +180,7 @@
               <span>{tf(line.key, line.values)}</span>
               {#if record.result?.undone}
                 <span class="undone">{t("qa.undone")}</span>
-              {:else if record.undo}
+              {:else if record.undo && turn.status !== "running"}
                 <Button variant="quiet" onclick={() => void undo(turn, i)}>{t("qa.undo")}</Button>
               {/if}
             </div>
