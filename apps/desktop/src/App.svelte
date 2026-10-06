@@ -27,7 +27,8 @@
   import SearchIcon from "@lucide/svelte/icons/search";
   import Backlinks from "./lib/Backlinks.svelte";
   import QuickOpen from "./lib/QuickOpen.svelte";
-  import AssistantDrawer from "./lib/AssistantDrawer.svelte";
+  import AssistantPanel from "./lib/AssistantPanel.svelte";
+  import Sparkles from "@lucide/svelte/icons/sparkles";
   import { fold } from "./lib/media";
   import SearchPanel from "./lib/SearchPanel.svelte";
   import type { MetricKind } from "./lib/metrics";
@@ -60,11 +61,12 @@
   let quickMetric = $state<{ record: MetricRecord | null } | null>(null);
   // M3: the left sidebar shows the folders or the search; the right panel tasks or backlinks.
   let leftView = $state<"tree" | "search">("tree");
-  let sideTab = $state<"tasks" | "links">("tasks");
+  // Owner decision (2026-10-07): the assistant is the right panel's first tab and its default.
+  let sideTab = $state<"assistant" | "tasks" | "links">("assistant");
+  let assistant: ReturnType<typeof AssistantPanel> | undefined = $state();
   let quickOpen = $state(false);
   let treeDialog = $state(false); // a tree dialog (move, delete, template…) is open
-  let assistantOpen = $state(false);
-  let assistantOpener: HTMLElement | null = null;
+
   let searchPanel: ReturnType<typeof SearchPanel> | undefined = $state();
   let settingsSection = $state<Section>("general"); // kept here: a language switch re-mounts the window
   let settingsRefocus = $state<string | null>(null);
@@ -81,7 +83,7 @@
   }
 
   function anyWindowOpen() {
-    return settingsOpen || quickMetric !== null || quickOpen || treeDialog || assistantOpen;
+    return settingsOpen || quickMetric !== null || quickOpen || treeDialog;
   }
 
   function openSearch() {
@@ -90,21 +92,15 @@
     void tick().then(() => searchPanel?.focus());
   }
 
-  /** FR-QA-001: Ctrl+K or the status bar button; one window at a time. */
+  /** FR-QA-001: Ctrl+K shows the assistant tab and puts the cursor in its question box. */
   function openAssistant() {
     if (wizard || vaultPath === null || anyWindowOpen()) return;
-    assistantOpener = document.activeElement as HTMLElement | null;
-    assistantOpen = true;
-  }
-
-  function closeAssistant() {
-    assistantOpen = false;
-    if (assistantOpener?.isConnected) assistantOpener.focus();
+    sideTab = "assistant";
+    void tick().then(() => assistant?.focus());
   }
 
   /** A note the answer cites: opened when it exists (an answer never creates notes). */
   async function openCited(target: string) {
-    assistantOpen = false;
     const hits = await api.quickOpen(target).catch(() => []);
     const hit = hits.find((h) => fold(h.title) === fold(target) || (h.alias !== null && fold(h.alias) === fold(target))) ?? hits[0];
     if (hit) await openNote(hit.note_path);
@@ -383,8 +379,7 @@
         openSearch();
       } else if (e.ctrlKey && !e.shiftKey && e.key.toLocaleLowerCase("tr") === "k") {
         e.preventDefault(); // FR-QA-001
-        if (assistantOpen) closeAssistant();
-        else openAssistant();
+        openAssistant();
       } else if (e.ctrlKey && e.shiftKey && e.key.toLocaleLowerCase("tr") === "d") {
         e.preventDefault(); // FR-EDT-015
         void openToday();
@@ -443,7 +438,7 @@
     <Button variant="primary" icon={FolderOpen} onclick={chooseVault}>{t("welcome.open")}</Button>
   </main>
 {:else}
-  <div class="layout">
+  <div class="layout" class:wide={sideTab === "assistant"}>
     <aside class="sidebar">
       <nav class="shortcuts" aria-label={t("metrics.title")}>
         <button class:on={center === "metrics"} aria-current={center === "metrics" ? "page" : undefined} onclick={showMetrics}>
@@ -482,34 +477,33 @@
         <EmptyState icon={FileText} title={t("editor.empty")} />
       {/if}
     </section>
-    <aside class="side-panel">
-      <div class="side-tabs" role="tablist" aria-label={t("links.panel")}>
+    <aside class="side-panel" class:chat={sideTab === "assistant"}>
+      <!-- owner choice B: one segmented control; the assistant segment is wider, with an icon -->
+      <div class="segments" role="tablist" aria-label={t("links.panel")}>
+        <button role="tab" class="ai" aria-selected={sideTab === "assistant"} class:on={sideTab === "assistant"} title={t("qa.open")} onclick={openAssistant}>
+          <Sparkles size={14} strokeWidth={2} aria-hidden="true" />{t("qa.title")}
+        </button>
         <button role="tab" aria-selected={sideTab === "tasks"} class:on={sideTab === "tasks"} onclick={() => (sideTab = "tasks")}>{t("links.tab.tasks")}</button>
         <button role="tab" aria-selected={sideTab === "links"} class:on={sideTab === "links"} onclick={() => (sideTab = "links")}>{t("links.tab.links")}</button>
       </div>
+      {#key vaultPath}<!-- another vault: its own history, its own undo -->
+        <div class="tab-body" hidden={sideTab !== "assistant"}>
+          <AssistantPanel
+            bind:this={assistant}
+            modelMissing={status.model === "not_installed"}
+            onOpenNote={(p) => void openNote(p)}
+            onOpenLink={(target) => void openCited(target)}
+            onShowModel={() => (showModel = true)}
+          />
+        </div>
+      {/key}
       {#if sideTab === "tasks"}
         <TaskPanel version={tasksVersion} onOpenSource={openSource} onChanged={() => panelEdits++} />
-      {:else}
+      {:else if sideTab === "links"}
         <Backlinks path={center === "editor" ? current : null} onOpen={(p, line) => void openNote(p, line)} />
       {/if}
     </aside>
-    <StatusBar {status} onResume={() => void api.setPaused(false)} download={modelDownload} onShowModel={() => (showModel = true)} onSettings={openSettings} onAssistant={openAssistant} />
-    {#key vaultPath}<!-- another vault: its own history, its own undo (final review I6) -->
-    <AssistantDrawer
-      open={assistantOpen}
-      modelMissing={status.model === "not_installed"}
-      onClose={closeAssistant}
-      onOpenNote={(p) => {
-        assistantOpen = false;
-        void openNote(p);
-      }}
-      onOpenLink={(target) => void openCited(target)}
-      onShowModel={() => {
-        assistantOpen = false;
-        showModel = true;
-      }}
-    />
-    {/key}
+    <StatusBar {status} onResume={() => void api.setPaused(false)} download={modelDownload} onShowModel={() => (showModel = true)} onSettings={openSettings} />
     <AddedToast onChanged={() => tasksVersion++} />
   </div>
 {/if}
@@ -533,13 +527,22 @@
 
 <style>
   .shortcuts { padding: var(--space-2) var(--space-2) 0; display: flex; flex-direction: column; gap: 2px; }
-  .side-tabs { display: flex; gap: var(--space-3); padding: var(--space-2) var(--space-3) 0; border-bottom: 1px solid var(--color-border); }
-  .side-tabs button {
-    border: 0; background: none; padding: var(--space-1) 0 var(--space-2); color: var(--color-text-muted); font: inherit; font-size: var(--text-md);
-    border-bottom: 2px solid transparent; margin-bottom: -1px; cursor: pointer;
+  .segments {
+    display: grid; grid-template-columns: 1.4fr 1fr 1fr; gap: 2px; padding: 2px; margin-bottom: var(--space-2);
+    background: var(--color-surface-reading); border: 1px solid var(--color-border); border-radius: var(--radius-md);
   }
-  .side-tabs button.on { color: var(--color-text); border-bottom-color: var(--color-accent); }
-  .side-tabs button:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
+  .segments button {
+    display: flex; align-items: center; justify-content: center; gap: var(--space-1); min-width: 0; padding: var(--space-1) var(--space-2);
+    border: 0; border-radius: var(--radius-sm); background: none; color: var(--color-text-muted); font: inherit; font-size: var(--text-md);
+    white-space: nowrap; cursor: pointer; transition: background-color var(--duration-fast) var(--ease-standard), color var(--duration-fast) var(--ease-standard);
+  }
+  .segments button:hover { color: var(--color-text); background: var(--color-surface-hover); }
+  .segments button.on { color: var(--color-text); background: var(--color-surface-selected); }
+  .segments button.ai { color: var(--color-accent); font-weight: 600; }
+  .segments button.ai.on { background: var(--color-accent-subtle); color: var(--color-accent); }
+  .segments button:focus-visible { outline: 2px solid var(--color-accent); outline-offset: -2px; }
+  .tab-body { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+  .tab-body[hidden] { display: none; }
   .shortcuts button {
     width: 100%; display: flex; align-items: center; gap: var(--space-2); padding: var(--space-1) var(--space-2);
     border: 0; border-radius: var(--radius-md); background: none; color: var(--color-text); font: inherit; font-size: var(--text-md); cursor: pointer;
