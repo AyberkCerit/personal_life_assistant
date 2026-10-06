@@ -43,6 +43,13 @@
     return e.is_dir ? e.path : parentOf(e.path) || inbox;
   });
 
+  // A dialog takes the focus, so Esc, Tab and Enter work in it: the name field, else the main button.
+  let dialogEl: HTMLDivElement | undefined = $state();
+  $effect(() => {
+    if (!dialogEl) return;
+    (dialogEl.querySelector<HTMLElement>(".field input") ?? dialogEl.querySelector<HTMLElement>("footer button:last-child"))?.focus();
+  });
+
   async function submit(e: SubmitEvent) {
     e.preventDefault();
     const name = title.trim();
@@ -185,6 +192,17 @@
     else if (d.kind === "template" && d.title.trim() && d.choice) await actions.createNote(d.folder, d.title.trim(), d.choice);
   }
 
+  function ask(kind: "move" | "delete", entry: TreeEntry) {
+    dialog = kind === "move" ? { kind, entry, choice: moveTargets(entries, entry.path)[0] ?? "" } : { kind, entry };
+    menu = null;
+  }
+
+  async function renameWithLinks(update: boolean) {
+    const d = dialog; // read before closing: a template {@const} would follow `dialog` to null
+    dialog = null;
+    if (d?.kind === "links") await actions.renameNote(d.entry.path, d.name, update);
+  }
+
   function dialogKey(e: KeyboardEvent) {
     if (e.key === "Escape") {
       e.preventDefault();
@@ -307,15 +325,15 @@
     {/if}
     {#if entry}
       <button role="menuitem" onclick={() => startRename(entry)}>{t("tree.menu.rename")}<kbd>F2</kbd></button>
-      <button role="menuitem" onclick={() => { menu = null; dialog = { kind: "move", entry, choice: moveTargets(entries, entry.path)[0] ?? "" }; }}>{t("tree.menu.move")}</button>
-      <button role="menuitem" class="danger" onclick={() => { menu = null; dialog = { kind: "delete", entry }; }}>{t("tree.menu.delete")}<kbd>Del</kbd></button>
+      <button role="menuitem" onclick={() => ask("move", entry)}>{t("tree.menu.move")}</button>
+      <button role="menuitem" class="danger" onclick={() => ask("delete", entry)}>{t("tree.menu.delete")}<kbd>Del</kbd></button>
     {/if}
   </div>
 {/if}
 
 {#if dialog}
   <div class="backdrop" aria-hidden="true" onclick={() => (dialog = null)}></div>
-  <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="tree-dialog-title" tabindex="-1" onkeydown={dialogKey}>
+  <div class="dialog" bind:this={dialogEl} role="dialog" aria-modal="true" aria-labelledby="tree-dialog-title" tabindex="-1" onkeydown={dialogKey}>
     {#if dialog.kind === "move"}
       <h2 id="tree-dialog-title">{tf("tree.move.title", { name: dialog.entry.is_dir ? dialog.entry.name : stem(dialog.entry.name) })}</h2>
       <div class="choices" role="radiogroup" aria-labelledby="tree-dialog-title">
@@ -335,13 +353,12 @@
         <Button variant="danger" onclick={() => void confirm()}>{t("tree.delete.confirm")}</Button>
       </footer>
     {:else if dialog.kind === "links"}
-      {@const d = dialog}
       <h2 id="tree-dialog-title">{t("tree.menu.rename")}</h2>
-      <p>{tf("tree.links.ask", { n: d.count })}</p>
+      <p>{tf("tree.links.ask", { n: dialog.count })}</p>
       <footer>
         <Button variant="quiet" onclick={() => (dialog = null)}>{t("tree.cancel")}</Button>
-        <Button onclick={() => { dialog = null; void actions.renameNote(d.entry.path, d.name, false); }}>{t("tree.links.keep")}</Button>
-        <Button variant="primary" onclick={() => { dialog = null; void actions.renameNote(d.entry.path, d.name, true); }}>{t("tree.links.update")}</Button>
+        <Button onclick={() => void renameWithLinks(false)}>{t("tree.links.keep")}</Button>
+        <Button variant="primary" onclick={() => void renameWithLinks(true)}>{t("tree.links.update")}</Button>
       </footer>
     {:else}
       <h2 id="tree-dialog-title">{t("tree.template.title")}</h2>
