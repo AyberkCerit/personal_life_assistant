@@ -15,7 +15,11 @@
   import { completionQuery, linkAt, linkRest } from "./links";
   import { autocompletion, type CompletionContext } from "@codemirror/autocomplete";
   import { keymap } from "@codemirror/view";
-  import { t } from "./i18n";
+  import { t, tf } from "./i18n";
+  import { mediaExtension } from "./editorMedia";
+  import { ImageCache, mediaError } from "./media";
+  import Properties from "./Properties.svelte";
+  import type { FrontMatter } from "./api";
 
   let {
     path,
@@ -23,6 +27,7 @@
     onSavedCopy,
     onOpenLink = () => {},
     suggest = async () => [],
+    onTag = () => {},
   }: {
     path: string;
     reveal?: string | null;
@@ -31,7 +36,31 @@
     onOpenLink?: (target: string) => void;
     /** FR-EDT-010: note names for `[[` completion. */
     suggest?: (query: string) => Promise<{ label: string; detail: string | null; insert: string }[]>;
+    /** FR-EDT-006: a tag chip in the properties strip was clicked. */
+    onTag?: (tag: string) => void;
   } = $props();
+
+  // FR-EDT-006/007: the strip follows the text as it is typed (a short pause, not every key).
+  let meta = $state<FrontMatter>({ state: "none", tags: [], aliases: [], lines: 0 });
+  let metaTimer: ReturnType<typeof setTimeout> | undefined;
+  function readMeta(text: string, wait: number) {
+    clearTimeout(metaTimer);
+    metaTimer = setTimeout(() => {
+      void api.noteMeta(text).then((m) => !destroyed && (meta = m), () => {});
+    }, wait);
+  }
+
+  // FR-EDT-016/017: previews come from one cache per open note; its object URLs go with it.
+  const images = new ImageCache((target) => api.imageBytes(target));
+  const media = mediaExtension({
+    cache: images,
+    missing: (name) => tf("image.missing", { name }),
+    save: async (bytes, name) => (await api.saveImage(bytes, name)).embed,
+    onError: (e) => {
+      const { key, reason } = mediaError(String(e));
+      imageError = tf(key, { reason }); // its own state: a save's sync() would clear `error`
+    },
+  });
 
   /** The wikilink at a document position, if any. */
   function linkAtPos(v: EditorView, pos: number): string | null {
@@ -67,6 +96,7 @@
   let readOnly = $state(false);
   let problem = $state<"conflict" | "missing" | null>(null);
   let error = $state<string | null>(null);
+  let imageError = $state<string | null>(null);
 
   function sync() {
     problem = doc?.problem ?? null;
@@ -88,7 +118,10 @@
           EditorView.lineWrapping,
           EditorState.readOnly.of(note.read_only),
           EditorView.updateListener.of((u) => {
-            if (u.docChanged) session?.edited();
+            if (u.docChanged) {
+              session?.edited();
+              readMeta(u.state.doc.toString(), 400);
+            }
           }),
           EditorView.domEventHandlers({
             blur: () => {
@@ -116,6 +149,7 @@
             },
           ])),
           linkCompletion,
+          media,
         ],
       }),
     });
@@ -124,6 +158,7 @@
     doc = new NoteDoc(path, note.text, note.hash, () => current.state.doc.toString(), saveApi, sync);
     session = new NoteSession(path, () => doc!.save(), (p) => void api.queueNote(p));
     sync();
+    readMeta(note.text, 0);
     if (reveal) {
       const range = revealRange(note.text, reveal);
       if (range) {
@@ -163,7 +198,9 @@
     });
     return () => {
       destroyed = true;
+      clearTimeout(metaTimer);
       view?.destroy();
+      images.dispose();
       void unChanged.then((f) => f());
     };
   });
@@ -187,6 +224,13 @@
   </Banner>
 {/if}
 {#if error}<Banner kind="danger" icon={CircleAlert} role="alert">{t("error.generic")}: {error}</Banner>{/if}
+{#if imageError}
+  <Banner kind="warning" icon={CircleAlert} role="alert">
+    {imageError}
+    {#snippet actions()}<Button onclick={() => (imageError = null)}>{t("image.dismiss")}</Button>{/snippet}
+  </Banner>
+{/if}
+<Properties {meta} {onTag} />
 <div class="editor" bind:this={host}></div>
 
 <style>

@@ -2,6 +2,7 @@
 
 mod commands;
 pub mod fileops_cmds;
+pub mod media_cmds;
 pub mod indexer;
 pub mod links_cmds;
 pub mod metrics_cmds;
@@ -84,6 +85,9 @@ pub fn run() {
             fileops_cmds::list_templates,
             fileops_cmds::create_note_in,
             fileops_cmds::open_today,
+            media_cmds::note_meta,
+            media_cmds::image_bytes,
+            media_cmds::save_image,
             links_cmds::search_notes,
             links_cmds::quick_open,
             links_cmds::backlinks,

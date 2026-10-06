@@ -5,6 +5,7 @@
   import { api, type SearchHit, type TagCount, type TreeEntry } from "./api";
   import { t, tf } from "./i18n";
   import { snippetParts } from "./links";
+  import { fold } from "./media";
   import IconButton from "./ui/IconButton.svelte";
 
   // FR-EDT-012/014/015: full-text search with folder and tag filters, and the tag list.
@@ -52,6 +53,12 @@
 
   async function loadTags() {
     tags = await api.listTags().catch(() => []);
+  }
+
+  /** FR-EDT-006: a tag chip in the properties strip opens the search on that tag. */
+  export function showTag(name: string) {
+    tag = fold(name); // as the index keeps tags, so the list shows it selected
+    query = "";
   }
 
   export function focus() {

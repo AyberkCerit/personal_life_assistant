@@ -10,7 +10,7 @@ const PLA_MIGRATIONS: &[&str] = &[
     include_str!("../migrations/pla/003_reminders.sql"),
     include_str!("../migrations/pla/004_reminder_seen.sql"),
 ];
-const CACHE_MIGRATIONS: &[&str] = &[include_str!("../migrations/cache/001_init.sql"), include_str!("../migrations/cache/002_link_line.sql"), include_str!("../migrations/cache/003_tag_keys.sql")];
+const CACHE_MIGRATIONS: &[&str] = &[include_str!("../migrations/cache/001_init.sql"), include_str!("../migrations/cache/002_link_line.sql"), include_str!("../migrations/cache/003_tag_keys.sql"), include_str!("../migrations/cache/004_yaml_frontmatter.sql")];
 
 pub struct Databases {
     pub pla: Connection,

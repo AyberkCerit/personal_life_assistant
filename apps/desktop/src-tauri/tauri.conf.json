@@ -11,10 +11,10 @@
   },
   "app": {
     "windows": [
-      { "label": "main", "title": "PLA", "width": 1280, "height": 720, "minWidth": 1024, "minHeight": 600, "center": true, "visible": false }
+      { "label": "main", "title": "PLA", "width": 1280, "height": 720, "minWidth": 1024, "minHeight": 600, "center": true, "visible": false, "dragDropEnabled": false }
     ],
     "security": {
-      "csp": "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:"
+      "csp": "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:"
     }
   },
   "bundle": { "active": false, "resources": { "llama/": "llama/" }, "icon": ["icons/32x32.png", "icons/128x128.png", "icons/icon.ico"] }
