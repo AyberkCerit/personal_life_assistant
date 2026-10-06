@@ -1,4 +1,5 @@
 <script lang="ts">
+  import Bot from "@lucide/svelte/icons/bot";
   import CircleAlert from "@lucide/svelte/icons/circle-alert";
   import Play from "@lucide/svelte/icons/play";
   import SettingsIcon from "@lucide/svelte/icons/settings";
@@ -15,7 +16,16 @@
     download = null,
     onShowModel = () => {},
     onSettings = () => {},
-  }: { status: WorkerStatus; onResume: () => void; download?: DownloadState | null; onShowModel?: () => void; onSettings?: () => void } = $props();
+    onAssistant = () => {},
+  }: {
+    status: WorkerStatus;
+    onResume: () => void;
+    download?: DownloadState | null;
+    onShowModel?: () => void;
+    onSettings?: () => void;
+    /** FR-QA-001: the Assistant button. */
+    onAssistant?: () => void;
+  } = $props();
 </script>
 
 <footer class="status" role="status" aria-live="polite">
@@ -33,7 +43,10 @@
   {#if status.last_error}
     <span class="error" title={status.last_error}><Icon icon={CircleAlert} size="sm" />{status.last_error}</span>
   {/if}
-  <span class="end"><IconButton icon={SettingsIcon} label={t("status.settings")} onclick={onSettings} /></span>
+  <span class="end">
+    <IconButton icon={Bot} label={t("qa.open")} title={t("qa.open")} onclick={onAssistant} />
+    <IconButton icon={SettingsIcon} label={t("status.settings")} onclick={onSettings} />
+  </span>
 </footer>
 
 <style>

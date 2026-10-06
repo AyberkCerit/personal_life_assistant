@@ -285,6 +285,51 @@ function mockTree(cmd: string, args: Record<string, unknown>): unknown {
   return undefined;
 }
 
+// Assistant stand-in: answers in a few tokens; "hatırlat" adds a task the panel can undo.
+const mockTurns: unknown[] = [];
+let mockStop = false;
+function mockQa(cmd: string, args: Record<string, unknown>): unknown {
+  switch (cmd) {
+    case "qa_ask": {
+      const id = `t${Date.now()}`;
+      const q = String(args.question);
+      mockStop = false;
+      const tools = /hatırlat|remind/i.test(q)
+        ? [{ tool: "add_task", args: { title: "Doktor randevusu" }, ok: true, result: { task_id: "m1", title: "Doktor randevusu", date: todayIso(), time: "10:00", remind: true }, error: null, undo: { kind: "task", id: "m1" } }]
+        : [];
+      const words = (tools.length ? "Hatırlatıcıyı ekledim. Ayrıntılar [[Hoş geldin]] notunda." : "Notlarında bunu bulamadım.").split(/(?<= )/);
+      let t = 0;
+      const at = (ms: number, f: () => void) => setTimeout(f, (t += ms));
+      at(150, () => emit("qa-event", { kind: "working", turn_id: id, tool: tools.length ? "add_task" : null }));
+      for (const r of tools) at(300, () => emit("qa-event", { kind: "tool", turn_id: id, record: r }));
+      let answer = "";
+      for (const w of words)
+        at(80, () => {
+          if (mockStop) return;
+          answer += w;
+          emit("qa-event", { kind: "token", turn_id: id, text: w });
+        });
+      at(100, () => {
+        const turn = { turn_id: id, question: q, answer, tools, created_at: new Date().toISOString(), status: mockStop ? "stopped" : "done", new_topic: Boolean(args.newTopic) };
+        mockTurns.push(turn);
+        emit("qa-event", { kind: "done", turn_id: id, turn, sources: tools.length ? ["Hoş geldin.md"] : [] });
+      });
+      return id;
+    }
+    case "qa_stop":
+      mockStop = true;
+      return undefined;
+    case "qa_history":
+      return [...mockTurns];
+    case "qa_clear":
+      mockTurns.length = 0;
+      return undefined;
+    case "qa_undo":
+      return undefined;
+  }
+  return undefined;
+}
+
 export async function mockBackend<T>(cmd: string, args: Record<string, unknown>): Promise<T> {
   const path = String(args.path ?? "");
   switch (cmd) {
@@ -319,6 +364,12 @@ export async function mockBackend<T>(cmd: string, args: Record<string, unknown>)
     case "list_tags":
     case "open_link":
       return mockLinks(cmd, args) as T;
+    case "qa_ask":
+    case "qa_stop":
+    case "qa_history":
+    case "qa_clear":
+    case "qa_undo":
+      return mockQa(cmd, args) as T;
     case "note_meta": {
       const text = String(args.text);
       const m = /^---\n([\s\S]*?)\n---/.exec(text);

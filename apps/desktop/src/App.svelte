@@ -27,6 +27,8 @@
   import SearchIcon from "@lucide/svelte/icons/search";
   import Backlinks from "./lib/Backlinks.svelte";
   import QuickOpen from "./lib/QuickOpen.svelte";
+  import AssistantDrawer from "./lib/AssistantDrawer.svelte";
+  import { fold } from "./lib/media";
   import SearchPanel from "./lib/SearchPanel.svelte";
   import type { MetricKind } from "./lib/metrics";
   import type { MetricRecord } from "./lib/api";
@@ -61,6 +63,8 @@
   let sideTab = $state<"tasks" | "links">("tasks");
   let quickOpen = $state(false);
   let treeDialog = $state(false); // a tree dialog (move, delete, template…) is open
+  let assistantOpen = $state(false);
+  let assistantOpener: HTMLElement | null = null;
   let searchPanel: ReturnType<typeof SearchPanel> | undefined = $state();
   let settingsSection = $state<Section>("general"); // kept here: a language switch re-mounts the window
   let settingsRefocus = $state<string | null>(null);
@@ -77,13 +81,33 @@
   }
 
   function anyWindowOpen() {
-    return settingsOpen || quickMetric !== null || quickOpen || treeDialog;
+    return settingsOpen || quickMetric !== null || quickOpen || treeDialog || assistantOpen;
   }
 
   function openSearch() {
     if (wizard || vaultPath === null || anyWindowOpen()) return; // never behind an open window (I3)
     leftView = "search";
     void tick().then(() => searchPanel?.focus());
+  }
+
+  /** FR-QA-001: Ctrl+K or the status bar button; one window at a time. */
+  function openAssistant() {
+    if (wizard || vaultPath === null || anyWindowOpen()) return;
+    assistantOpener = document.activeElement as HTMLElement | null;
+    assistantOpen = true;
+  }
+
+  function closeAssistant() {
+    assistantOpen = false;
+    if (assistantOpener?.isConnected) assistantOpener.focus();
+  }
+
+  /** A note the answer cites: opened when it exists (an answer never creates notes). */
+  async function openCited(target: string) {
+    assistantOpen = false;
+    const hits = await api.quickOpen(target).catch(() => []);
+    const hit = hits.find((h) => fold(h.title) === fold(target) || (h.alias !== null && fold(h.alias) === fold(target))) ?? hits[0];
+    if (hit) await openNote(hit.note_path);
   }
 
   async function searchTag(tag: string) {
@@ -357,6 +381,10 @@
       } else if (e.ctrlKey && e.shiftKey && e.key.toLocaleLowerCase("tr") === "f") {
         e.preventDefault(); // FR-EDT-014
         openSearch();
+      } else if (e.ctrlKey && !e.shiftKey && e.key.toLocaleLowerCase("tr") === "k") {
+        e.preventDefault(); // FR-QA-001
+        if (assistantOpen) closeAssistant();
+        else openAssistant();
       } else if (e.ctrlKey && e.shiftKey && e.key.toLocaleLowerCase("tr") === "d") {
         e.preventDefault(); // FR-EDT-015
         void openToday();
@@ -465,7 +493,21 @@
         <Backlinks path={center === "editor" ? current : null} onOpen={(p, line) => void openNote(p, line)} />
       {/if}
     </aside>
-    <StatusBar {status} onResume={() => void api.setPaused(false)} download={modelDownload} onShowModel={() => (showModel = true)} onSettings={openSettings} />
+    <StatusBar {status} onResume={() => void api.setPaused(false)} download={modelDownload} onShowModel={() => (showModel = true)} onSettings={openSettings} onAssistant={openAssistant} />
+    <AssistantDrawer
+      open={assistantOpen}
+      modelMissing={status.model === "not_installed"}
+      onClose={closeAssistant}
+      onOpenNote={(p) => {
+        assistantOpen = false;
+        void openNote(p);
+      }}
+      onOpenLink={(target) => void openCited(target)}
+      onShowModel={() => {
+        assistantOpen = false;
+        showModel = true;
+      }}
+    />
     <AddedToast onChanged={() => tasksVersion++} />
   </div>
 {/if}

@@ -107,6 +107,7 @@ export interface TagCount { tag: string; count: number }
 /** FR-EDT-006/007: the open note's frontmatter, `lines` with both fences. */
 export interface FrontMatter { state: "none" | "ok" | "invalid"; tags: string[]; aliases: string[]; lines: number }
 export interface SavedImage { path: string; embed: string }
+import type { QaEvent, QaTurn } from "./qa";
 export interface PendingReminders { due: DueReminder[]; missed: DueReminder[] }
 
 /** Inside the Tauri window; false in a plain browser (Vite dev server), where a mock backend answers. */
@@ -132,6 +133,13 @@ export const api = {
   setupVault: (path: string, lang: string) => call<VaultInfo>("setup_vault", { path, lang }),
   setLanguage: (lang: string) => call<void>("set_language", { lang }),
   finishSetup: () => call<void>("finish_setup"),
+  /** FR-QA-003: starts an answer; its progress comes as `qa-event`s with the returned turn id. */
+  qaAsk: (question: string, newTopic: boolean) => call<string>("qa_ask", { question, newTopic }),
+  qaStop: () => call<void>("qa_stop"),
+  qaHistory: () => call<QaTurn[]>("qa_history"),
+  qaClear: () => call<void>("qa_clear"),
+  qaUndo: (turnId: string, index: number) => call<void>("qa_undo", { turnId, index }),
+  onQaEvent: (cb: (e: QaEvent) => void) => on<QaEvent>("qa-event", cb),
   noteMeta: (text: string) => call<FrontMatter>("note_meta", { text }),
   /** FR-EDT-016: the image bytes; rejects `missing|<target>|` when the vault has no such image. */
   imageBytes: (target: string) => (inTauri ? invoke<ArrayBuffer>("image_bytes", { target }) : mockBackend<ArrayBuffer>("image_bytes", { target })),
