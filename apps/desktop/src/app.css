@@ -31,8 +31,12 @@ svg.lucide { flex: none; }
   grid-template-columns: 15rem minmax(0, 1fr) 20rem;
   grid-template-rows: minmax(0, 1fr) 1.75rem;
   height: 100%;
+  /* the right panel widens for the assistant tab and narrows back (owner decision 2026-10-07) */
+  transition: grid-template-columns var(--duration-base) var(--ease-standard); /* 0 with reduced motion */
 }
+.layout.wide { grid-template-columns: 15rem minmax(0, 1fr) 32.5rem; }
 .sidebar, .side-panel { background: var(--color-surface-panel); overflow: auto; }
 .sidebar { border-right: 1px solid var(--color-border); }
 .side-panel { border-left: 1px solid var(--color-border); padding: var(--space-3); }
+.side-panel.chat { display: flex; flex-direction: column; overflow: hidden; padding-bottom: 0; }
 .main { overflow: hidden; display: flex; flex-direction: column; background: var(--color-surface-reading); }

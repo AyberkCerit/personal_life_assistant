@@ -1,38 +1,37 @@
 <script lang="ts">
   import { onMount, tick } from "svelte";
-  import { cubicIn, cubicOut } from "svelte/easing";
-  import { fade, fly } from "svelte/transition";
   import Bot from "@lucide/svelte/icons/bot";
   import CircleAlert from "@lucide/svelte/icons/circle-alert";
   import FileText from "@lucide/svelte/icons/file-text";
   import Send from "@lucide/svelte/icons/send-horizontal";
   import Square from "@lucide/svelte/icons/square";
   import Trash from "@lucide/svelte/icons/trash-2";
-  import X from "@lucide/svelte/icons/x";
   import { api } from "./api";
   import { t, tf, type Key } from "./i18n";
   import { answerParts, apply, qaError, shown, started, toolLine, type QaEvent, type ShownTurn } from "./qa";
   import Button from "./ui/Button.svelte";
   import IconButton from "./ui/IconButton.svelte";
-  import { motion } from "./ui/motion";
 
-  // FR-QA-001…016, owner decision B: a wide drawer from the right over the editor. It stays mounted
-  // while a vault is open, so an answer goes on (and is seen) when the drawer is closed and reopened.
+  // FR-QA-001…016, owner decision (2026-10-07): the assistant is the right panel's first tab and
+  // its default; the panel widens while it shows. It stays mounted (hidden on the other tabs), so
+  // an answer goes on, and is seen, while the user looks at the tasks.
   let {
-    open,
     modelMissing,
-    onClose,
     onOpenNote,
     onOpenLink,
     onShowModel,
   }: {
-    open: boolean;
     modelMissing: boolean;
-    onClose: () => void;
     onOpenNote: (path: string) => void;
     onOpenLink: (target: string) => void;
     onShowModel: () => void;
   } = $props();
+
+  /** Ctrl+K: the question box. */
+  export function focus() {
+    input?.focus();
+    void scrollDown();
+  }
 
   let turns = $state<ShownTurn[]>([]);
   let question = $state("");
@@ -108,19 +107,15 @@
     input?.focus();
   }
 
-  function dialogKey(e: KeyboardEvent) {
-    if (e.key !== "Escape") return;
-    e.preventDefault();
-    if (confirmClear) confirmClear = false;
-    else onClose();
+  function panelKey(e: KeyboardEvent) {
+    if (e.key === "Escape" && confirmClear) {
+      e.preventDefault();
+      confirmClear = false;
+    }
   }
 
   const name = (path: string) => path.split("/").pop()!.replace(/\.md$/i, "");
   const failure = (turn: ShownTurn) => (turn.error ? tf(qaError(turn.error.code), { detail: turn.error.detail }) : "");
-
-  $effect(() => {
-    if (open) void tick().then(() => input?.focus());
-  });
 
   onMount(() => {
     void load();
@@ -133,26 +128,11 @@
   });
 </script>
 
-{#if open}
-  <div class="scrim" aria-hidden="true" onclick={onClose} transition:fade={{ duration: motion(180) }}></div>
-  <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-  <div
-    class="drawer"
-    role="dialog"
-    aria-modal="true"
-    aria-labelledby="qa-title"
-    tabindex="-1"
-    onkeydown={dialogKey}
-    in:fly={{ x: 520, duration: motion(220), easing: cubicOut, opacity: 1 }}
-    out:fly={{ x: 520, duration: motion(160), easing: cubicIn, opacity: 1 }}
-  >
+<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+<div class="assistant" role="region" aria-label={t("qa.title")} onkeydown={panelKey}>
     <header>
-      <h2 id="qa-title"><Bot size={18} strokeWidth={1.75} aria-hidden="true" />{t("qa.title")}</h2>
-      <div class="actions">
-        <Button variant="quiet" onclick={startTopic} disabled={newTopic}>{t("qa.newTopic")}</Button>
-        <IconButton icon={Trash} label={t("qa.clear")} onclick={() => (confirmClear = true)} disabled={turns.length === 0 || live !== null} />
-        <IconButton icon={X} label={t("qa.close")} onclick={onClose} />
-      </div>
+      <Button variant="quiet" onclick={startTopic} disabled={newTopic} title={t("qa.newTopicHint")}>{t("qa.newTopic")}</Button>
+      <IconButton icon={Trash} label={t("qa.clear")} onclick={() => (confirmClear = true)} disabled={turns.length === 0 || live !== null} />
     </header>
     {#if confirmClear}
       <div class="confirm" role="alertdialog" aria-label={t("qa.clear")}>
@@ -236,25 +216,17 @@
         {/if}
       </div>
     </footer>
-  </div>
-{/if}
+</div>
 
 <style>
-  .scrim { position: fixed; inset: 0; background: var(--color-scrim); z-index: 30; }
-  .drawer {
-    position: fixed; top: 0; right: 0; bottom: 0; z-index: 31; width: min(520px, calc(100vw - 4 * var(--space-8)));
-    display: flex; flex-direction: column; background: var(--color-surface-reading);
-    border-left: 1px solid var(--color-border); box-shadow: var(--shadow-raised); outline: none;
-  }
-  header { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); padding: var(--space-3) var(--space-4); border-bottom: 1px solid var(--color-border); }
-  h2 { display: flex; align-items: center; gap: var(--space-2); margin: 0; font-size: var(--text-lg); font-weight: 600; }
-  .actions { display: flex; align-items: center; gap: var(--space-1); }
+  .assistant { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+  header { display: flex; align-items: center; justify-content: flex-end; gap: var(--space-1); padding: var(--space-1) 0; }
   .confirm {
     display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); padding: var(--space-2) var(--space-4);
     background: var(--color-danger-subtle); font-size: var(--text-sm);
   }
   .confirm span { flex: 1 1 12rem; }
-  .turns { flex: 1; overflow-y: auto; padding: var(--space-4); display: flex; flex-direction: column; gap: var(--space-4); }
+  .turns { flex: 1; min-height: 0; overflow-y: auto; padding: var(--space-2) var(--space-1) var(--space-4); display: flex; flex-direction: column; gap: var(--space-4); }
   .empty { margin: auto; max-width: 22rem; text-align: center; color: var(--color-text-muted); display: flex; flex-direction: column; align-items: center; gap: var(--space-2); }
   .empty h3 { margin: 0; color: var(--color-text); font-size: var(--text-md); }
   .empty p { margin: 0; font-size: var(--text-sm); }
@@ -283,7 +255,7 @@
   }
   .topic { display: flex; align-items: center; gap: var(--space-2); color: var(--color-text-muted); font-size: var(--text-xs); }
   .topic::before, .topic::after { content: ""; flex: 1; border-top: 1px solid var(--color-border); }
-  footer { border-top: 1px solid var(--color-border); padding: var(--space-3) var(--space-4); display: flex; flex-direction: column; gap: var(--space-2); }
+  footer { border-top: 1px solid var(--color-border); padding: var(--space-3) 0; display: flex; flex-direction: column; gap: var(--space-2); }
   .nomodel { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); font-size: var(--text-sm); color: var(--color-warning); }
   .ask { display: flex; align-items: flex-end; gap: var(--space-2); }
   textarea {
