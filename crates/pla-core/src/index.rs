@@ -81,36 +81,6 @@ fn split_frontmatter<'a>(lines: &[&'a str]) -> Option<(Vec<&'a str>, usize)> {
     Some((lines[1..end].to_vec(), end + 1))
 }
 
-fn unquote(s: &str) -> String {
-    s.trim().trim_matches(|c| c == '"' || c == '\'').trim().to_owned()
-}
-
-/// The values of `key` (or its singular) in simple YAML: `[a, b]`, a block list, or one scalar.
-fn yaml_list(front: &[&str], keys: &[&str]) -> Vec<String> {
-    for (i, line) in front.iter().enumerate() {
-        let Some((key, value)) = line.split_once(':') else { continue };
-        if line.starts_with(char::is_whitespace) || !keys.contains(&key.trim()) {
-            continue;
-        }
-        // A YAML comment starts at ` #` (a tag value itself may start with `#` only after quoting).
-        let value = value.split(" #").next().unwrap_or_default().trim();
-        let items: Vec<String> = if let Some(inner) = value.strip_prefix('[') {
-            let Some(inner) = inner.strip_suffix(']') else { return Vec::new() };
-            inner.split(',').map(unquote).collect()
-        } else if value.is_empty() {
-            front[i + 1..]
-                .iter()
-                .take_while(|l| l.trim_start().starts_with("- ") || l.trim().is_empty())
-                .filter_map(|l| l.trim_start().strip_prefix("- ").map(|v| unquote(v.split(" #").next().unwrap_or_default())))
-                .collect()
-        } else {
-            value.split(',').map(unquote).collect()
-        };
-        return items.into_iter().filter(|s| !s.is_empty()).collect();
-    }
-    Vec::new()
-}
-
 fn push_unique(list: &mut Vec<String>, item: String) {
     if !list.contains(&item) {
         list.push(item);
@@ -193,16 +163,14 @@ pub fn parse_note(rel: &str, text: &str) -> ParsedNote {
     let text = text.strip_prefix('\u{feff}').unwrap_or(text);
     let lines: Vec<&str> = text.lines().collect();
     let title = std::path::Path::new(rel).file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
-    let (front, body_start) = split_frontmatter(&lines).unwrap_or((Vec::new(), 0));
-    // FR-EDT-007: invalid YAML counts as no frontmatter (its lines are still not the body)
-    let front = if crate::media::read_frontmatter(text).state == crate::media::FrontState::Invalid { Vec::new() } else { front };
-    let aliases = yaml_list(&front, &["aliases", "alias"]);
+    let body_start = split_frontmatter(&lines).map_or(0, |(_, start)| start);
+    // FR-EDT-006/007: the same reading as the properties strip; invalid YAML gives none (its lines
+    // are still not the body)
+    let front = crate::media::read_frontmatter(text);
+    let aliases = front.aliases;
     let mut tags: Vec<String> = Vec::new();
-    for t in yaml_list(&front, &["tags", "tag"]) {
-        let t = fold(t.trim_start_matches('#'));
-        if !t.is_empty() {
-            push_unique(&mut tags, t);
-        }
+    for t in front.tags {
+        push_unique(&mut tags, fold(&t));
     }
     let mut links = Vec::new();
     let mut fence: Option<&str> = None; // the marker that opened the code block

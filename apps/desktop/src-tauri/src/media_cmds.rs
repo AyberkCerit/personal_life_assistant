@@ -1,7 +1,12 @@
 //! The properties strip and images in notes (FR-EDT-006/007/016/017). Errors are `<code>|<detail>|`.
 
+use std::path::PathBuf;
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
+
 use chrono::Local;
 use pla_core::media::{self, FrontMatter, MediaError};
+use pla_core::vault::Vault;
 use serde::Serialize;
 use tauri::ipc::{InvokeBody, Request, Response};
 use tauri::{AppHandle, Emitter, State};
@@ -19,18 +24,39 @@ fn media_code(e: MediaError) -> String {
 }
 
 /// FR-EDT-006/007: the open note's tags and aliases, from the editor's current text.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn note_meta(text: String) -> FrontMatter {
     media::read_frontmatter(&text)
 }
 
-/// FR-EDT-016: the bytes of the image an embed target shows (an ArrayBuffer in the page).
-#[tauri::command]
-pub fn image_bytes(state: State<AppState>, target: String) -> Result<Response, String> {
+/// The open vault, copied out so no file work happens under the session lock (final review I2).
+fn vault_of(state: &State<AppState>) -> Result<Vault, String> {
     let guard = state.session.lock().expect("session lock");
-    let session = guard.as_ref().ok_or("no_vault||")?;
-    let rel = media::resolve_image(&session.vault, &target).ok_or_else(|| format!("missing|{target}|"))?;
-    let bytes = media::read_image(&session.vault, &rel).map_err(media_code)?;
+    Ok(guard.as_ref().ok_or("no_vault||")?.vault.clone())
+}
+
+/// The vault's images, walked at most every few seconds: a note with many embeds asks at once.
+static IMAGES: Mutex<Option<(PathBuf, Instant, Vec<String>)>> = Mutex::new(None);
+const IMAGES_FRESH: Duration = Duration::from_secs(5);
+
+fn images_cached(vault: &Vault) -> Vec<String> {
+    let mut cached = IMAGES.lock().expect("images lock");
+    if let Some((root, at, list)) = cached.as_ref() {
+        if *root == vault.root && at.elapsed() < IMAGES_FRESH {
+            return list.clone();
+        }
+    }
+    let list = media::images_in(vault);
+    *cached = Some((vault.root.clone(), Instant::now(), list.clone()));
+    list
+}
+
+/// FR-EDT-016: the bytes of the image an embed target shows (an ArrayBuffer in the page).
+#[tauri::command(async)]
+pub fn image_bytes(state: State<'_, AppState>, target: String) -> Result<Response, String> {
+    let vault = vault_of(&state)?;
+    let rel = media::resolve_image_among(&vault, &target, || images_cached(&vault)).ok_or_else(|| format!("missing|{target}|"))?;
+    let bytes = media::read_image(&vault, &rel).map_err(media_code)?;
     Ok(Response::new(bytes))
 }
 
@@ -43,8 +69,8 @@ pub struct SavedImage {
 
 /// FR-EDT-017: a pasted or dropped image, sent as the raw request body; a dropped file's name comes
 /// in the `x-name` header (URI-encoded), a pasted image has none.
-#[tauri::command]
-pub fn save_image(app: AppHandle, state: State<AppState>, request: Request<'_>) -> Result<SavedImage, String> {
+#[tauri::command(async)]
+pub fn save_image(app: AppHandle, state: State<'_, AppState>, request: Request<'_>) -> Result<SavedImage, String> {
     let InvokeBody::Raw(bytes) = request.body() else { return Err("not_image||".into()) };
     let name = request
         .headers()
@@ -52,13 +78,10 @@ pub fn save_image(app: AppHandle, state: State<AppState>, request: Request<'_>) 
         .and_then(|v| v.to_str().ok())
         .map(percent_decode)
         .filter(|n| !n.trim().is_empty());
-    let saved = {
-        let guard = state.session.lock().expect("session lock");
-        let session = guard.as_ref().ok_or("no_vault||")?;
-        let path = media::save_attachment(&session.vault, bytes, name.as_deref(), Local::now().fixed_offset()).map_err(media_code)?;
-        let embed = media::embed_target(&session.vault, &path);
-        SavedImage { path, embed }
-    };
+    let vault = vault_of(&state)?;
+    let path = media::save_attachment(&vault, bytes, name.as_deref(), Local::now().fixed_offset()).map_err(media_code)?;
+    *IMAGES.lock().expect("images lock") = None; // the new image is found at once
+    let saved = SavedImage { embed: media::embed_target(&vault, &path), path };
     let _ = app.emit("tree-changed", ());
     Ok(saved)
 }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { frontmatterLines, ImageCache, imageEmbeds, isImageFile, mediaError } from "./media";
+import { fold, frontmatterLines, ImageCache, imageEmbeds, isImageFile, mediaError } from "./media";
 
 describe("media helpers", () => {
   it("finds the frontmatter block only when it closes", () => {
@@ -23,6 +23,12 @@ describe("media helpers", () => {
     expect(isImageFile({ type: "application/pdf", name: "a.pdf" })).toBe(false);
   });
 
+  it("folds like the index (Turkish İ and I are i)", () => {
+    expect(fold("Işık")).toBe("işık");
+    expect(fold("İş")).toBe("iş");
+    expect(fold("I.png") === fold("ı.png")).toBe(false);
+  });
+
   it("reads save errors", () => {
     expect(mediaError("too_big|20|")).toEqual({ key: "image.error.too_big", reason: "" });
     expect(mediaError("not_image||")).toEqual({ key: "image.error.not_image", reason: "" });
@@ -40,8 +46,7 @@ describe("media helpers", () => {
     expect(a).toMatch(/^blob:/);
     expect(await cache.get("A.png")).toBe(a);
     expect(await cache.get("yok.png")).toBeNull();
-    cache.forgetMissing();
-    await Promise.resolve();
+    cache.forgetMissing(); // at once: the next preview asks again
     await cache.get("yok.png");
     expect(asked).toEqual(["a.png", "yok.png", "yok.png"]);
     cache.dispose();

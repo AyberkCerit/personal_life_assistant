@@ -1,7 +1,7 @@
 /** The editor's frontmatter and images (FR-EDT-006/016/017): dim YAML, previews, paste and drop. */
-import { RangeSetBuilder, StateField, type EditorState, type Extension } from "@codemirror/state";
+import { RangeSetBuilder, StateEffect, StateField, type EditorState, type Extension } from "@codemirror/state";
 import { Decoration, EditorView, WidgetType, type DecorationSet } from "@codemirror/view";
-import { frontmatterLines, imageEmbeds, isImageFile, type ImageCache } from "./media";
+import { frontmatterLines, imageEmbeds, isImageFile, MAX_IMAGE, type ImageCache } from "./media";
 
 export interface MediaConfig {
   cache: ImageCache;
@@ -9,19 +9,22 @@ export interface MediaConfig {
   missing: (name: string) => string;
   /** Stores a pasted (`name` = null) or dropped image; returns what goes inside `![[…]]`. */
   save: (bytes: Uint8Array, name: string | null) => Promise<string>;
+  /** A `<code>|<detail>|<reason>` error, as `save_image` gives them. */
   onError: (err: unknown) => void;
 }
 
 class ImagesWidget extends WidgetType {
   constructor(
     readonly targets: string[],
+    readonly generation: number,
     readonly config: MediaConfig,
   ) {
     super();
   }
 
   eq(other: ImagesWidget): boolean {
-    return other.targets.join("\n") === this.targets.join("\n");
+    // a new generation (an image was just saved) redraws the previews that said "missing"
+    return other.generation === this.generation && other.targets.join("\n") === this.targets.join("\n");
   }
 
   toDOM(view: EditorView): HTMLElement {
@@ -55,13 +58,16 @@ class ImagesWidget extends WidgetType {
 }
 
 const dimLine = Decoration.line({ class: "cm-frontmatter" });
+/** An image was saved: the previews are drawn again. */
+const mediaChanged = StateEffect.define<null>();
 
-function decorations(state: EditorState, config: MediaConfig): DecorationSet {
+function decorations(state: EditorState, generation: number, config: MediaConfig): DecorationSet {
   const builder = new RangeSetBuilder<Decoration>();
   const { doc } = state;
   const head: string[] = [];
-  for (let i = 1; i <= doc.lines && i <= 200; i++) {
+  for (let i = 1; i <= doc.lines; i++) {
     head.push(doc.line(i).text);
+    if (i === 1 && head[0].replace(/^﻿/, "").trimEnd() !== "---") break;
     if (i > 1 && /^(---|\.\.\.)\s*$/.test(head[i - 1])) break;
   }
   const front = frontmatterLines(head);
@@ -73,52 +79,80 @@ function decorations(state: EditorState, config: MediaConfig): DecorationSet {
     }
     if (!line.text.includes("![[")) continue;
     const targets = imageEmbeds(line.text);
-    if (targets.length) builder.add(line.to, line.to, Decoration.widget({ widget: new ImagesWidget(targets, config), block: true, side: 1 }));
+    if (targets.length) builder.add(line.to, line.to, Decoration.widget({ widget: new ImagesWidget(targets, generation, config), block: true, side: 1 }));
   }
   return builder.finish();
 }
 
-async function insertImages(view: EditorView, files: File[], pasted: boolean, pos: number, config: MediaConfig) {
-  const embeds: string[] = [];
-  for (const file of files) {
-    try {
-      const bytes = new Uint8Array(await file.arrayBuffer());
-      embeds.push(`![[${await config.save(bytes, pasted ? null : file.name)}]]`);
-    } catch (e) {
-      config.onError(e);
-    }
-  }
-  if (!embeds.length) return;
-  config.cache.forgetMissing();
-  const at = Math.min(pos, view.state.doc.length);
-  const insert = embeds.join("\n");
-  view.dispatch({ changes: { from: at, insert }, selection: { anchor: at + insert.length }, scrollIntoView: true });
-  view.focus();
-}
-
 export function mediaExtension(config: MediaConfig): Extension {
+  let generation = 0;
   const field = StateField.define<DecorationSet>({
-    create: (state) => decorations(state, config),
-    update: (deco, tr) => (tr.docChanged ? decorations(tr.state, config) : deco),
+    create: (state) => decorations(state, generation, config),
+    update: (deco, tr) => (tr.docChanged || tr.effects.some((e) => e.is(mediaChanged)) ? decorations(tr.state, generation, config) : deco),
     provide: (f) => EditorView.decorations.from(f),
   });
+
+  // Where a pending image goes: moved along with what is typed while it is being saved (I6).
+  const pending = new Set<{ pos: number }>();
+
+  async function insertImages(view: EditorView, files: File[], pasted: boolean, pos: number) {
+    const at = { pos };
+    pending.add(at);
+    const embeds: string[] = [];
+    try {
+      for (const file of files) {
+        if (file.size > MAX_IMAGE) {
+          config.onError("too_big|20|"); // before reading 20 MB into the page (M5)
+          continue;
+        }
+        try {
+          const bytes = new Uint8Array(await file.arrayBuffer());
+          embeds.push(`![[${await config.save(bytes, pasted ? null : file.name)}]]`);
+        } catch (e) {
+          config.onError(e);
+        }
+      }
+    } finally {
+      pending.delete(at);
+    }
+    if (!embeds.length || !view.dom.isConnected) return; // the note was closed: the file stays saved
+    config.cache.forgetMissing();
+    generation++;
+    const from = Math.min(at.pos, view.state.doc.length);
+    const insert = embeds.join("\n");
+    view.dispatch({ changes: { from, insert }, selection: { anchor: from + insert.length }, effects: mediaChanged.of(null), scrollIntoView: true });
+    view.focus();
+  }
+
   const images = (list: FileList | undefined | null) => [...(list ?? [])].filter(isImageFile);
   return [
     field,
+    EditorView.updateListener.of((u) => {
+      if (u.docChanged) for (const at of pending) at.pos = u.changes.mapPos(at.pos, 1);
+    }),
     EditorView.domEventHandlers({
       paste: (event, view) => {
+        // copied cells (Excel, Word) carry text and a picture of it: the text is what was meant (M8)
+        if (event.clipboardData?.getData("text/plain")) return false;
         const files = images(event.clipboardData?.files);
         if (!files.length || view.state.readOnly) return false;
         event.preventDefault();
-        void insertImages(view, files, true, view.state.selection.main.head, config);
+        void insertImages(view, files, true, view.state.selection.main.head);
         return true;
       },
       drop: (event, view) => {
-        const files = images(event.dataTransfer?.files);
-        if (!files.length || view.state.readOnly) return false;
+        const all = [...(event.dataTransfer?.files ?? [])];
+        if (!all.length) return false; // text or a tree item: CodeMirror's own handling
+        // other files are never read into the note as text (I3)
         event.preventDefault();
+        const files = all.filter(isImageFile);
+        if (!files.length) {
+          config.onError("not_image||");
+          return true;
+        }
+        if (view.state.readOnly) return true;
         const pos = view.posAtCoords({ x: event.clientX, y: event.clientY }) ?? view.state.selection.main.head;
-        void insertImages(view, files, false, pos, config);
+        void insertImages(view, files, false, pos);
         return true;
       },
     }),

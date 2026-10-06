@@ -4,6 +4,13 @@ import type { Key } from "./i18n";
 
 const IMAGE = /\.(png|jpe?g|gif|webp)$/i;
 const IMAGE_TYPES = ["image/png", "image/jpeg", "image/gif", "image/webp"];
+/** The largest image PLA stores (the backend refuses more too). */
+export const MAX_IMAGE = 20 * 1024 * 1024;
+
+/** Like the index's `fold`: İ is i, then lower case (I is i, ı stays ı). */
+export function fold(s: string): string {
+  return s.replace(/İ/g, "i").toLowerCase();
+}
 
 /** Lines the frontmatter takes, fences included; 0 when the note has none (it must close). */
 export function frontmatterLines(lines: string[]): number {
@@ -48,15 +55,19 @@ export function mediaError(err: string): { key: Key; reason: string } {
  */
 export class ImageCache {
   private urls = new Map<string, Promise<string | null>>();
+  private missing = new Set<string>(); // known at once, not after a promise settles (I5)
   constructor(private fetch: (target: string) => Promise<ArrayBuffer>) {}
 
   get(target: string): Promise<string | null> {
-    const key = target.toLocaleLowerCase("tr");
+    const key = fold(target);
     let url = this.urls.get(key);
     if (!url) {
       url = this.fetch(target).then(
         (bytes) => URL.createObjectURL(new Blob([bytes])),
-        () => null,
+        () => {
+          if (this.urls.get(key) === url) this.missing.add(key);
+          return null;
+        },
       );
       this.urls.set(key, url);
     }
@@ -65,11 +76,13 @@ export class ImageCache {
 
   /** Forget the images that were missing (one may just have been saved). */
   forgetMissing(): void {
-    for (const [key, url] of this.urls) void url.then((u) => u === null && this.urls.get(key) === url && this.urls.delete(key));
+    for (const key of this.missing) this.urls.delete(key);
+    this.missing.clear();
   }
 
   dispose(): void {
     for (const url of this.urls.values()) void url.then((u) => u && URL.revokeObjectURL(u));
     this.urls.clear();
+    this.missing.clear();
   }
 }

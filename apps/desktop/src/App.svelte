@@ -367,6 +367,12 @@
       }
     };
     window.addEventListener("keydown", shortcut);
+    // A file dropped anywhere outside the editor would make the window open it (media review I3).
+    const noFileDrop = (e: DragEvent) => {
+      if (e.dataTransfer?.types.includes("Files")) e.preventDefault();
+    };
+    window.addEventListener("dragover", noFileDrop);
+    window.addEventListener("drop", noFileDrop);
     const unClose = inTauri
       ? getCurrentWindow().onCloseRequested(async (event) => {
           // No vault open: nothing runs in the background, so closing quits (deferred F4c minor).
@@ -388,6 +394,8 @@
       void unQuick.then((f) => f());
       void unAdded.then((f) => f());
       window.removeEventListener("keydown", shortcut);
+      window.removeEventListener("dragover", noFileDrop);
+      window.removeEventListener("drop", noFileDrop);
     };
   });
 </script>

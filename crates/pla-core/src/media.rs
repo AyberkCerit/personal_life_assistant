@@ -62,13 +62,40 @@ fn strings(value: &Yaml) -> Vec<String> {
     out
 }
 
+/// The largest frontmatter PLA reads, and the most YAML events in it.
+const MAX_FRONT: usize = 64 * 1024;
+const MAX_EVENTS: usize = 10_000;
+
+/// Whether `source` is safe to load: small, and without YAML aliases (`*name`), which the loader
+/// copies out in full, so a few lines of nested aliases would grow to billions of nodes (final
+/// review C1). Notes do not need aliases in their properties; such frontmatter counts as unreadable.
+fn small_and_plain(source: &str) -> bool {
+    use yaml_rust2::parser::{Event, Parser};
+    if source.len() > MAX_FRONT {
+        return false;
+    }
+    let mut parser = Parser::new_from_str(source);
+    for _ in 0..MAX_EVENTS {
+        match parser.next_token() {
+            Ok((Event::StreamEnd, _)) => return true,
+            Ok((Event::Alias(_), _)) | Err(_) => return false,
+            Ok(_) => {}
+        }
+    }
+    false
+}
+
 /// FR-EDT-006/007: the note's tags and aliases from its frontmatter. Invalid YAML (or YAML that is
 /// not a set of keys) is reported and counts as no frontmatter; PLA never rewrites it.
 pub fn read_frontmatter(text: &str) -> FrontMatter {
     let none = FrontMatter { state: FrontState::None, tags: Vec::new(), aliases: Vec::new(), lines: 0 };
     let Some((front, lines)) = split(text) else { return none };
     let invalid = FrontMatter { state: FrontState::Invalid, lines, ..none.clone() };
-    let docs = match YamlLoader::load_from_str(&front.join("\n")) {
+    let source = front.join("\n");
+    if !small_and_plain(&source) {
+        return invalid;
+    }
+    let docs = match YamlLoader::load_from_str(&source) {
         Ok(docs) => docs,
         Err(_) => return invalid,
     };
@@ -80,7 +107,13 @@ pub fn read_frontmatter(text: &str) -> FrontMatter {
         return invalid;
     }
     let field = |keys: &[&str]| keys.iter().map(|k| &doc[*k]).find(|v| !v.is_badvalue() && !v.is_null()).map(strings).unwrap_or_default();
-    let tags = field(&["tags", "tag"]).into_iter().map(|t| t.trim_start_matches('#').to_owned()).filter(|t| !t.is_empty()).collect();
+    let mut tags: Vec<String> = Vec::new();
+    for t in field(&["tags", "tag"]) {
+        let t = t.trim_start_matches('#').to_owned(); // `a` and `#a` are one tag (final review I1)
+        if !t.is_empty() && !tags.contains(&t) {
+            tags.push(t);
+        }
+    }
     FrontMatter { state: FrontState::Ok, tags, aliases: field(&["aliases", "alias"]), lines }
 }
 
@@ -123,7 +156,7 @@ pub fn is_image_name(name: &str) -> bool {
 }
 
 /// Every image file in the vault (vault-relative, `/`), hidden places left out.
-fn images_in(vault: &Vault) -> Vec<String> {
+pub fn images_in(vault: &Vault) -> Vec<String> {
     let mut out = Vec::new();
     let mut dirs = vec![(vault.root.clone(), String::new())];
     while let Some((dir, prefix)) = dirs.pop() {
@@ -147,6 +180,11 @@ fn images_in(vault: &Vault) -> Vec<String> {
 /// the exact vault path first, then the file name anywhere, `attachments/` first, then the shortest
 /// path. `None` when there is no such image in the vault.
 pub fn resolve_image(vault: &Vault, target: &str) -> Option<String> {
+    resolve_image_among(vault, target, || images_in(vault))
+}
+
+/// `resolve_image` with the vault's image list from the caller (which may keep it a moment).
+pub fn resolve_image_among(vault: &Vault, target: &str, images: impl FnOnce() -> Vec<String>) -> Option<String> {
     let target = target.split('|').next().unwrap_or_default().split('#').next().unwrap_or_default().trim().replace('\\', "/");
     let target = target.trim_start_matches('/');
     if !is_image_name(target) {
@@ -158,7 +196,7 @@ pub fn resolve_image(vault: &Vault, target: &str) -> Option<String> {
     }
     let wanted = target.to_lowercase();
     let attachments = format!("{}/", vault.config.folders.attachments.trim_matches('/').to_lowercase());
-    images_in(vault)
+    images()
         .into_iter()
         .filter(|rel| rel.rsplit('/').next().is_some_and(|n| n.to_lowercase() == wanted))
         .min_by_key(|rel| (!rel.to_lowercase().starts_with(&attachments), rel.len(), rel.clone()))
@@ -177,8 +215,10 @@ pub fn read_image(vault: &Vault, rel: &str) -> Result<Vec<u8>, MediaError> {
 fn clean_stem(name: &str) -> String {
     let stem = Path::new(name).file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
     let cleaned: String = stem.chars().map(|c| if FORBIDDEN.contains(&c) || FORBIDDEN_EXTRA.contains(&c) || c.is_control() { '-' } else { c }).collect();
-    let cleaned = cleaned.trim().trim_start_matches('.').trim_end_matches(['.', ' ']).to_owned();
-    if cleaned.is_empty() { "image".to_owned() } else { cleaned }
+    let cleaned: String = cleaned.trim().trim_start_matches('.').chars().take(100).collect();
+    let cleaned = cleaned.trim_end_matches(['.', ' ']).to_owned();
+    // a Windows device name (`con.png` dragged from a browser) would not be a file
+    if cleaned.is_empty() || crate::fileops::check_name(&cleaned).is_err() { "image".to_owned() } else { cleaned }
 }
 
 /// FR-EDT-017: stores a pasted (`name` = `None`) or dropped image in `attachments/` and returns its
@@ -263,6 +303,13 @@ mod tests {
         assert!(fm.tags.is_empty() && fm.aliases.is_empty());
         assert_eq!(fm.lines, 4, "the editor still dims it");
         assert_eq!(read_frontmatter("---\n- bir liste\n---\n").state, FrontState::Invalid, "not a set of keys");
+        // an alias bomb is refused before it is loaded (final review C1)
+        let bomb = "---\na: &a [x, x, x, x, x, x, x, x, x]\nb: &b [*a, *a, *a, *a, *a, *a, *a, *a, *a]\nc: [*b, *b, *b, *b, *b, *b, *b, *b, *b]\n---\n";
+        assert_eq!(read_frontmatter(bomb).state, FrontState::Invalid);
+        let huge = format!("---\nnot: \"{}\"\n---\n", "a".repeat(MAX_FRONT));
+        assert_eq!(read_frontmatter(&huge).state, FrontState::Invalid);
+        // `a` and `#a` are one tag; a list over two lines and a quoted comma read as YAML does
+        assert_eq!(read_frontmatter("---\ntags: [a, \"#a\",\n  b]\naliases: [\"x, y\"]\n---\n").tags, ["a", "b"]);
         // the index agrees: no tags or aliases from it, and its lines are not the body
         let parsed = crate::index::parse_note("a.md", "---\ntags: [a, b\n---\nmetin #gerçek");
         assert_eq!(parsed.tags, ["gerçek"]);
@@ -305,6 +352,9 @@ mod tests {
         // a dropped file keeps its name; the extension follows the bytes
         assert_eq!(save_attachment(&v, PNG, Some("Ekran: görüntüsü.jpeg"), now()).unwrap(), "attachments/Ekran- görüntüsü.png");
         assert_eq!(save_attachment(&v, PNG, Some("../../.gizli.png"), now()).unwrap(), "attachments/gizli.png");
+        assert_eq!(save_attachment(&v, PNG, Some("con.png"), now()).unwrap(), "attachments/image.png", "not a device name");
+        let long = save_attachment(&v, PNG, Some(&format!("{}.png", "ç".repeat(300))), now()).unwrap();
+        assert_eq!(long.chars().count(), "attachments/".len() + 100 + ".png".len());
         assert!(matches!(save_attachment(&v, b"%PDF-1.7", None, now()), Err(MediaError::NotImage)));
         let big = [PNG, &vec![0u8; MAX_IMAGE]].concat();
         assert!(matches!(save_attachment(&v, &big, None, now()), Err(MediaError::TooBig)));

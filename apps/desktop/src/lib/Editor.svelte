@@ -58,7 +58,7 @@
     save: async (bytes, name) => (await api.saveImage(bytes, name)).embed,
     onError: (e) => {
       const { key, reason } = mediaError(String(e));
-      error = tf(key, { reason });
+      imageError = tf(key, { reason }); // its own state: a save's sync() would clear `error`
     },
   });
 
@@ -96,6 +96,7 @@
   let readOnly = $state(false);
   let problem = $state<"conflict" | "missing" | null>(null);
   let error = $state<string | null>(null);
+  let imageError = $state<string | null>(null);
 
   function sync() {
     problem = doc?.problem ?? null;
@@ -223,6 +224,12 @@
   </Banner>
 {/if}
 {#if error}<Banner kind="danger" icon={CircleAlert} role="alert">{t("error.generic")}: {error}</Banner>{/if}
+{#if imageError}
+  <Banner kind="warning" icon={CircleAlert} role="alert">
+    {imageError}
+    {#snippet actions()}<Button onclick={() => (imageError = null)}>{t("image.dismiss")}</Button>{/snippet}
+  </Banner>
+{/if}
 <Properties {meta} {onTag} />
 <div class="editor" bind:this={host}></div>
 
