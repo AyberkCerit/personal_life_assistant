@@ -1,6 +1,8 @@
 //! PLA desktop app: Tauri shell around pla-core.
 
 mod commands;
+pub mod indexer;
+pub mod links_cmds;
 pub mod metrics_cmds;
 pub mod model_download;
 pub mod model_paths;
@@ -72,6 +74,11 @@ pub fn run() {
             commands::settings_set,
             commands::set_autostart,
             commands::send_test_notification,
+            links_cmds::search_notes,
+            links_cmds::quick_open,
+            links_cmds::backlinks,
+            links_cmds::list_tags,
+            links_cmds::open_link,
             metrics_cmds::metrics_overview,
             metrics_cmds::metrics_summary,
             metrics_cmds::metric_records,
