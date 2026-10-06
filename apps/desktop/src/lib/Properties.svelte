@@ -10,11 +10,12 @@
 </script>
 
 {#if meta.state === "invalid"}
-  <div class="props invalid" role="status">
-    <TriangleAlert size={14} strokeWidth={2} aria-hidden="true" />{t("props.invalid")}
+  <div class="props" role="status">
+    <div class="column invalid"><TriangleAlert size={14} strokeWidth={2} aria-hidden="true" /><span>{t("props.invalid")}</span></div>
   </div>
 {:else if meta.tags.length || meta.aliases.length}
   <div class="props" role="group" aria-label={t("props.label")}>
+    <div class="column">
     {#if meta.tags.length}
       <ul aria-label={t("props.tags")}>
         {#each meta.tags as tag (tag)}
@@ -34,15 +35,18 @@
         {/each}
       </ul>
     {/if}
+    </div>
   </div>
 {/if}
 
 <style>
-  .props {
+  .props { border-bottom: 1px solid var(--color-border); background: var(--color-surface-reading); }
+  /* the editor's text column (72ch at its font size), so the chips line up with the note */
+  .column {
+    font-size: var(--text-lg); max-width: 72ch; box-sizing: border-box; margin: 0 auto; padding: var(--space-2) var(--space-8);
     display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-4);
-    padding: var(--space-2) var(--space-8); border-bottom: 1px solid var(--color-border);
-    background: var(--color-surface-reading); font-size: var(--text-sm);
   }
+  .column > :global(*) { font-size: var(--text-sm); }
   .invalid { color: var(--color-warning); gap: var(--space-2); flex-wrap: nowrap; }
   ul { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-1); margin: 0; padding: 0; list-style: none; }
   .label { color: var(--color-text-muted); margin-right: var(--space-1); }

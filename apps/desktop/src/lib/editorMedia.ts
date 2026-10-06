@@ -124,6 +124,8 @@ export function mediaExtension(config: MediaConfig): Extension {
     }),
     EditorView.theme({
       ".cm-frontmatter": { color: "var(--color-text-muted)", fontFamily: "var(--font-mono)", fontSize: "0.85em" },
+      // YAML closed by `---` reads as a setext heading to Markdown: its heading style stays out
+      ".cm-frontmatter span": { fontSize: "inherit", fontWeight: "inherit", color: "inherit", fontStyle: "inherit" },
       ".cm-images": { display: "flex", flexWrap: "wrap", gap: "var(--space-2)", padding: "var(--space-1) 0 var(--space-2)" },
       ".cm-image img": { display: "block", maxWidth: "100%", maxHeight: "400px", objectFit: "contain", borderRadius: "var(--radius-md)" },
       ".cm-image-missing": {
