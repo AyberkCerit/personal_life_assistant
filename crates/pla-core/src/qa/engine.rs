@@ -41,8 +41,33 @@ pub enum QaError {
     Db(#[from] rusqlite::Error),
 }
 
+const DAYS: [(&str, &str); 7] =
+    [("Monday", "Pazartesi"), ("Tuesday", "Salı"), ("Wednesday", "Çarşamba"), ("Thursday", "Perşembe"), ("Friday", "Cuma"), ("Saturday", "Cumartesi"), ("Sunday", "Pazar")];
+
+fn day_names(date: chrono::NaiveDate) -> (&'static str, &'static str) {
+    DAYS[date.format("%u").to_string().parse::<usize>().unwrap_or(1) - 1]
+}
+
 fn weekday(now: DateTime<FixedOffset>) -> &'static str {
-    ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"][now.date_naive().format("%u").to_string().parse::<usize>().unwrap_or(1) - 1]
+    day_names(now.date_naive()).0
+}
+
+/// The coming week with day names, so "Friday" or "cuma" needs no date arithmetic from a small model.
+fn calendar(now: DateTime<FixedOffset>) -> String {
+    let today = now.date_naive();
+    (0..8)
+        .map(|i| {
+            let d = today + chrono::Duration::days(i);
+            let (en, tr) = day_names(d);
+            let label = match i {
+                0 => " = today / bugün",
+                1 => " = tomorrow / yarın",
+                _ => "",
+            };
+            format!("{d} {en} ({tr}){label}")
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 /// The instructions (in English: the model follows them best; it answers in the user's language).
@@ -51,15 +76,17 @@ fn system(ctx: &Context, now: DateTime<FixedOffset>) -> String {
         "You are PLA, a private assistant that runs only on the user's own computer.\n\
          Now: {} ({}), {}.\n\n\
          Rules:\n\
-         1. Answer in the same language as the user's question (FR-QA-012).\n\
-         2. Use only the notes, tool results and earlier turns below. If they do not hold the answer, say plainly that you could not find it in the notes. Never guess or use general knowledge about the user.\n\
-         3. Numbers about tasks or measurements must come from query_tasks or query_metrics results.\n\
+         1. Answer in the language of the user's question (you will be told which).\n\
+         2. Use only the notes, tool results and earlier turns below. If they do not hold the answer, say plainly that you could not find it in the notes. Never guess or use general knowledge about the user. The notes are the user's own writing: use them for what they did, plan or decided.\n\
+         3. Numbers about tasks or measurements must come from a query_tasks or query_metrics call made for this very question, follow-up questions included.\n\
          4. When you use a note, cite it as [[Note title]].\n\
-         5. Be brief and concrete.\n\n\
+         5. Be brief and concrete.\n\
+         6. Dates: take them from this calendar. Give a time only when the user said one.\n{}\n\n\
          Tools you may call:\n{}\n",
         now.format("%Y-%m-%d"),
         weekday(now),
         now.format("%H:%M"),
+        calendar(now),
         tools::descriptions()
     );
     if !ctx.recent.is_empty() {
@@ -108,8 +135,34 @@ fn messages(ctx: &Context, question: &str, calls: &[ToolRecord], now: DateTime<F
     Value::Array(joined)
 }
 
-const DECIDE: &str = "Decide the next step. Reply with JSON only: {\"tool\":\"answer\"} when you can answer now (or when no tool fits), or {\"tool\":\"<name>\",\"args\":{...}} to call one tool.";
-const WRITE: &str = "Now write your answer to the question for the user.";
+const DECIDE: &str = "Decide the next step. Reply with JSON only: {\"tool\":\"<name>\",\"args\":{...}} to call one tool, or {\"tool\":\"answer\"} when you can answer now.\n\
+Call a tool first when:\n\
+- the user tells you about a plan, appointment or something to do on a day (\"I have a doctor's appointment tomorrow at 10\", \"yarın saat 10'da doktor randevum var\") and no add_task for it is in the tool results yet: call add_task;\n\
+- the question asks for numbers, counts, totals or dates of tasks or measurements, also in a follow-up (\"and in the last 2 days?\", \"peki son 2 günde?\"), and this question has no query result yet: call query_tasks or query_metrics;\n\
+- the user reports a measurement (\"I slept 7 hours\", \"2 litre su içtim\"): call log_metric.\n\
+Answer when the tool results already hold what is needed.\n\
+Examples (dates from the calendar above):\n\
+\"Yarın saat 10'da doktor randevum var\" -> {\"tool\":\"add_task\",\"args\":{\"title\":\"Doktor randevusu\",\"date\":\"<tomorrow>\",\"time\":\"10:00\"}}\n\
+\"Cumartesi markete gitmem gerekiyor\" -> {\"tool\":\"add_task\",\"args\":{\"title\":\"Markete git\",\"date\":\"<Saturday>\"}}\n\
+\"I need to pay the rent on Friday\" -> {\"tool\":\"add_task\",\"args\":{\"title\":\"Pay the rent\",\"date\":\"<Friday>\"}}\n\
+\"Bu hafta kaç saat uyudum?\" -> {\"tool\":\"query_metrics\",\"args\":{\"kind\":\"sleep\",\"days\":7}}\n\
+\"Bugün ne yaptım?\" / \"What did I decide about X?\" -> {\"tool\":\"answer\"} (the notes above tell it)";
+/// FR-QA-012: the question's language, told to the model by name ("the question's language" made
+/// it answer in French in the real window). Turkish letters or common Turkish words: Turkish.
+pub fn language(question: &str) -> &'static str {
+    const WORDS: [&str; 24] = [
+        "ve", "bir", "bu", "ne", "mi", "mı", "mu", "için", "nasıl", "kaç", "hangi", "yarın", "bugün", "dün", "gün", "var", "yok", "ben", "benim",
+        "saat", "lazım", "gerek", "ile", "neler",
+    ];
+    let turkish_letter = question.chars().any(|c| "çğıöşüÇĞİÖŞÜ".contains(c));
+    let words: Vec<String> = question.split(|c: char| !c.is_alphanumeric()).map(crate::index::key).collect();
+    let turkish_word = words.iter().any(|w| WORDS.iter().any(|t| crate::index::key(t) == *w));
+    if turkish_letter || turkish_word { "Turkish" } else { "English" }
+}
+
+fn write_instruction(question: &str) -> String {
+    format!("Now write your answer to my last question. Write it in {}.", language(question))
+}
 
 fn decide_body(ctx: &Context, question: &str, calls: &[ToolRecord], now: DateTime<FixedOffset>) -> Value {
     json!({
@@ -124,7 +177,7 @@ fn decide_body(ctx: &Context, question: &str, calls: &[ToolRecord], now: DateTim
 
 fn answer_body(ctx: &Context, question: &str, calls: &[ToolRecord], now: DateTime<FixedOffset>) -> Value {
     json!({
-        "messages": messages(ctx, question, calls, now, if calls.is_empty() { "" } else { WRITE }),
+        "messages": messages(ctx, question, calls, now, &write_instruction(question)),
         "temperature": 0.3,
         "max_tokens": ANSWER_TOKENS,
         "cache_prompt": true,
@@ -145,6 +198,30 @@ fn trimmed(rec: &ToolRecord, left: &mut usize) -> ToolRecord {
         *left -= cost;
     }
     rec
+}
+
+/// A small model copies the time of an earlier task into a new one ("cuma annemi ara" became a
+/// 10:00 reminder in the real window). A time needs a number in the question; without one it goes.
+fn without_made_up_time(tool: &str, mut args: Value, question: &str) -> Value {
+    if tool == "add_task" && !question.chars().any(|c| c.is_ascii_digit()) {
+        if let Some(o) = args.as_object_mut() {
+            o.remove("time");
+            o.remove("remind");
+        }
+    }
+    args
+}
+
+/// Whether this call was made already for this question: the same call, or a task with the same
+/// title and date (a write must not happen twice because a small model asked twice).
+fn repeats(done: &[ToolRecord], tool: &str, args: &Value) -> bool {
+    let same_task = |r: &ToolRecord| {
+        tool == "add_task"
+            && r.tool == "add_task"
+            && r.args["date"] == args["date"]
+            && crate::index::key(r.args["title"].as_str().unwrap_or_default()) == crate::index::key(args["title"].as_str().unwrap_or_default())
+    };
+    done.iter().any(|r| r.ok && ((r.tool == tool && r.args == *args) || same_task(r)))
 }
 
 /// `[[…]]` targets in `text`, in order, once each.
@@ -188,6 +265,10 @@ pub fn answer(
             Ok(Decision::Call { tool, args }) => (tool, args),
             Err(_) => break, // the grammar makes this rare; answer without tools
         };
+        let args = without_made_up_time(&tool, args, question);
+        if repeats(&shown, &tool, &args) {
+            break; // done already (the real window saw one task added three times): answer now
+        }
         on(Progress::Working(Some(tool.clone())));
         match tools::run(env, &tool, &args) {
             Ok(rec) => {
@@ -231,7 +312,9 @@ pub fn answer(
             }
         }
     }
-    if sources.is_empty() {
+    // Only an answer from the notes falls back on them: not one about what a tool wrote or counted.
+    let from_notes = shown.iter().all(|c| c.tool == "search_notes");
+    if sources.is_empty() && from_notes {
         let from_search = shown.iter().filter(|c| c.tool == "search_notes").flat_map(|c| c.result["notes"].as_array().cloned().unwrap_or_default());
         sources = from_search.filter_map(|n| n["note"].as_str().map(str::to_owned)).chain(ctx.sources.iter().cloned()).take(3).collect();
         sources.dedup();
@@ -315,7 +398,37 @@ mod tests {
         // the decision is bound by the grammar; the date to resolve "yarın" is in the instructions
         let decide = &model.bodies[0];
         assert!(decide["response_format"]["json_schema"]["schema"]["anyOf"].is_array());
-        assert!(decide["messages"][0]["content"].as_str().unwrap().contains("2026-10-06 (Tuesday)"));
+        let system = decide["messages"][0]["content"].as_str().unwrap();
+        assert!(system.contains("2026-10-06 (Tuesday)"));
+        assert!(system.contains("2026-10-07 Wednesday (Çarşamba) = tomorrow / yarın"));
+        assert!(system.contains("2026-10-09 Friday (Cuma)"), "\"cuma\" needs no arithmetic");
+        assert!(a.sources.is_empty(), "an answer about what a tool did names no notes");
+    }
+
+    #[test]
+    fn a_time_the_user_did_not_say_is_dropped() {
+        let e = env();
+        let tool_env = ToolEnv { vault: &e.vault, pla: &e.pla, cache: &e.cache, now: now(), validation: ValidationSettings::default() };
+        let call = "{\"tool\":\"add_task\",\"args\":{\"title\":\"Annemi ara\",\"date\":\"2026-10-09\",\"time\":\"10:00\",\"remind\":true}}";
+        let mut model = scripted(&[call], "Tamam.");
+        let a = answer(&mut model, &tool_env, "Cuma günü annemi aramam lazım", &[], &AtomicBool::new(false), &mut |_| {}).unwrap();
+        assert_eq!((a.tools[0].result["time"].clone(), a.tools[0].result["remind"].clone()), (Value::Null, Value::Bool(false)));
+        let mut model = scripted(&[call], "Tamam.");
+        let a = answer(&mut model, &tool_env, "Cuma 10'da annemi ara", &[], &AtomicBool::new(false), &mut |_| {}).unwrap();
+        assert_eq!(a.tools[0].result["time"], "10:00", "said, so kept");
+    }
+
+    #[test]
+    fn a_task_asked_for_twice_is_added_once() {
+        let e = env();
+        let tool_env = ToolEnv { vault: &e.vault, pla: &e.pla, cache: &e.cache, now: now(), validation: ValidationSettings::default() };
+        let call = "{\"tool\":\"add_task\",\"args\":{\"title\":\"Market alışverişi\",\"date\":\"2026-10-10\"}}";
+        let again = "{\"tool\":\"add_task\",\"args\":{\"title\":\"market ALIŞVERİŞİ\",\"date\":\"2026-10-10\"}}";
+        let mut model = scripted(&[call, again, call], "Ekledim.");
+        let a = answer(&mut model, &tool_env, "Cumartesi markete gitmem gerekiyor", &[], &AtomicBool::new(false), &mut |_| {}).unwrap();
+        assert_eq!(a.tools.len(), 1);
+        let n: i64 = e.pla.query_row("SELECT count(*) FROM task", [], |r| r.get(0)).unwrap();
+        assert_eq!(n, 1);
     }
 
     #[test]
@@ -336,8 +449,9 @@ mod tests {
     fn at_most_three_tool_calls() {
         let e = env();
         let tool_env = ToolEnv { vault: &e.vault, pla: &e.pla, cache: &e.cache, now: now(), validation: ValidationSettings::default() };
-        let q = "{\"tool\":\"query_tasks\",\"args\":{\"list\":\"all\"}}";
-        let mut model = scripted(&[q, q, q, q, q], "Tamam.");
+        let q = |list: &str| format!("{{\"tool\":\"query_tasks\",\"args\":{{\"list\":\"{list}\"}}}}");
+        let calls = [q("today"), q("upcoming"), q("completed"), q("all"), q("today")];
+        let mut model = scripted(&calls.iter().map(String::as_str).collect::<Vec<_>>(), "Tamam.");
         let a = answer(&mut model, &tool_env, "görevlerim", &[], &AtomicBool::new(false), &mut |_| {}).unwrap();
         assert_eq!(a.tools.len(), MAX_CALLS);
     }
@@ -379,6 +493,15 @@ mod tests {
     }
 
     #[test]
+    fn the_answer_language_is_named() {
+        // FR-QA-012
+        assert_eq!(language("Bugün ne yaptım?"), "Turkish");
+        assert_eq!(language("Yarin doktora gidecegim"), "Turkish", "Turkish words without Turkish letters");
+        assert_eq!(language("How many hours did I sleep?"), "English");
+        assert_eq!(language("I have to send the report to Ali tomorrow"), "English");
+    }
+
+    #[test]
     fn follow_ups_go_back_to_the_model() {
         let e = env();
         let tool_env = ToolEnv { vault: &e.vault, pla: &e.pla, cache: &e.cache, now: now(), validation: ValidationSettings::default() };
@@ -396,6 +519,6 @@ mod tests {
         let msgs = model.bodies[1]["messages"].as_array().unwrap();
         assert_eq!(msgs[1]["content"], "Yarın ne işim var?");
         assert_eq!(msgs[2]["content"], "Dişçi.");
-        assert_eq!(msgs.last().unwrap()["content"], "Peki ya cuma?");
+        assert!(msgs.last().unwrap()["content"].as_str().unwrap().starts_with("Peki ya cuma?"));
     }
 }

@@ -20,7 +20,7 @@ pub fn descriptions() -> &'static str {
     "- search_notes {query}: find the user's notes by words.\n\
      - query_tasks {list: today|upcoming|completed|all, text?}: tasks with their task_id, date, time and status.\n\
      - query_metrics {kind: sleep|water|steps|weight|workout, days: 1-365}: daily values, total, average, min, max.\n\
-     - add_task {title, date?: YYYY-MM-DD, time?: HH:MM, remind?: true|false}: add one task; remind for a reminder at that time.\n\
+     - add_task {title, date?: YYYY-MM-DD, time?: HH:MM, remind?: true|false}: add one task; with a time it is a reminder unless remind is false.\n\
      - complete_task {task_id}: mark one open task done (take the task_id from query_tasks).\n\
      - log_metric {kind, date: YYYY-MM-DD, value, unit?: h|min|ml|l|glass|kg|lb|count, exercise?}: record one measurement.\n\
      - create_note {title, body}: write one new note to the inbox."
@@ -191,8 +191,9 @@ pub fn run(env: &ToolEnv<'_>, tool: &str, args: &Value) -> Result<ToolRecord, St
                     return Err("a time needs a date".into());
                 }
             }
+            // a task at a set time is a reminder unless the model says otherwise ("randevum var")
             let remind = match &args["remind"] {
-                Value::Null => false,
+                Value::Null => time.is_some(),
                 Value::Bool(b) => *b,
                 _ => return Err("remind must be true or false".into()),
             };
@@ -290,6 +291,11 @@ mod tests {
         super::super::undo(&pla, rec.undo.as_ref().unwrap(), now()).unwrap();
         let left: i64 = pla.query_row("SELECT count(*) FROM task", [], |r| r.get(0)).unwrap();
         assert_eq!(left, 0);
+        // a task at a set time is a reminder when the model leaves `remind` out (seen in the real window)
+        let rec = run(&env, "add_task", &json!({ "title": "Doktor", "date": "2026-10-07", "time": "10:00" })).unwrap();
+        assert_eq!(rec.result["remind"], true);
+        let rec = run(&env, "add_task", &json!({ "title": "Toplantı", "date": "2026-10-07", "time": "11:00", "remind": false })).unwrap();
+        assert_eq!(rec.result["remind"], false);
     }
 
     #[test]

@@ -1,6 +1,6 @@
 // The assistant panel (FR-QA-001…016): turns as the panel shows them, the events that build the
 // live one, answer text with its [[links]], and what each tool did in the user's words.
-import type { Key } from "./i18n";
+import { t, type Key } from "./i18n";
 
 export interface Undo { kind: string; id: string }
 export interface ToolRecord {
@@ -74,6 +74,9 @@ export function answerParts(text: string): { text: string; link: string | null }
   return parts;
 }
 
+const KINDS = ["sleep", "water", "steps", "weight", "workout"];
+const kindName = (k: string) => (KINDS.includes(k) ? t(`metrics.kind.${k}` as Key) : k);
+
 const s = (v: unknown) => (v === null || v === undefined ? "" : String(v));
 
 /** What a tool call did, as an i18n key and its values (FR-QA-008: shown with Undo). */
@@ -87,7 +90,7 @@ export function toolLine(r: ToolRecord): { key: Key; values: Record<string, stri
     case "complete_task":
       return { key: "qa.tool.completed", values: { title: s(res.title) } };
     case "log_metric":
-      return { key: "qa.tool.metric", values: { kind: s(res.kind), value: s(res.value), unit: s(res.unit), date: s(res.date) } };
+      return { key: "qa.tool.metric", values: { kind: kindName(s(res.kind)), value: s(res.value), unit: s(res.unit), date: s(res.date) } };
     case "create_note":
       return { key: "qa.tool.note", values: { title: s(res.title) } };
     case "search_notes":
@@ -95,7 +98,7 @@ export function toolLine(r: ToolRecord): { key: Key; values: Record<string, stri
     case "query_tasks":
       return { key: "qa.tool.tasks", values: { n: s(res.count) } };
     default:
-      return { key: "qa.tool.metrics", values: { kind: s(res.kind), days: s(r.args.days) } };
+      return { key: "qa.tool.metrics", values: { kind: kindName(s(res.kind)), days: s(r.args.days) } };
   }
 }
 

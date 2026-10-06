@@ -51,8 +51,10 @@ fn stamp(ms: i64) -> String {
     chrono::Local.timestamp_millis_opt(ms).single().map(|t| t.format("%Y-%m-%d %H:%M").to_string()).unwrap_or_default()
 }
 
+/// One note for the model. A plain header: the model echoed a "(path, time)" one into its answers.
 fn note_block(n: &NoteText, body: &str) -> String {
-    format!("### [[{}]] ({}, {})\n{}\n", n.title, n.note_path, stamp(n.mtime), body.trim())
+    let day = stamp(n.mtime).split(' ').next().unwrap_or_default().to_owned();
+    format!("Note [[{}]], last changed {day}:\n{}\n\n", n.title, body.trim())
 }
 
 /// The paragraphs of `body` that hold one of the question's words (or the first one).
