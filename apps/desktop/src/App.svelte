@@ -60,6 +60,7 @@
   let leftView = $state<"tree" | "search">("tree");
   let sideTab = $state<"tasks" | "links">("tasks");
   let quickOpen = $state(false);
+  let treeDialog = $state(false); // a tree dialog (move, delete, template…) is open
   let searchPanel: ReturnType<typeof SearchPanel> | undefined = $state();
   let settingsSection = $state<Section>("general"); // kept here: a language switch re-mounts the window
   let settingsRefocus = $state<string | null>(null);
@@ -76,7 +77,7 @@
   }
 
   function anyWindowOpen() {
-    return settingsOpen || quickMetric !== null || quickOpen;
+    return settingsOpen || quickMetric !== null || quickOpen || treeDialog;
   }
 
   function openSearch() {
@@ -415,7 +416,7 @@
       {#if leftView === "search"}
         <SearchPanel bind:this={searchPanel} {entries} onOpen={(p, line) => void openNote(p, line)} onClose={() => (leftView = "tree")} />
       {:else}
-        <FileTree {entries} selected={center === "editor" ? current : null} {inbox} onOpen={openNote} actions={treeActions} />
+        <FileTree {entries} selected={center === "editor" ? current : null} {inbox} onOpen={openNote} actions={treeActions} bind:windowOpen={treeDialog} />
       {/if}
     </aside>
     <section class="main">

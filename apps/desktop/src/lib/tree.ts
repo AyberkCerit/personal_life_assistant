@@ -2,7 +2,7 @@
 import type { TreeEntry } from "./api";
 import type { Key } from "./i18n";
 
-const CODES = ["bad_name", "exists", "missing", "bad_path", "read_only", "conflict", "io", "no_vault"];
+const CODES = ["bad_name", "exists", "missing", "bad_path", "read_only", "conflict", "io", "no_vault", "reserved"];
 
 /** Reads `<code>|<detail>|<reason>` from the tree commands. */
 export function treeError(err: string): { key: Key; detail: string; reason: string } {

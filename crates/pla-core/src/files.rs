@@ -47,6 +47,8 @@ pub enum FileError {
     Missing,
     #[error("a note with this name already exists: {0}")]
     Exists(String),
+    #[error("{0} is a name Windows keeps for itself")]
+    Reserved(String),
     #[error(transparent)]
     Io(#[from] std::io::Error),
     #[error(transparent)]

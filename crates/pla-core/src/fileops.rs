@@ -16,21 +16,36 @@ pub fn check_name(name: &str) -> Result<(), FileError> {
     if name.starts_with('.') {
         return Err(FileError::BadName('.'));
     }
-    match name.chars().find(|c| FORBIDDEN.contains(c) || FORBIDDEN_EXTRA.contains(c)) {
-        Some(c) => Err(FileError::BadName(c)),
-        None => Ok(()),
+    if let Some(c) = name.chars().find(|c| FORBIDDEN.contains(c) || FORBIDDEN_EXTRA.contains(c)) {
+        return Err(FileError::BadName(c));
     }
+    // Windows drops a trailing dot and keeps device names for itself: the records would point at
+    // a path that is not on disk (final review I5).
+    if name.ends_with('.') {
+        return Err(FileError::BadName('.'));
+    }
+    let device = name.split('.').next().unwrap_or_default().trim().to_uppercase();
+    let reserved = ["CON", "PRN", "AUX", "NUL"].contains(&device.as_str())
+        || ((device.starts_with("COM") || device.starts_with("LPT")) && device.len() == 4 && device.as_bytes()[3].is_ascii_digit());
+    if reserved {
+        return Err(FileError::Reserved(device));
+    }
+    Ok(())
 }
 
-fn same_ignoring_case(a: &str, b: &str) -> bool {
+/// Whether two vault paths name the same file on Windows (only the letter case differs).
+pub fn same_ignoring_case(a: &str, b: &str) -> bool {
     a.to_lowercase() == b.to_lowercase()
 }
 
-/// The system folders PLA keeps its own things in: they stay where `.pla/config` says.
-fn is_system_folder(folders: &Folders, rel: &str) -> bool {
-    [&folders.daily, &folders.inbox, &folders.notes, &folders.reports, &folders.attachments, &folders.templates]
-        .iter()
-        .any(|f| same_ignoring_case(f.trim_matches('/'), rel.trim_matches('/')))
+/// The system folders PLA keeps its own things in: they stay where `.pla/config` says, and so does
+/// any folder that holds one (a configured `journal/daily` keeps `journal` in place).
+pub fn is_system_folder(folders: &Folders, rel: &str) -> bool {
+    let rel = rel.trim_matches('/').to_lowercase();
+    [&folders.daily, &folders.inbox, &folders.notes, &folders.reports, &folders.attachments, &folders.templates].iter().any(|f| {
+        let f = f.trim_matches('/').to_lowercase();
+        f == rel || f.starts_with(&format!("{rel}/"))
+    })
 }
 
 /// Puts `from` at `to` on disk: refuses an existing target (unless only the letter case differs,
@@ -99,8 +114,9 @@ pub fn move_folder(vault: &Vault, conn: &Connection, from: &str, to: &str) -> Re
 }
 
 /// FR-EDT-013: `text` with every wikilink to `old_rel` pointed at `new_rel` (alias and heading
-/// kept), or `None` when nothing changed. Links by name get the new name, links by path the new path.
-pub fn rewrite_links(text: &str, old_rel: &str, new_rel: &str) -> Option<String> {
+/// kept), or `None` when nothing changed. Links by path get the new path; links by name get the new
+/// name only when `by_name` (the name led to this note, not to another one with the same name).
+pub fn rewrite_links(text: &str, old_rel: &str, new_rel: &str, by_name: bool) -> Option<String> {
     use crate::index::{key, normalize_name, strip_md};
     let stem = |rel: &str| strip_md(rel.rsplit('/').next().unwrap_or_default()).to_owned();
     let (old_path, old_title) = (normalize_name(old_rel), key(&stem(old_rel)));
@@ -126,7 +142,7 @@ pub fn rewrite_links(text: &str, old_rel: &str, new_rel: &str) -> Option<String>
             let Some(close) = rest[open + 2..].find("]]") else { break };
             let inner = &rest[open + 2..open + 2 + close];
             out.push_str(&rest[..open + 2]);
-            let replaced = if in_code { None } else { relink(inner, &old_path, &old_title, &new_path, &new_title) };
+            let replaced = if in_code { None } else { relink(inner, &old_path, by_name.then_some(old_title.as_str()), &new_path, &new_title) };
             match replaced {
                 Some(r) => {
                     changed = true;
@@ -150,7 +166,7 @@ fn in_inline_code(line: &str, rest: &str, open: usize) -> bool {
 
 /// One link's inside (`target#heading|alias`) pointed at the new note, or `None` when it is not
 /// a link to the old one.
-fn relink(inner: &str, old_path: &str, old_title: &str, new_path: &str, new_title: &str) -> Option<String> {
+fn relink(inner: &str, old_path: &str, old_title: Option<&str>, new_path: &str, new_title: &str) -> Option<String> {
     use crate::index::{key, normalize_name};
     // the alias part keeps its separator as written (`|`, or `\|` inside a table)
     let split = inner.find("\\|").or_else(|| inner.find('|'));
@@ -165,13 +181,13 @@ fn relink(inner: &str, old_path: &str, old_title: &str, new_path: &str, new_titl
     let target_trim = target.trim();
     let new_target = if normalize_name(target_trim) == old_path && target_trim.contains('/') {
         new_path
-    } else if !target_trim.contains('/') && key(crate::index::strip_md(target_trim)) == old_title {
+    } else if !target_trim.contains('/') && Some(key(crate::index::strip_md(target_trim)).as_str()) == old_title {
         new_title
     } else {
         return None;
     };
-    if new_target == target_trim {
-        return None;
+    if new_target.to_lowercase() == crate::index::strip_md(target_trim).to_lowercase() {
+        return None; // links resolve regardless of letter case: no churn in other notes
     }
     Some(format!("{new_target}{}{}", heading.unwrap_or_default(), alias.unwrap_or_default()))
 }
@@ -235,6 +251,11 @@ mod tests {
         assert!(matches!(check_name("soru?"), Err(FileError::BadName('?'))));
         assert!(matches!(check_name(".gizli"), Err(FileError::BadName('.'))));
         assert!(matches!(check_name("   "), Err(FileError::BadName(' '))));
+        // Windows would drop the dot or refuse the device name (final review I5)
+        assert!(matches!(check_name("proje."), Err(FileError::BadName('.'))));
+        assert!(matches!(check_name("con"), Err(FileError::Reserved(d)) if d == "CON"));
+        assert!(matches!(check_name("Com1.notlar"), Err(FileError::Reserved(_))));
+        assert!(check_name("Konser").is_ok() && check_name("COM10").is_ok() && check_name("v1.2 notları").is_ok());
     }
 
     #[test]
@@ -285,22 +306,29 @@ mod tests {
         assert_eq!(note_of(&conn, "b3"), "notes/projeler/c.md");
         assert!(matches!(move_folder(&vault, &conn, "arşiv", "arşiv/iç"), Err(FileError::BadPath(_))), "not into itself");
         assert!(matches!(move_folder(&vault, &conn, "inbox", "gelen"), Err(FileError::BadPath(_))), "system folders stay where the config says");
+        let folders = Folders { daily: "günlük/daily".into(), ..Folders::default() };
+        assert!(is_system_folder(&folders, "günlük") && is_system_folder(&folders, "Günlük/Daily"), "a folder holding a system folder stays too");
+        assert!(!is_system_folder(&folders, "günlük/daily/2026") && !is_system_folder(&folders, "gün"));
     }
 
     #[test]
     fn rewriting_links_keeps_aliases_and_headings() {
         // FR-EDT-013, Review Focus 3
         let text = "Bkz [[Proje Planı]], [[proje planı|plan]], [[Proje Planı#Hedefler]] ve [[notes/Proje Planı]].\n[[Proje]] başka not. `[[Proje Planı]]` kod.";
-        let out = rewrite_links(text, "notes/Proje Planı.md", "notes/Yol Haritası.md").unwrap();
+        let out = rewrite_links(text, "notes/Proje Planı.md", "notes/Yol Haritası.md", true).unwrap();
         assert_eq!(
             out,
             "Bkz [[Yol Haritası]], [[Yol Haritası|plan]], [[Yol Haritası#Hedefler]] ve [[notes/Yol Haritası]].\n[[Proje]] başka not. `[[Proje Planı]]` kod."
         );
         // a move keeps the name: only links by path change
-        let moved = rewrite_links("[[Proje Planı]] ve [[notes/Proje Planı|p]]", "notes/Proje Planı.md", "arşiv/Proje Planı.md").unwrap();
+        let moved = rewrite_links("[[Proje Planı]] ve [[notes/Proje Planı|p]]", "notes/Proje Planı.md", "arşiv/Proje Planı.md", true).unwrap();
         assert_eq!(moved, "[[Proje Planı]] ve [[arşiv/Proje Planı|p]]");
-        assert_eq!(rewrite_links("[[Başka]]", "notes/Proje Planı.md", "notes/Yeni.md"), None);
-        assert_eq!(rewrite_links("![[Proje Planı]] gömülü", "notes/Proje Planı.md", "notes/Yeni.md").as_deref(), Some("![[Yeni]] gömülü"), "embeds point at the note too");
+        assert_eq!(rewrite_links("[[Başka]]", "notes/Proje Planı.md", "notes/Yeni.md", true), None);
+        // the name led to another note with the same name: only the path link is this note's (I2)
+        assert_eq!(rewrite_links("[[Plan]] ve [[arşiv/x/Plan]]", "arşiv/x/Plan.md", "arşiv/x/Eski.md", false).as_deref(), Some("[[Plan]] ve [[arşiv/x/Eski]]"));
+        // a move keeps the name: a link written in other letter case is left as it is (M4)
+        assert_eq!(rewrite_links("[[proje planı]]", "notes/Proje Planı.md", "arşiv/Proje Planı.md", true), None);
+        assert_eq!(rewrite_links("![[Proje Planı]] gömülü", "notes/Proje Planı.md", "notes/Yeni.md", true).as_deref(), Some("![[Yeni]] gömülü"), "embeds point at the note too");
     }
 
     #[test]

@@ -16,7 +16,16 @@
     inbox,
     onOpen,
     actions,
-  }: { entries: TreeEntry[]; selected: string | null; inbox: string; onOpen: (path: string) => void; actions: TreeActions } = $props();
+    windowOpen = $bindable(false),
+  }: {
+    entries: TreeEntry[];
+    selected: string | null;
+    inbox: string;
+    onOpen: (path: string) => void;
+    actions: TreeActions;
+    /** Whether a tree dialog is open: the app opens no other window over it. */
+    windowOpen?: boolean;
+  } = $props();
 
   type Dialog =
     | { kind: "move"; entry: TreeEntry; choice: string }
@@ -47,7 +56,11 @@
   let dialogEl: HTMLDivElement | undefined = $state();
   $effect(() => {
     if (!dialogEl) return;
-    (dialogEl.querySelector<HTMLElement>(".field input") ?? dialogEl.querySelector<HTMLElement>("footer button:last-child"))?.focus();
+    const main = dialogEl.querySelector<HTMLElement>(".field input") ?? dialogEl.querySelector<HTMLElement>("footer button:last-child:not(:disabled)");
+    (main ?? dialogEl).focus(); // with nothing to press, the dialog itself, so Esc still closes it
+  });
+  $effect(() => {
+    windowOpen = dialog !== null;
   });
 
   async function submit(e: SubmitEvent) {
@@ -291,8 +304,8 @@
         <input
           class="create"
           bind:value={creating.value}
-          placeholder={t("tree.folderName")}
-          aria-label={t("tree.folderName")}
+          placeholder={creating.kind === "note" ? tf("tree.newNoteIn", { folder: inbox }) : t("tree.folderName")}
+          aria-label={creating.kind === "note" ? tf("tree.newNoteIn", { folder: inbox }) : t("tree.folderName")}
           onkeydown={(e) => {
             if (e.key === "Enter") void commitCreate();
             else if (e.key === "Escape") creating = null;

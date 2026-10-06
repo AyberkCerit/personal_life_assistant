@@ -20,6 +20,7 @@ pub fn code(e: FileError) -> String {
         FileError::BadPath(p) => format!("bad_path|{p}|"),
         FileError::BadName(c) => format!("bad_name|{c}|"),
         FileError::Exists(p) => format!("exists|{p}|"),
+        FileError::Reserved(n) => format!("reserved|{n}|"),
         FileError::Missing => "missing||".into(),
         FileError::ReadOnly(p) => format!("read_only|{p}|"),
         FileError::Conflict { .. } => "conflict||".into(),
@@ -57,12 +58,12 @@ pub fn link_count(state: State<AppState>, path: String) -> Result<usize, String>
 }
 
 /// Points the links in `sources` from `old` to `new`, as PLA's own writes. Returns how many changed.
-fn relink(state: &State<AppState>, vault: &Vault, sources: &[String], old: &str, new: &str) -> usize {
+fn relink(state: &State<AppState>, vault: &Vault, sources: &[String], old: &str, new: &str, by_name: bool) -> usize {
     let mut changed = 0;
     for source in sources {
         let Ok(path) = files::resolve(vault, source) else { continue };
         let Ok(text) = std::fs::read_to_string(&path) else { continue };
-        if let Some(updated) = fileops::rewrite_links(&text, old, new) {
+        if let Some(updated) = fileops::rewrite_links(&text, old, new, by_name) {
             state.self_writes.record_text(source, &updated);
             if write_atomic(&path, updated.as_bytes()).is_ok() {
                 changed += 1;
@@ -75,11 +76,23 @@ fn relink(state: &State<AppState>, vault: &Vault, sources: &[String], old: &str,
 /// Moves a note and keeps everything around it: records, index, and (when asked) the links to it.
 fn move_note_with_links(state: &State<AppState>, session: &Session, from: &str, to: &str, update_links: bool) -> Result<(), String> {
     let sources = if update_links { linking_notes(session, from)? } else { Vec::new() };
+    // A link by name is this note's only when the name leads here, not to a namesake (final review I2).
+    let stem = index::strip_md(from.rsplit('/').next().unwrap_or_default()).to_owned();
+    let by_name = index::resolve_link(&session.cache.lock().expect("cache lock"), &stem).ok().flatten().as_deref() == Some(from);
+    let case_only = fileops::same_ignoring_case(from, to);
     if let Ok(text) = std::fs::read_to_string(files::resolve(&session.vault, from).map_err(code)?) {
         state.self_writes.record_text(to, &text); // the note itself is not an outside change
+        if case_only {
+            state.self_writes.record_text(from, &text); // Windows still reads it under the old case (I1)
+        }
     }
     fileops::move_note(&session.vault, &session.db.lock().expect("db lock"), from, to).map_err(code)?;
-    relink(state, &session.vault, &sources, from, to);
+    relink(state, &session.vault, &sources, from, to, by_name);
+    if case_only {
+        // the old name still opens the file, so a touch would keep it in the index: walk the disk
+        session.indexer.send(IndexCommand::Rescan);
+        return Ok(());
+    }
     for rel in [from, to].iter().copied().chain(sources.iter().map(String::as_str)) {
         session.indexer.send(IndexCommand::Touch(rel.to_owned()));
     }
@@ -106,9 +119,7 @@ pub fn move_entry(app: AppHandle, state: State<AppState>, path: String, folder: 
     }
     with_session(&state, |s| {
         if files::resolve(&s.vault, &path).map_err(code)?.is_dir() {
-            fileops::move_folder(&s.vault, &s.db.lock().expect("db lock"), &path, &to).map_err(code)?;
-            s.indexer.send(IndexCommand::Rescan);
-            Ok(())
+            move_folder_quietly(&state, s, &path, &to)
         } else {
             // a move keeps the name: only links written with the path change
             move_note_with_links(&state, s, &path, &to, true)
@@ -118,25 +129,45 @@ pub fn move_entry(app: AppHandle, state: State<AppState>, path: String, folder: 
     Ok(to)
 }
 
+/// Moves a folder; the notes inside are PLA's own writes at their new paths, so the open one does
+/// not show a conflict when the watcher sees them (final review I3).
+fn move_folder_quietly(state: &State<AppState>, session: &Session, from: &str, to: &str) -> Result<(), String> {
+    let root = files::resolve(&session.vault, from).map_err(code)?;
+    let case_only = fileops::same_ignoring_case(from, to);
+    let mut dirs = vec![(root, String::new())];
+    while let Some((dir, prefix)) = dirs.pop() {
+        for entry in std::fs::read_dir(&dir).into_iter().flatten().flatten() {
+            let inner = format!("{prefix}{}", entry.file_name().to_string_lossy());
+            if entry.file_type().is_ok_and(|t| t.is_dir()) {
+                dirs.push((entry.path(), format!("{inner}/")));
+            } else if inner.to_lowercase().ends_with(".md") {
+                if let Ok(text) = std::fs::read_to_string(entry.path()) {
+                    state.self_writes.record_text(&format!("{to}/{inner}"), &text);
+                    if case_only {
+                        state.self_writes.record_text(&format!("{from}/{inner}"), &text);
+                    }
+                }
+            }
+        }
+    }
+    fileops::move_folder(&session.vault, &session.db.lock().expect("db lock"), from, to).map_err(code)?;
+    session.indexer.send(IndexCommand::Rescan);
+    Ok(())
+}
+
 #[tauri::command]
 pub fn rename_folder(app: AppHandle, state: State<AppState>, path: String, name: String) -> Result<String, String> {
     let name = name.trim().to_owned();
     check_name(&name).map_err(code)?;
     let to = join(parent_of(&path), &name);
-    with_session(&state, |s| {
-        fileops::move_folder(&s.vault, &s.db.lock().expect("db lock"), &path, &to).map_err(code)?;
-        s.indexer.send(IndexCommand::Rescan);
-        Ok(())
-    })?;
+    with_session(&state, |s| move_folder_quietly(&state, s, &path, &to))?;
     let _ = app.emit("tree-changed", ());
     Ok(to)
 }
 
 /// What may be deleted: a note or a folder inside the vault, never a system folder or the root.
 pub fn deletable(vault: &Vault, rel: &str) -> Result<std::path::PathBuf, String> {
-    let folders = &vault.config.folders;
-    let system = [&folders.daily, &folders.inbox, &folders.notes, &folders.reports, &folders.attachments, &folders.templates];
-    if system.iter().any(|f| f.trim_matches('/').eq_ignore_ascii_case(rel.trim_matches('/'))) {
+    if rel.trim_matches('/').is_empty() || fileops::is_system_folder(&vault.config.folders, rel) {
         return Err(format!("bad_path|{rel}|"));
     }
     let path = files::resolve(vault, rel).map_err(code)?;
@@ -161,7 +192,7 @@ pub fn delete_entry(app: AppHandle, state: State<AppState>, path: String) -> Res
 
 #[cfg(windows)]
 fn to_recycle_bin(path: &Path) -> Result<(), String> {
-    use windows_sys::Win32::UI::Shell::{SHFileOperationW, FOF_ALLOWUNDO, FOF_NOCONFIRMATION, FOF_NOERRORUI, FOF_SILENT, FO_DELETE, SHFILEOPSTRUCTW};
+    use windows_sys::Win32::UI::Shell::{SHFileOperationW, FOF_ALLOWUNDO, FOF_NOCONFIRMATION, FOF_NOERRORUI, FOF_SILENT, FOF_WANTNUKEWARNING, FO_DELETE, SHFILEOPSTRUCTW};
     // a list of paths, each NUL-terminated, ended by one more NUL
     let from: Vec<u16> = path.as_os_str().to_string_lossy().encode_utf16().chain([0, 0]).collect();
     let mut op = SHFILEOPSTRUCTW {
@@ -169,7 +200,9 @@ fn to_recycle_bin(path: &Path) -> Result<(), String> {
         wFunc: FO_DELETE,
         pFrom: from.as_ptr(),
         pTo: std::ptr::null(),
-        fFlags: (FOF_ALLOWUNDO | FOF_NOCONFIRMATION | FOF_SILENT | FOF_NOERRORUI) as u16,
+        // NUKEWARNING: where there is no Recycle Bin (a USB or network drive, a full bin), Windows
+        // asks before deleting for good instead of doing it silently (final review I4)
+        fFlags: (FOF_ALLOWUNDO | FOF_NOCONFIRMATION | FOF_SILENT | FOF_NOERRORUI | FOF_WANTNUKEWARNING) as u16,
         fAnyOperationsAborted: 0,
         hNameMappings: std::ptr::null_mut(),
         lpszProgressTitle: std::ptr::null(),
@@ -314,6 +347,7 @@ mod tests {
         std::fs::write(vault.root.join("notes/a.md"), "a").unwrap();
         assert!(deletable(&vault, "notes/a.md").is_ok());
         assert_eq!(deletable(&vault, "inbox").unwrap_err(), "bad_path|inbox|");
+        assert_eq!(deletable(&vault, "").unwrap_err(), "bad_path||", "never the vault itself");
         assert!(deletable(&vault, ".obsidian").is_err());
         assert!(deletable(&vault, "../dışarı.md").is_err());
         assert_eq!(deletable(&vault, "notes/yok.md").unwrap_err(), "missing||");

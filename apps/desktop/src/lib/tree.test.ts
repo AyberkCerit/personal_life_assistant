@@ -6,6 +6,7 @@ describe("tree helpers", () => {
     expect(treeError("bad_name|?|")).toEqual({ key: "tree.error.bad_name", detail: "?", reason: "" });
     expect(treeError("exists|notes/a.md|")).toEqual({ key: "tree.error.exists", detail: "notes/a.md", reason: "" });
     expect(treeError("io||erişim engellendi")).toEqual({ key: "tree.error.io", detail: "", reason: "erişim engellendi" });
+    expect(treeError("reserved|CON|")).toEqual({ key: "tree.error.reserved", detail: "CON", reason: "" });
     expect(treeError("boom")).toEqual({ key: "tree.error.io", detail: "", reason: "boom" });
   });
 
