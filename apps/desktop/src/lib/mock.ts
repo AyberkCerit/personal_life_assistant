@@ -222,6 +222,69 @@ function mockLinks(cmd: string, args: Record<string, unknown>): unknown {
   return undefined;
 }
 
+// Tree actions stand-in: moves keys in the mock file map.
+function mockTree(cmd: string, args: Record<string, unknown>): unknown {
+  const join = (f: string, n: string) => (f ? `${f}/${n}` : n);
+  const parent = (p: string) => p.split("/").slice(0, -1).join("/");
+  const moveKeys = (from: string, to: string) => {
+    for (const [p, text] of [...files]) {
+      if (p === from || p.startsWith(`${from}/`)) {
+        files.delete(p);
+        files.set(to + p.slice(from.length), text);
+      }
+    }
+    emit("tree-changed", null);
+  };
+  switch (cmd) {
+    case "link_count":
+      return [...files.values()].filter((t) => t.includes(`[[${String(args.path).split("/").pop()!.replace(/\.md$/i, "")}`)).length;
+    case "rename_note": {
+      const to = join(parent(String(args.path)), `${args.name}.md`);
+      if (/[\[\]#^|\\/:*"?<>]/.test(String(args.name))) throw `bad_name|${String(args.name).match(/[\[\]#^|\\/:*"?<>]/)![0]}|`;
+      if (files.has(to)) throw `exists|${to}|`;
+      moveKeys(String(args.path), to);
+      return to;
+    }
+    case "move_entry": {
+      const to = join(String(args.folder), String(args.path).split("/").pop()!);
+      moveKeys(String(args.path), to);
+      return to;
+    }
+    case "rename_folder": {
+      const to = join(parent(String(args.path)), String(args.name));
+      moveKeys(String(args.path), to);
+      return to;
+    }
+    case "delete_entry":
+      if (["inbox", "daily", "notes"].includes(String(args.path))) throw `bad_path|${args.path}|`;
+      for (const p of [...files.keys()]) if (p === args.path || p.startsWith(`${args.path}/`)) files.delete(p);
+      emit("tree-changed", null);
+      return undefined;
+    case "create_folder": {
+      const rel = join(String(args.parent), String(args.name));
+      files.set(`${rel}/.keep`, "");
+      emit("tree-changed", null);
+      return rel;
+    }
+    case "list_templates":
+      return ["Günlük", "Toplantı"];
+    case "create_note_in": {
+      const rel = join(String(args.folder), `${args.title}.md`);
+      files.set(rel, args.template ? `# ${args.title}\n\n` : "");
+      emit("tree-changed", null);
+      return rel;
+    }
+    case "open_today": {
+      const d = todayIso();
+      const rel = `daily/${d.slice(0, 4)}/${d}.md`;
+      if (!files.has(rel)) files.set(rel, `# ${d}\n\n## Yapılacaklar\n\n`);
+      emit("tree-changed", null);
+      return rel;
+    }
+  }
+  return undefined;
+}
+
 export async function mockBackend<T>(cmd: string, args: Record<string, unknown>): Promise<T> {
   const path = String(args.path ?? "");
   switch (cmd) {
@@ -256,6 +319,16 @@ export async function mockBackend<T>(cmd: string, args: Record<string, unknown>)
     case "list_tags":
     case "open_link":
       return mockLinks(cmd, args) as T;
+    case "link_count":
+    case "rename_note":
+    case "move_entry":
+    case "rename_folder":
+    case "delete_entry":
+    case "create_folder":
+    case "list_templates":
+    case "create_note_in":
+    case "open_today":
+      return mockTree(cmd, args) as T;
     case "settings_get":
       return { language: mockLang, theme: mockTheme, autostart: mockAutostart, paused: false, vault_path: vault } as T;
     case "settings_set":
