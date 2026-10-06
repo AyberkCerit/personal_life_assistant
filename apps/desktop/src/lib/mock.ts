@@ -319,6 +319,18 @@ export async function mockBackend<T>(cmd: string, args: Record<string, unknown>)
     case "list_tags":
     case "open_link":
       return mockLinks(cmd, args) as T;
+    case "note_meta": {
+      const text = String(args.text);
+      const m = /^---\n([\s\S]*?)\n---/.exec(text);
+      if (!m) return { state: "none", tags: [], aliases: [], lines: 0 } as T;
+      const list = (key: string) => (new RegExp(`^${key}:\\s*\\[(.*)\\]`, "m").exec(m[1])?.[1] ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+      const invalid = m[1].includes("[") && !m[1].includes("]");
+      return { state: invalid ? "invalid" : "ok", tags: list("tags"), aliases: list("aliases"), lines: m[0].split("\n").length } as T;
+    }
+    case "image_bytes":
+      throw `missing|${args.target}|`;
+    case "save_image":
+      return { path: `attachments/${args.name ?? "Pasted image"}`, embed: String(args.name ?? "Pasted image.png") } as T;
     case "link_count":
     case "rename_note":
     case "move_entry":

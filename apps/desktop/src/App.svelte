@@ -86,6 +86,13 @@
     void tick().then(() => searchPanel?.focus());
   }
 
+  async function searchTag(tag: string) {
+    if (anyWindowOpen()) return;
+    leftView = "search";
+    await tick();
+    searchPanel?.showTag(tag);
+  }
+
   let switcherOpener: HTMLElement | null = null;
 
   function openQuickOpen() {
@@ -433,7 +440,7 @@
         />
       {:else if current}
         {#key current}
-          <Editor bind:this={editor} path={current} {reveal} onSavedCopy={() => void refresh()} onOpenLink={(target) => void followLink(target)} suggest={suggestLinks} />
+          <Editor bind:this={editor} path={current} {reveal} onSavedCopy={() => void refresh()} onOpenLink={(target) => void followLink(target)} suggest={suggestLinks} onTag={(tag) => void searchTag(tag)} />
         {/key}
       {:else}
         <EmptyState icon={FileText} title={t("editor.empty")} />

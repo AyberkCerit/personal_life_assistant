@@ -104,6 +104,9 @@ export interface SearchHit { note_path: string; title: string; snippet: string; 
 export interface QuickHit { note_path: string; title: string; alias: string | null }
 export interface Backlink { source_path: string; source_title: string; line: number; line_text: string }
 export interface TagCount { tag: string; count: number }
+/** FR-EDT-006/007: the open note's frontmatter, `lines` with both fences. */
+export interface FrontMatter { state: "none" | "ok" | "invalid"; tags: string[]; aliases: string[]; lines: number }
+export interface SavedImage { path: string; embed: string }
 export interface PendingReminders { due: DueReminder[]; missed: DueReminder[] }
 
 /** Inside the Tauri window; false in a plain browser (Vite dev server), where a mock backend answers. */
@@ -129,6 +132,14 @@ export const api = {
   setupVault: (path: string, lang: string) => call<VaultInfo>("setup_vault", { path, lang }),
   setLanguage: (lang: string) => call<void>("set_language", { lang }),
   finishSetup: () => call<void>("finish_setup"),
+  noteMeta: (text: string) => call<FrontMatter>("note_meta", { text }),
+  /** FR-EDT-016: the image bytes; rejects `missing|<target>|` when the vault has no such image. */
+  imageBytes: (target: string) => (inTauri ? invoke<ArrayBuffer>("image_bytes", { target }) : mockBackend<ArrayBuffer>("image_bytes", { target })),
+  /** FR-EDT-017: the bytes go as the raw body, a dropped file's name in a header. */
+  saveImage: (bytes: Uint8Array, name: string | null) =>
+    inTauri
+      ? invoke<SavedImage>("save_image", bytes, { headers: name ? { "x-name": encodeURIComponent(name) } : {} })
+      : mockBackend<SavedImage>("save_image", { name }),
   linkCount: (path: string) => call<number>("link_count", { path }),
   renameNote: (path: string, name: string, updateLinks: boolean) => call<string>("rename_note", { path, name, updateLinks }),
   moveEntry: (path: string, folder: string) => call<string>("move_entry", { path, folder }),

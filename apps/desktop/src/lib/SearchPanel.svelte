@@ -54,6 +54,12 @@
     tags = await api.listTags().catch(() => []);
   }
 
+  /** FR-EDT-006: a tag chip in the properties strip opens the search on that tag. */
+  export function showTag(name: string) {
+    tag = name.toLocaleLowerCase("tr");
+    query = "";
+  }
+
   export function focus() {
     input?.focus();
     input?.select();
