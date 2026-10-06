@@ -78,13 +78,16 @@
   }
 
   function openSearch() {
-    if (wizard || vaultPath === null) return;
+    if (wizard || vaultPath === null || anyWindowOpen()) return; // never behind an open window (I3)
     leftView = "search";
     void tick().then(() => searchPanel?.focus());
   }
 
+  let switcherOpener: HTMLElement | null = null;
+
   function openQuickOpen() {
     if (wizard || vaultPath === null || anyWindowOpen()) return;
+    switcherOpener = document.activeElement as HTMLElement | null;
     quickOpen = true;
   }
 
@@ -95,14 +98,22 @@
       if (opened.created) await refresh();
       await openNote(opened.path);
     } catch (e) {
-      error = tf("links.error", { reason: String(e) });
+      const [code, what] = String(e).split("|");
+      error = code === "not_a_note" ? tf("links.notANote", { target: what ?? target }) : tf("links.error", { reason: String(e) });
     }
   }
 
   /** FR-EDT-010: titles (or the alias that matched) for `[[` completion. */
   async function suggestLinks(query: string) {
-    const hits = await api.quickOpen(query).catch(() => []);
-    return hits.slice(0, 8).map((h) => ({ label: h.alias ?? h.title, detail: h.note_path.split("/").slice(0, -1).join("/") || null }));
+    const hits = (await api.quickOpen(query).catch(() => [])).slice(0, 8);
+    const fold = (s: string) => s.toLocaleLowerCase("tr");
+    // A title two notes share is written with its path, so the link reaches the chosen one (M3).
+    const shared = (h: (typeof hits)[number]) => hits.filter((o) => fold(o.title) === fold(h.title)).length > 1;
+    return hits.map((h) => ({
+      label: h.alias ?? h.title,
+      detail: h.note_path.split("/").slice(0, -1).join("/") || null,
+      insert: h.alias ?? (shared(h) ? h.note_path.replace(/\.md$/i, "") : h.title),
+    }));
   }
 
   function openSettings() {
@@ -354,7 +365,7 @@
       {/if}
     </section>
     <aside class="side-panel">
-      <div class="side-tabs" role="tablist" aria-label={t("links.tab.tasks")}>
+      <div class="side-tabs" role="tablist" aria-label={t("links.panel")}>
         <button role="tab" aria-selected={sideTab === "tasks"} class:on={sideTab === "tasks"} onclick={() => (sideTab = "tasks")}>{t("links.tab.tasks")}</button>
         <button role="tab" aria-selected={sideTab === "links"} class:on={sideTab === "links"} onclick={() => (sideTab = "links")}>{t("links.tab.links")}</button>
       </div>
@@ -369,7 +380,7 @@
   </div>
 {/if}
 {#if quickOpen && !wizard}
-  <QuickOpen onOpen={(p) => void openNote(p)} onClose={() => (quickOpen = false)} />
+  <QuickOpen onOpen={(p) => void openNote(p)} onClose={() => (quickOpen = false)} onCancel={() => (switcherOpener?.isConnected ? switcherOpener.focus() : undefined)} />
 {/if}
 {#if quickMetric && !wizard}
   <QuickMetric record={quickMetric.record} onClose={closeQuickMetric} onSaved={() => metricsVersion++} />

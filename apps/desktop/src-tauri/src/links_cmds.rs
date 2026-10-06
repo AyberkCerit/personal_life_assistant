@@ -40,8 +40,16 @@ pub fn list_tags(state: State<AppState>) -> Result<Vec<TagCount>, String> {
 pub fn new_note_title(target: &str) -> String {
     let target = target.split('#').next().unwrap_or_default().trim().replace('\\', "/");
     let name = target.rsplit('/').next().unwrap_or_default().trim();
-    let name = name.strip_suffix(".md").or_else(|| name.strip_suffix(".MD")).unwrap_or(name);
-    name.trim().to_owned()
+    index::strip_md(name).trim().to_owned()
+}
+
+/// A link to something that is not a note (`[[rapor.pdf]]`, `[[#Başlık]]`) never creates one.
+pub fn is_note_target(title: &str) -> bool {
+    match title.rsplit_once('.') {
+        _ if title.is_empty() => false,
+        Some((_, ext)) => !(2..=5).contains(&ext.len()) || !ext.chars().all(|c| c.is_ascii_alphanumeric()),
+        None => true,
+    }
 }
 
 #[derive(Serialize)]
@@ -58,7 +66,15 @@ pub fn open_link(state: State<AppState>, target: String) -> Result<OpenedLink, S
     if let Some(path) = index::resolve_link(&session.cache.lock().expect("cache lock"), &target).map_err(|e| e.to_string())? {
         return Ok(OpenedLink { path, created: false });
     }
+    // Not indexed yet (first open, a long sync, a note made a moment ago): the disk decides (I1).
+    if let Some(path) = index::find_on_disk(&session.vault.root, &target) {
+        session.indexer.send(IndexCommand::Touch(path.clone()));
+        return Ok(OpenedLink { path, created: false });
+    }
     let title = new_note_title(&target);
+    if !is_note_target(&title) {
+        return Err(format!("not_a_note|{target}|"));
+    }
     let inbox = &session.vault.config.folders.inbox;
     // Clicked again before the index caught up: the note made a moment ago, not a second one.
     let existing = format!("{inbox}/{title}.md");
@@ -81,5 +97,15 @@ mod tests {
         assert_eq!(new_note_title("projeler/Yeni Fikir#Başlık"), "Yeni Fikir");
         assert_eq!(new_note_title(" Toplantı.md "), "Toplantı");
         assert_eq!(new_note_title("a\\b\\Kitap"), "Kitap");
+        assert_eq!(new_note_title("Not.Md"), "Not", "any case of .md");
+    }
+
+    #[test]
+    fn only_note_names_become_notes() {
+        assert!(is_note_target("Proje Planı"));
+        assert!(is_note_target("v1.2 notları"), "a dot inside a name is fine");
+        assert!(!is_note_target("rapor.pdf"));
+        assert!(!is_note_target("resim.png"));
+        assert!(!is_note_target(""), "[[#Başlık]] has no note name");
     }
 }

@@ -12,7 +12,7 @@
   import { NoteDoc } from "./saving";
   import { NoteSession } from "./triggers";
   import { revealRange } from "./tasks";
-  import { completionQuery, linkAt } from "./links";
+  import { completionQuery, linkAt, linkRest } from "./links";
   import { autocompletion, type CompletionContext } from "@codemirror/autocomplete";
   import { keymap } from "@codemirror/view";
   import { t } from "./i18n";
@@ -30,7 +30,7 @@
     /** FR-EDT-008: Ctrl+click or Ctrl+Enter on a wikilink. */
     onOpenLink?: (target: string) => void;
     /** FR-EDT-010: note names for `[[` completion. */
-    suggest?: (query: string) => Promise<{ label: string; detail: string | null }[]>;
+    suggest?: (query: string) => Promise<{ label: string; detail: string | null; insert: string }[]>;
   } = $props();
 
   /** The wikilink at a document position, if any. */
@@ -46,12 +46,14 @@
         const line = ctx.state.doc.lineAt(ctx.pos);
         const found = completionQuery(line.text.slice(0, ctx.pos - line.from));
         if (!found) return null;
-        const closed = line.text.slice(ctx.pos - line.from).startsWith("]]");
+        // inside an existing link, the rest of its name is replaced too (links final review M3)
+        const rest = linkRest(line.text.slice(ctx.pos - line.from));
         const names = await suggest(found.query);
         return {
           from: line.from + found.offset,
+          to: ctx.pos + rest.length,
           filter: false,
-          options: names.map((n) => ({ label: n.label, detail: n.detail ?? undefined, apply: closed ? n.label : `${n.label}]]` })),
+          options: names.map((n) => ({ label: n.label, detail: n.detail ?? undefined, apply: rest.closed ? n.insert : `${n.insert}]]` })),
         };
       },
     ],

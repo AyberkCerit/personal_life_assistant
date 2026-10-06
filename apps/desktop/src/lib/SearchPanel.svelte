@@ -20,6 +20,8 @@
   let hits = $state<SearchHit[]>([]);
   let tags = $state<TagCount[]>([]);
   let input: HTMLInputElement | undefined = $state();
+  let loading = $state(false);
+  let revision = $state(0); // bumped when the index changes: results follow edits (M1)
   let request = 0;
 
   const folders = $derived(entries.filter((e) => e.is_dir && e.depth === 0).map((e) => e.path));
@@ -27,17 +29,22 @@
 
   $effect(() => {
     const [q, f, g] = [query, folder, tag];
+    void revision;
     const mine = ++request;
     if (q.trim() === "" && g === "") {
       hits = [];
+      loading = false;
       return;
     }
+    loading = true;
     const timer = setTimeout(() => {
       void api
         .searchNotes(q, f || null, g || null)
         .catch(() => [])
         .then((found) => {
-          if (mine === request) hits = found;
+          if (mine !== request) return;
+          hits = found;
+          loading = false;
         });
     }, 200);
     return () => clearTimeout(timer);
@@ -55,7 +62,10 @@
   onMount(() => {
     focus();
     void loadTags();
-    const un = api.onIndexChanged(() => void loadTags());
+    const un = api.onIndexChanged(() => {
+      void loadTags();
+      revision++;
+    });
     return () => void un.then((f) => f());
   });
 </script>
@@ -85,7 +95,7 @@
   </div>
 
   {#if searching}
-    <p class="count" role="status">{hits.length ? tf("search.count", { n: hits.length }) : t("search.none")}</p>
+    <p class="count" role="status">{hits.length ? tf("search.count", { n: hits.length }) : loading ? "" : t("search.none")}</p>
     <ul class="hits">
       {#each hits as h (h.note_path)}
         <li>

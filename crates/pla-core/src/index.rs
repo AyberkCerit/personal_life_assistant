@@ -3,6 +3,8 @@
 
 use std::path::Path;
 
+use std::sync::atomic::{AtomicBool, Ordering};
+
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::Serialize;
 
@@ -34,14 +36,39 @@ fn fold(s: &str) -> String {
     s.replace('İ', "i").to_lowercase()
 }
 
+/// How names and tags are matched: like `fold`, and Turkish `ı` equals `i`, so `Işık`, `ışık` and
+/// `ISIK` are one (links final review I2).
+pub fn key(s: &str) -> String {
+    fold(s).replace('ı', "i")
+}
+
+/// `key` without the Turkish diacritics FTS5 also drops (ç ğ ş ö ü), for finding the matching line.
+fn loose(s: &str) -> String {
+    key(s).chars().map(|c| match c {
+        'ç' => 'c',
+        'ğ' => 'g',
+        'ş' => 's',
+        'ö' => 'o',
+        'ü' => 'u',
+        'â' => 'a',
+        'î' => 'i',
+        'û' => 'u',
+        c => c,
+    }).collect()
+}
+
 /// How a link target or note name is compared: lower-case, `/` separators, no `.md`, no `#heading`.
 pub fn normalize_name(name: &str) -> String {
     let name = name.split('#').next().unwrap_or_default().trim().replace('\\', "/");
-    let name = match name.len().checked_sub(3) {
+    key(strip_md(name.trim()).trim())
+}
+
+/// `name` without a final `.md` in any case.
+pub fn strip_md(name: &str) -> &str {
+    match name.len().checked_sub(3) {
         Some(at) if name.is_char_boundary(at) && name[at..].eq_ignore_ascii_case(".md") => &name[..at],
-        _ => &name[..],
-    };
-    fold(name.trim())
+        _ => name,
+    }
 }
 
 /// The frontmatter's lines (without the `---` fences) and the index of the first body line, or
@@ -65,7 +92,8 @@ fn yaml_list(front: &[&str], keys: &[&str]) -> Vec<String> {
         if line.starts_with(char::is_whitespace) || !keys.contains(&key.trim()) {
             continue;
         }
-        let value = value.trim();
+        // A YAML comment starts at ` #` (a tag value itself may start with `#` only after quoting).
+        let value = value.split(" #").next().unwrap_or_default().trim();
         let items: Vec<String> = if let Some(inner) = value.strip_prefix('[') {
             let Some(inner) = inner.strip_suffix(']') else { return Vec::new() };
             inner.split(',').map(unquote).collect()
@@ -73,10 +101,10 @@ fn yaml_list(front: &[&str], keys: &[&str]) -> Vec<String> {
             front[i + 1..]
                 .iter()
                 .take_while(|l| l.trim_start().starts_with("- ") || l.trim().is_empty())
-                .filter_map(|l| l.trim_start().strip_prefix("- ").map(unquote))
+                .filter_map(|l| l.trim_start().strip_prefix("- ").map(|v| unquote(v.split(" #").next().unwrap_or_default())))
                 .collect()
         } else {
-            vec![unquote(value)]
+            value.split(',').map(unquote).collect()
         };
         return items.into_iter().filter(|s| !s.is_empty()).collect();
     }
@@ -108,7 +136,7 @@ fn tags_in(line: &str, out: &mut Vec<String>) {
     let chars: Vec<char> = line.chars().collect();
     let mut i = 0;
     while i < chars.len() {
-        let after_word = i > 0 && (chars[i - 1].is_alphanumeric() || chars[i - 1] == '#' || chars[i - 1] == '&');
+        let after_word = i > 0 && (chars[i - 1].is_alphanumeric() || matches!(chars[i - 1], '#' | '&' | '/'));
         if chars[i] != '#' || after_word {
             i += 1;
             continue;
@@ -119,23 +147,41 @@ fn tags_in(line: &str, out: &mut Vec<String>) {
             end += 1;
         }
         let tag: String = chars[start..end].iter().collect::<String>().trim_end_matches('/').to_owned();
-        if !tag.is_empty() && !tag.chars().all(|c| c.is_ascii_digit()) {
+        let valid = !tag.is_empty() && !tag.starts_with('/') && !tag.chars().all(|c| c.is_ascii_digit());
+        if valid {
             push_unique(out, fold(&tag));
         }
         i = end.max(i + 1);
     }
 }
 
+/// Up to `CONTEXT` characters each side of a link: a megabyte line is not stored per link (I5).
+const CONTEXT: usize = 100;
+
 fn links_in(line: &str, number: usize, original: &str, out: &mut Vec<Link>) {
+    let original: Vec<char> = original.trim_end().chars().collect();
     let mut rest = line;
     let mut offset = 0;
     while let Some(open) = rest.find("[[") {
         let Some(close) = rest[open + 2..].find("]]") else { break };
-        let inner = &rest[open + 2..open + 2 + close];
-        let embed = line[..offset + open].ends_with('!');
+        let inner = rest[open + 2..open + 2 + close].replace("\\|", "|"); // a pipe escaped in a table
+        let start = offset + open;
+        let embed = line[..start].ends_with('!');
         let target = normalize_name(inner.split('|').next().unwrap_or_default());
         if !embed && !target.is_empty() {
-            out.push(Link { target, line: number, line_text: original.trim_end().to_owned() });
+            // `line` and `original` have the same characters (code spans are blanked one for one)
+            let at = line[..start].chars().count();
+            let end = at + rest[open..open + 2 + close + 2].chars().count();
+            let from = at.saturating_sub(CONTEXT);
+            let to = (end + CONTEXT).min(original.len());
+            let mut text: String = original[from..to].iter().collect();
+            if from > 0 {
+                text.insert(0, '…');
+            }
+            if to < original.len() {
+                text.push('…');
+            }
+            out.push(Link { target, line: number, line_text: text });
         }
         let used = open + 2 + close + 2;
         offset += used;
@@ -157,15 +203,21 @@ pub fn parse_note(rel: &str, text: &str) -> ParsedNote {
         }
     }
     let mut links = Vec::new();
-    let mut fenced = false;
+    let mut fence: Option<&str> = None; // the marker that opened the code block
     for (i, line) in lines.iter().enumerate().skip(body_start) {
         let trimmed = line.trim_start();
-        if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
-            fenced = !fenced;
-            continue;
-        }
-        if fenced {
-            continue;
+        let marker = ["```", "~~~"].into_iter().find(|m| trimmed.starts_with(m));
+        match (fence, marker) {
+            (None, Some(m)) => {
+                fence = Some(m);
+                continue;
+            }
+            (Some(open), Some(m)) if open == m => {
+                fence = None;
+                continue;
+            }
+            (Some(_), _) => continue,
+            (None, None) => {}
         }
         let plain = without_inline_code(line);
         tags_in(&plain, &mut tags);
@@ -179,10 +231,11 @@ pub fn parse_note(rel: &str, text: &str) -> ParsedNote {
 /// Puts one note into the index, replacing what was there (one transaction).
 pub fn index_note(conn: &Connection, rel: &str, text: &str, mtime: i64, size: i64) -> rusqlite::Result<()> {
     let note = parse_note(rel, text);
+    let tag_keys: Vec<String> = note.tags.iter().map(|t| key(t)).collect();
     let tx = conn.unchecked_transaction()?;
     delete_rows(&tx, rel)?;
     tx.execute(
-        "INSERT INTO note_index (note_path, title, aliases, tags, mtime, size, content_hash) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        "INSERT INTO note_index (note_path, title, aliases, tags, mtime, size, content_hash, tag_keys) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
         params![
             rel,
             note.title,
@@ -190,7 +243,8 @@ pub fn index_note(conn: &Connection, rel: &str, text: &str, mtime: i64, size: i6
             serde_json::to_string(&note.tags).expect("strings serialize"),
             mtime,
             size,
-            content_hash(text.as_bytes())
+            content_hash(text.as_bytes()),
+            serde_json::to_string(&tag_keys).expect("strings serialize")
         ],
     )?;
     tx.execute("INSERT INTO note_fts (note_path, title, body) VALUES (?1, ?2, ?3)", params![rel, note.title, note.body])?;
@@ -252,6 +306,21 @@ fn markdown_files(root: &Path) -> Vec<String> {
     out
 }
 
+/// A note for `target` straight from the disk, for when the index does not know it yet (at the
+/// first open, during a long sync, or a note made a moment ago): path, then name; shortest wins.
+pub fn find_on_disk(root: &Path, target: &str) -> Option<String> {
+    let wanted = normalize_name(target);
+    let name = wanted.rsplit('/').next().unwrap_or_default().to_owned();
+    if wanted.is_empty() {
+        return None;
+    }
+    let files = markdown_files(root);
+    let shortest = |hits: Vec<&String>| hits.into_iter().min_by_key(|p| (p.len(), (*p).clone())).cloned();
+    shortest(files.iter().filter(|p| normalize_name(p) == wanted).collect()).or_else(|| {
+        shortest(files.iter().filter(|p| normalize_name(p).rsplit('/').next() == Some(name.as_str()) && !wanted.contains('/')).collect())
+    })
+}
+
 fn stamp(meta: &std::fs::Metadata) -> (i64, i64) {
     let mtime = meta.modified().ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map_or(0, |d| d.as_millis() as i64);
     (mtime, meta.len() as i64)
@@ -298,7 +367,15 @@ fn known_stamp(conn: &Connection, rel: &str) -> rusqlite::Result<Option<(i64, i6
 
 /// At vault open: re-reads what changed since the last run and drops what is gone (Review Focus 3).
 pub fn sync_vault(conn: &Connection, root: &Path) -> rusqlite::Result<SyncReport> {
+    sync_vault_until(conn, root, &AtomicBool::new(false))
+}
+
+/// `sync_vault` that stops between two notes once `stop` is set (a vault switch must not wait, I4).
+pub fn sync_vault_until(conn: &Connection, root: &Path, stop: &AtomicBool) -> rusqlite::Result<SyncReport> {
     let mut report = SyncReport::default();
+    if stop.load(Ordering::SeqCst) {
+        return Ok(report);
+    }
     let files = markdown_files(root);
     let indexed: Vec<String> = conn.prepare("SELECT note_path FROM note_index")?.query_map([], |r| r.get(0))?.collect::<Result<_, _>>()?;
     for gone in indexed.iter().filter(|p| files.binary_search(p).is_err()) {
@@ -306,6 +383,9 @@ pub fn sync_vault(conn: &Connection, root: &Path) -> rusqlite::Result<SyncReport
         report.removed += 1;
     }
     for rel in &files {
+        if stop.load(Ordering::SeqCst) {
+            break;
+        }
         match refresh(conn, root, rel, known_stamp(conn, rel)?)? {
             Refresh::Indexed => report.indexed += 1,
             Refresh::Unchanged => report.unchanged += 1,
@@ -338,28 +418,49 @@ pub struct SearchHit {
 
 /// User text as an FTS5 query: every word quoted (so no operator survives), the last one a prefix.
 fn fts_query(text: &str) -> Option<String> {
-    let words: Vec<String> = text
-        .split(|c: char| !(c.is_alphanumeric() || c == '_'))
-        .filter(|w| !w.is_empty())
-        .map(|w| format!("\"{}\"", w.replace('"', "\"\"")))
+    let words: Vec<String> = text.split(|c: char| !(c.is_alphanumeric() || c == '_')).filter(|w| !w.is_empty()).map(fold).collect();
+    let last = words.len().checked_sub(1)?;
+    let groups: Vec<String> = words
+        .iter()
+        .enumerate()
+        .map(|(n, w)| {
+            let star = if n == last { "*" } else { "" };
+            let variants: Vec<String> = i_variants(w).into_iter().map(|v| format!("\"{}\"{star}", v.replace('"', "\"\""))).collect();
+            format!("({})", variants.join(" OR "))
+        })
         .collect();
-    let mut query = words.join(" ");
-    if query.is_empty() {
-        return None;
+    Some(groups.join(" AND "))
+}
+
+/// The spellings of `word` with each `i` or `ı` either way: FTS5 keeps `ı` apart from `i`, but a
+/// Turkish word may be written with an `I` that folds to `i` (`Işık` → `işık`). At most 16.
+fn i_variants(word: &str) -> Vec<String> {
+    let positions: Vec<usize> = word.char_indices().filter(|(_, c)| matches!(c, 'i' | 'ı')).map(|(i, _)| i).take(4).collect();
+    let mut out: Vec<String> = Vec::new();
+    for mask in 0..(1u32 << positions.len()) {
+        let mut v = String::with_capacity(word.len());
+        for (i, c) in word.char_indices() {
+            match positions.iter().position(|p| *p == i) {
+                Some(bit) => v.push(if mask & (1 << bit) == 0 { 'i' } else { 'ı' }),
+                None => v.push(c),
+            }
+        }
+        if !out.contains(&v) {
+            out.push(v);
+        }
     }
-    query.push('*');
-    Some(query)
+    out
 }
 
 /// SQL that is true when `folder` is the note's folder or one above it (no LIKE wildcards involved).
 const IN_FOLDER: &str = "(?2 IS NULL OR substr(n.note_path, 1, length(?2) + 1) = ?2 || '/')";
-const HAS_TAG: &str = "(?3 IS NULL OR EXISTS (SELECT 1 FROM json_each(n.tags) WHERE value = ?3 OR substr(value, 1, length(?3) + 1) = ?3 || '/'))";
+const HAS_TAG: &str = "(?3 IS NULL OR EXISTS (SELECT 1 FROM json_each(n.tag_keys) WHERE value = ?3 OR substr(value, 1, length(?3) + 1) = ?3 || '/'))";
 
 /// FR-EDT-014/015: ranked full-text results; `folder` and `tag` narrow them. A tag alone lists its notes.
 pub fn search(conn: &Connection, text: &str, folder: Option<&str>, tag: Option<&str>, limit: usize) -> rusqlite::Result<Vec<SearchHit>> {
     let folder = folder.map(|f| f.trim_matches('/').to_owned()).filter(|f| !f.is_empty());
-    let tag = tag.map(|t| fold(t.trim().trim_start_matches('#'))).filter(|t| !t.is_empty());
-    let words: Vec<String> = text.split(|c: char| !(c.is_alphanumeric() || c == '_')).filter(|w| !w.is_empty()).map(fold).collect();
+    let tag = tag.map(|t| key(t.trim().trim_start_matches('#'))).filter(|t| !t.is_empty());
+    let words: Vec<String> = text.split(|c: char| !(c.is_alphanumeric() || c == '_')).filter(|w| !w.is_empty()).map(loose).collect();
     let rows: Vec<(String, String, String, String)> = match fts_query(text) {
         Some(query) => conn
             .prepare(&format!(
@@ -380,14 +481,15 @@ pub fn search(conn: &Connection, text: &str, folder: Option<&str>, tag: Option<&
             .collect::<Result<_, _>>()?,
         None => Vec::new(),
     };
+    // The line to select: one holding a word that starts like a searched one (M2), loosely compared.
+    let matches_line = |l: &str| {
+        l.split(|c: char| !(c.is_alphanumeric() || c == '_')).filter(|w| !w.is_empty()).map(loose).any(|w| words.iter().any(|q| w.starts_with(q.as_str())))
+    };
     Ok(rows
         .into_iter()
         .map(|(note_path, title, snippet, body)| {
-            let line_text = body.lines().find(|l| {
-                let l = fold(l);
-                words.iter().any(|w| l.contains(w.as_str()))
-            });
-            SearchHit { note_path, title, snippet, line_text: line_text.map(str::to_owned) }
+            let line_text = body.lines().find(|l| matches_line(l)).map(str::to_owned);
+            SearchHit { note_path, title, snippet, line_text }
         })
         .collect())
 }
@@ -417,10 +519,10 @@ pub fn resolve_link(conn: &Connection, target: &str) -> rusqlite::Result<Option<
     if let Some(p) = pick(all.iter().map(|n| &n.0).filter(|p| normalize_name(p) == target).collect()) {
         return Ok(Some(p));
     }
-    if let Some(p) = pick(all.iter().filter(|n| fold(&n.1) == target).map(|n| &n.0).collect()) {
+    if let Some(p) = pick(all.iter().filter(|n| key(&n.1) == target).map(|n| &n.0).collect()) {
         return Ok(Some(p));
     }
-    Ok(pick(all.iter().filter(|n| n.2.iter().any(|a| fold(a) == target)).map(|n| &n.0).collect()))
+    Ok(pick(all.iter().filter(|n| n.2.iter().any(|a| key(a) == target)).map(|n| &n.0).collect()))
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -434,8 +536,8 @@ pub struct Backlink {
 /// FR-EDT-011: every line of another note whose link resolves to `rel`.
 pub fn backlinks(conn: &Connection, rel: &str) -> rusqlite::Result<Vec<Backlink>> {
     let Some((_, title, aliases, _)) = names(conn)?.into_iter().find(|n| n.0 == rel) else { return Ok(Vec::new()) };
-    let mut candidates = vec![normalize_name(rel), fold(&title)];
-    candidates.extend(aliases.iter().map(|a| fold(a)));
+    let mut candidates = vec![normalize_name(rel), key(&title)];
+    candidates.extend(aliases.iter().map(|a| key(a)));
     let mut out = Vec::new();
     let mut resolved: std::collections::HashMap<String, Option<String>> = std::collections::HashMap::new();
     let mut stmt = conn.prepare(
@@ -516,14 +618,19 @@ pub struct TagCount {
 
 /// FR-EDT-012: every tag with the number of notes that carry it, alphabetical.
 pub fn list_tags(conn: &Connection) -> rusqlite::Result<Vec<TagCount>> {
-    let mut counts: std::collections::BTreeMap<String, usize> = std::collections::BTreeMap::new();
-    let lists: Vec<String> = conn.prepare("SELECT tags FROM note_index")?.query_map([], |r| r.get(0))?.collect::<Result<_, _>>()?;
+    // Counted by key, shown as first written (`#Işık` and `#ışık` are one tag).
+    let mut counts: std::collections::BTreeMap<String, (String, usize)> = std::collections::BTreeMap::new();
+    let lists: Vec<String> = conn.prepare("SELECT tags FROM note_index ORDER BY note_path")?.query_map([], |r| r.get(0))?.collect::<Result<_, _>>()?;
     for list in lists {
+        let mut seen = std::collections::BTreeSet::new();
         for tag in serde_json::from_str::<Vec<String>>(&list).unwrap_or_default() {
-            *counts.entry(tag).or_default() += 1;
+            let k = key(&tag);
+            if seen.insert(k.clone()) {
+                counts.entry(k).or_insert_with(|| (tag, 0)).1 += 1;
+            }
         }
     }
-    Ok(counts.into_iter().map(|(tag, count)| TagCount { tag, count }).collect())
+    Ok(counts.into_values().map(|(tag, count)| TagCount { tag, count }).collect())
 }
 
 #[cfg(test)]
@@ -532,7 +639,7 @@ mod tests {
 
     #[test]
     fn names_are_compared_without_case_extension_or_heading() {
-        assert_eq!(normalize_name("Projeler\\PLA Planı.md#Hedefler"), "projeler/pla planı");
+        assert_eq!(normalize_name("Projeler\\PLA Planı.md#Hedefler"), "projeler/pla plani");
         assert_eq!(normalize_name("  Günlük  "), "günlük");
         assert_eq!(normalize_name("İstanbul"), "istanbul", "Turkish capitals lower-case like Obsidian's search");
     }
@@ -570,7 +677,7 @@ mod tests {
         let text = "İlk satır [[Proje Planı]] ve [[notes/Fikirler|fikirler]].\n\n![[resim.png]]\nBaşlığa [[Günlük#Sabah]] ve [[ boş ]] ile [[]].\n";
         let n = parse_note("a.md", text);
         let found: Vec<(&str, usize)> = n.links.iter().map(|l| (l.target.as_str(), l.line)).collect();
-        assert_eq!(found, vec![("proje planı", 1), ("notes/fikirler", 1), ("günlük", 4), ("boş", 4)]);
+        assert_eq!(found, vec![("proje plani", 1), ("notes/fikirler", 1), ("günlük", 4), ("boş", 4)]);
         assert_eq!(n.links[0].line_text, "İlk satır [[Proje Planı]] ve [[notes/Fikirler|fikirler]].");
     }
 
@@ -711,5 +818,76 @@ mod tests {
             tags.iter().map(|t| (t.tag.as_str(), t.count)).collect::<Vec<_>>(),
             vec![("okuma", 1), ("proje", 2), ("proje/pla", 1)]
         );
+    }
+
+    #[test]
+    fn turkish_dotted_and_dotless_i_match_in_search_tags_and_links() {
+        // links final review I2, Review Focus 4
+        let (_t, conn) = db();
+        put(&conn, "notes/Işık.md", "Işık ILIK bir sabah. #Işık");
+        put(&conn, "notes/b.md", "Bugün ışık güzeldi #ışık ve [[ışık]] notuna baktım.");
+        for q in ["ışık", "işık", "ISIK", "Işık", "ılık", "ılı"] {
+            assert!(!search(&conn, q, None, None, 20).unwrap().is_empty(), "{q}");
+        }
+        assert_eq!(search(&conn, "ışık", None, None, 20).unwrap().len(), 2);
+        let tags = list_tags(&conn).unwrap();
+        assert_eq!(tags.len(), 1, "#Işık and #ışık are one tag: {tags:?}");
+        assert_eq!(tags[0].count, 2);
+        assert_eq!(search(&conn, "", None, Some("IŞIK"), 20).unwrap().len(), 2);
+        assert_eq!(resolve_link(&conn, "ışık").unwrap().as_deref(), Some("notes/Işık.md"));
+        assert_eq!(backlinks(&conn, "notes/Işık.md").unwrap().len(), 1);
+    }
+
+    #[test]
+    fn crlf_notes_parse_like_lf_notes() {
+        let n = parse_note("a.md", "---\r\ntags: [x]\r\n---\r\nSatır [[B]]\r\n#etiket\r\n");
+        assert_eq!(n.tags, vec!["x", "etiket"]);
+        assert_eq!(n.links[0].line_text, "Satır [[B]]");
+    }
+
+    #[test]
+    fn parsing_edge_cases_from_review() {
+        // URL fragments, comma lists, YAML comments, escaped pipes, fences of the other kind
+        let n = parse_note("a.md", "---\ntags: a, b # yorum\n---\nhttps://site.com/#/route\n| [[Tablo\\|takma]] |\n~~~\n```\n#kodda\n~~~\n");
+        assert_eq!(n.tags, vec!["a", "b"]);
+        assert_eq!(n.links.iter().map(|l| l.target.as_str()).collect::<Vec<_>>(), vec!["tablo"]);
+    }
+
+    #[test]
+    fn a_link_keeps_only_the_text_around_it() {
+        // links final review I5: a megabyte line must not be stored once per link
+        let long = format!("{}[[A]]{}", "x".repeat(5000), "y".repeat(5000));
+        let n = parse_note("a.md", &long);
+        assert!(n.links[0].line_text.chars().count() <= 210, "{}", n.links[0].line_text.len());
+        assert!(n.links[0].line_text.contains("[[A]]"));
+    }
+
+    #[test]
+    fn a_note_on_disk_is_found_even_before_the_index_knows_it() {
+        // links final review I1: the first open after an upgrade, or a large vault still syncing
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        std::fs::create_dir_all(root.join("notes/alt")).unwrap();
+        std::fs::create_dir_all(root.join(".trash")).unwrap();
+        std::fs::write(root.join("notes/alt/Proje Planı.md"), "x").unwrap();
+        std::fs::write(root.join(".trash/Silinen.md"), "x").unwrap();
+        assert_eq!(find_on_disk(root, "proje planı").as_deref(), Some("notes/alt/Proje Planı.md"));
+        assert_eq!(find_on_disk(root, "Notes/Alt/Proje Planı.md").as_deref(), Some("notes/alt/Proje Planı.md"));
+        assert_eq!(find_on_disk(root, "Silinen"), None, "hidden folders do not count");
+        assert_eq!(find_on_disk(root, "Yok"), None);
+    }
+
+    #[test]
+    fn a_sync_can_be_stopped_between_notes() {
+        // links final review I4: switching vaults must not wait for a long first index
+        let (tmp, conn) = db();
+        let root = tmp.path().join("kasa");
+        std::fs::create_dir_all(&root).unwrap();
+        for i in 0..20 {
+            std::fs::write(root.join(format!("n{i}.md")), "x").unwrap();
+        }
+        let stop = std::sync::atomic::AtomicBool::new(true);
+        let report = sync_vault_until(&conn, &root, &stop).unwrap();
+        assert_eq!(report.indexed, 0, "stopped before the first note");
     }
 }

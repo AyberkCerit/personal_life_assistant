@@ -6,7 +6,12 @@
   import { BASE, motion } from "./ui/motion";
 
   // FR-EDT-005: Ctrl+O, type a few letters of a title or alias, Enter.
-  let { onOpen, onClose }: { onOpen: (path: string) => void; onClose: () => void } = $props();
+  let { onOpen, onClose, onCancel = () => {} }: { onOpen: (path: string) => void; onClose: () => void; onCancel?: () => void } = $props();
+
+  function cancel() {
+    onClose();
+    onCancel(); // focus back where it was (a chosen note takes it instead)
+  }
 
   let query = $state("");
   let hits = $state<QuickHit[]>([]);
@@ -37,7 +42,7 @@
   function keydown(e: KeyboardEvent) {
     if (e.key === "Escape") {
       e.preventDefault();
-      onClose();
+      cancel();
     } else if (e.key === "ArrowDown" || e.key === "ArrowUp") {
       e.preventDefault();
       if (hits.length) active = (active + (e.key === "ArrowDown" ? 1 : hits.length - 1)) % hits.length;
@@ -53,7 +58,7 @@
   onMount(() => input?.focus());
 </script>
 
-<div class="backdrop" transition:fade={{ duration: motion(BASE) }} onclick={onClose} aria-hidden="true"></div>
+<div class="backdrop" transition:fade={{ duration: motion(BASE) }} onclick={cancel} aria-hidden="true"></div>
 <div class="dialog" role="dialog" aria-modal="true" aria-label={t("quick.title")}>
   <input
     bind:this={input}

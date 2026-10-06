@@ -9,7 +9,7 @@ export function linkAt(line: string, column: number): string | null {
     if (column < start || column > end) continue;
     if (start > 0 && line[start - 1] === "!") return null;
     const target = m[1].split("|")[0].trim();
-    return target === "" ? null : target;
+    return target === "" || target.startsWith("#") ? null : target; // `[[#Başlık]]`: this note's heading
   }
   return null;
 }
@@ -21,6 +21,15 @@ export function completionQuery(before: string): { query: string; offset: number
   const query = before.slice(open + 2);
   if (/[\]\n]/.test(query)) return null;
   return { query, offset: open + 2 };
+}
+
+/**
+ * Inside an existing link, the text after the cursor that a picked name replaces (up to `|` or
+ * `]]`), and whether the link is already closed.
+ */
+export function linkRest(after: string): { length: number; closed: boolean } {
+  const m = /^([^[\]|\n]*)(\||\]\])/.exec(after);
+  return m ? { length: m[1].length, closed: true } : { length: 0, closed: false };
 }
 
 /** A search snippet as parts: the matched words sit between U+0002 and U+0003 (never HTML). */

@@ -2,6 +2,8 @@
 //! event. Its own thread, so a large vault never holds up the window or the model.
 
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::thread::JoinHandle;
 use std::time::Duration;
@@ -19,6 +21,8 @@ pub enum IndexCommand {
 
 pub struct IndexerHandle {
     tx: Sender<IndexCommand>,
+    /// Set when the vault closes: a long sync stops between two notes (links final review I4).
+    stop: Arc<AtomicBool>,
     join: Option<JoinHandle<()>>,
 }
 
@@ -34,6 +38,7 @@ impl IndexerHandle {
 
 impl Drop for IndexerHandle {
     fn drop(&mut self) {
+        self.stop.store(true, Ordering::SeqCst);
         let _ = self.tx.send(IndexCommand::Shutdown);
         if let Some(join) = self.join.take() {
             let _ = join.join();
@@ -56,24 +61,32 @@ pub fn index_events(root: &Path, paths: &[PathBuf]) -> (Vec<String>, bool) {
             if !notes.contains(&rel) {
                 notes.push(rel);
             }
-        } else if path.is_dir() || (path.extension().is_none() && !path.exists()) {
+        } else if path.is_dir() || (!path.exists() && !looks_like_a_file(path)) {
+            // a folder appeared or vanished (its name may have a dot: `2026.10`)
             rescan = true;
         }
     }
     (notes, rescan)
 }
 
+/// A vanished path that was most likely a file (`resim.png`), not a folder (`2026.10`, `v1.2`).
+fn looks_like_a_file(path: &Path) -> bool {
+    path.extension().and_then(|e| e.to_str()).is_some_and(|e| (2..=5).contains(&e.len()) && e.chars().all(|c| c.is_ascii_alphabetic()))
+}
+
 /// Starts the indexer for the vault at `root` writing to `cache`; `changed` is called after each
 /// batch that changed the index (the UI refreshes backlinks and tags).
 pub fn spawn(root: PathBuf, cache: PathBuf, changed: Box<dyn Fn() + Send>) -> IndexerHandle {
     let (tx, rx) = mpsc::channel();
-    let join = std::thread::Builder::new().name("pla-indexer".into()).spawn(move || run(&root, &cache, rx, changed)).expect("spawn indexer");
-    IndexerHandle { tx, join: Some(join) }
+    let stop = Arc::new(AtomicBool::new(false));
+    let thread_stop = Arc::clone(&stop);
+    let join = std::thread::Builder::new().name("pla-indexer".into()).spawn(move || run(&root, &cache, rx, changed, &thread_stop)).expect("spawn indexer");
+    IndexerHandle { tx, stop, join: Some(join) }
 }
 
-fn run(root: &Path, cache: &Path, rx: Receiver<IndexCommand>, changed: Box<dyn Fn() + Send>) {
+fn run(root: &Path, cache: &Path, rx: Receiver<IndexCommand>, changed: Box<dyn Fn() + Send>, stop: &AtomicBool) {
     let Ok(conn) = connect(cache) else { return };
-    if let Err(e) = index::sync_vault(&conn, root) {
+    if let Err(e) = index::sync_vault_until(&conn, root, stop) {
         eprintln!("PLA: index sync failed: {e}");
     }
     changed();
@@ -96,7 +109,7 @@ fn run(root: &Path, cache: &Path, rx: Receiver<IndexCommand>, changed: Box<dyn F
         for command in batch {
             let result = match command {
                 IndexCommand::Touch(rel) => index::touch(&conn, root, &rel),
-                IndexCommand::Rescan => index::sync_vault(&conn, root).map(|r| r.indexed + r.removed > 0),
+                IndexCommand::Rescan => index::sync_vault_until(&conn, root, stop).map(|r| r.indexed + r.removed > 0),
                 IndexCommand::Shutdown => return,
             };
             match result {
@@ -125,6 +138,7 @@ mod tests {
         let paths = [root.join("templates/Günlük.md"), root.join(".obsidian/x.md"), root.join("notes/a.MD"), root.join("notes/a.MD"), root.join("resim.png")];
         assert_eq!(index_events(root, &paths), (vec!["templates/Günlük.md".to_owned(), "notes/a.MD".to_owned()], false));
         assert!(index_events(root, &[root.join("templates")]).1, "a folder event rescans");
+        assert!(index_events(root, &[root.join("arşiv/2026.10")]).1, "a vanished folder with a dot in its name too");
     }
 
     #[test]
