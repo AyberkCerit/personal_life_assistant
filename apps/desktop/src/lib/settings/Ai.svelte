@@ -8,6 +8,8 @@
   import { formatBytes } from "../modelText";
   import { describeError } from "../settings";
   import ModelCard from "../ModelCard.svelte";
+  import MemoryCard from "../MemoryCard.svelte";
+  import type { MemoryStatus } from "../api";
   import Banner from "../ui/Banner.svelte";
   import Button from "../ui/Button.svelte";
   import Checkbox from "../ui/Checkbox.svelte";
@@ -20,8 +22,11 @@
   let notice = $state<string | null>(null);
   let error = $state<string | null>(null);
 
+  let memoryStatus = $state<MemoryStatus | null>(null);
+
   async function refresh() {
     status = await api.modelStatus();
+    memoryStatus = await api.memoryStatus().catch(() => null);
   }
 
   async function remove() {
@@ -92,6 +97,10 @@
   <p class="hint">{t("model.banner")}</p>
   <ModelCard {status} onDone={() => void refresh()} />
 {/if}
+{#if memoryStatus}
+  <h3 class="sub">{t("memory.title")}</h3>
+  <MemoryCard status={memoryStatus} />
+{/if}
 <Row label={t("settings.ai.pause")} hint={t("settings.ai.pause.hint")}>
   <Checkbox checked={paused} label={t("settings.ai.pause")} hideLabel onchange={(on) => void act(() => api.setPaused(on))} />
 </Row>
@@ -106,6 +115,7 @@
   a { color: var(--color-link); }
   p { margin: 0 0 var(--space-2); font-size: var(--text-md); }
   .hint { color: var(--color-text-muted); }
+  .sub { margin: var(--space-3) 0 0; font-size: var(--text-md); font-weight: 600; }
   .confirm { padding: var(--space-2) 0; }
   .actions { display: flex; gap: var(--space-2); padding-bottom: var(--space-3); border-bottom: 1px solid var(--color-border); }
 </style>

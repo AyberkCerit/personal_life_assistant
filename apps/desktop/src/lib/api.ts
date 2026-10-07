@@ -107,6 +107,9 @@ export interface TagCount { tag: string; count: number }
 /** FR-EDT-006/007: the open note's frontmatter, `lines` with both fences. */
 export interface FrontMatter { state: "none" | "ok" | "invalid"; tags: string[]; aliases: string[]; lines: number }
 export interface SavedImage { path: string; embed: string }
+/** FR-MEM-003/004: the embedding model and how far the notes are embedded. */
+export interface MemoryStatus { installed: boolean; entry: CatalogEntry; download: DownloadState | null; pending: number; total: number }
+export interface MemoryProgress { pending: number; total: number }
 import type { QaEvent, QaTurn } from "./qa";
 export interface PendingReminders { due: DueReminder[]; missed: DueReminder[] }
 
@@ -140,6 +143,12 @@ export const api = {
   qaClear: () => call<void>("qa_clear"),
   qaUndo: (turnId: string, index: number) => call<void>("qa_undo", { turnId, index }),
   onQaEvent: (cb: (e: QaEvent) => void) => on<QaEvent>("qa-event", cb),
+  memoryStatus: () => call<MemoryStatus>("memory_status"),
+  memoryDownloadStart: () => call<void>("memory_download_start"),
+  memoryDownloadPause: () => call<void>("memory_download_pause"),
+  onMemoryDownload: (cb: (s: DownloadState) => void) => on<DownloadState>("memory-download", cb),
+  onMemoryProgress: (cb: (p: MemoryProgress) => void) => on<MemoryProgress>("memory-progress", cb),
+  onMemoryChanged: (cb: () => void) => on<null>("memory-changed", () => cb()),
   noteMeta: (text: string) => call<FrontMatter>("note_meta", { text }),
   /** FR-EDT-016: the image bytes; rejects `missing|<target>|` when the vault has no such image. */
   imageBytes: (target: string) => (inTauri ? invoke<ArrayBuffer>("image_bytes", { target }) : mockBackend<ArrayBuffer>("image_bytes", { target })),
