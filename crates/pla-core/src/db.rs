@@ -11,7 +11,7 @@ const PLA_MIGRATIONS: &[&str] = &[
     include_str!("../migrations/pla/004_reminder_seen.sql"),
     include_str!("../migrations/pla/005_qa.sql"),
 ];
-const CACHE_MIGRATIONS: &[&str] = &[include_str!("../migrations/cache/001_init.sql"), include_str!("../migrations/cache/002_link_line.sql"), include_str!("../migrations/cache/003_tag_keys.sql"), include_str!("../migrations/cache/004_yaml_frontmatter.sql"), include_str!("../migrations/cache/005_chunks.sql")];
+const CACHE_MIGRATIONS: &[&str] = &[include_str!("../migrations/cache/001_init.sql"), include_str!("../migrations/cache/002_link_line.sql"), include_str!("../migrations/cache/003_tag_keys.sql"), include_str!("../migrations/cache/004_yaml_frontmatter.sql"), include_str!("../migrations/cache/005_chunks.sql"), include_str!("../migrations/cache/006_summaries.sql")];
 
 pub struct Databases {
     pub pla: Connection,
