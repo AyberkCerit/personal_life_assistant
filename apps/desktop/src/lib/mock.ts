@@ -505,7 +505,7 @@ export async function mockBackend<T>(cmd: string, args: Record<string, unknown>)
       return undefined as T;
     case "day_summary":
       return (/daily\/\d{4}\/\d{4}-\d{2}-\d{2}\.md$/.test(String(args.path))
-        ? { date: "2026-10-06", text: "- Asistan paneli bitti [[PLA]]\n- Akşam spor [[2026-10-06]]", sources: [String(args.path)], generated_at: new Date().toISOString(), stale: false }
+        ? { date: "2026-10-06", past: true, summary: { date: "2026-10-06", text: "- Asistan paneli bitti [[PLA]]\n- Akşam spor [[2026-10-06]]", sources: [String(args.path)], generated_at: new Date().toISOString(), stale: false } }
         : null) as T;
     case "summary_regenerate":
       return undefined as T;

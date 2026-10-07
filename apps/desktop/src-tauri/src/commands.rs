@@ -148,8 +148,8 @@ fn start_session(app: &AppHandle, root: &Path, settings: &AppSettings, own: Arc<
     }))
     .with_summary_listener({
         let summary_app = app.clone();
-        Box::new(move |date: &str| {
-            let _ = summary_app.emit("summary-changed", date);
+        Box::new(move |date: &str, error: Option<&str>| {
+            let _ = summary_app.emit("summary-changed", serde_json::json!({ "date": date, "error": error }));
         })
     });
     let handle = worker.spawn();

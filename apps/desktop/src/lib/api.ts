@@ -112,6 +112,9 @@ export interface MemoryStatus { installed: boolean; entry: CatalogEntry; downloa
 export interface MemoryProgress { pending: number; total: number }
 /** FR-MEM-006: a day's summary (cache only). */
 export interface DaySummary { date: string; text: string; sources: string[]; generated_at: string; stale: boolean }
+/** A daily note's day: `past` days can be summarised; `summary` once one exists. */
+export interface DayInfo { date: string; past: boolean; summary: DaySummary | null }
+export interface SummaryChanged { date: string; error: "no_model" | "busy" | "no_notes" | "model" | null }
 import type { QaEvent, QaTurn } from "./qa";
 export interface PendingReminders { due: DueReminder[]; missed: DueReminder[] }
 
@@ -145,9 +148,9 @@ export const api = {
   qaClear: () => call<void>("qa_clear"),
   qaUndo: (turnId: string, index: number) => call<void>("qa_undo", { turnId, index }),
   onQaEvent: (cb: (e: QaEvent) => void) => on<QaEvent>("qa-event", cb),
-  daySummary: (path: string) => call<DaySummary | null>("day_summary", { path }),
+  daySummary: (path: string) => call<DayInfo | null>("day_summary", { path }),
   summaryRegenerate: (path: string) => call<void>("summary_regenerate", { path }),
-  onSummaryChanged: (cb: (date: string) => void) => on<string>("summary-changed", cb),
+  onSummaryChanged: (cb: (e: SummaryChanged) => void) => on<SummaryChanged>("summary-changed", cb),
   memoryStatus: () => call<MemoryStatus>("memory_status"),
   memoryDownloadStart: () => call<void>("memory_download_start"),
   memoryDownloadPause: () => call<void>("memory_download_pause"),

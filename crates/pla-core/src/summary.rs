@@ -42,7 +42,12 @@ pub fn day_of(ms: i64) -> Option<NaiveDate> {
 }
 
 fn day_bounds(date: NaiveDate) -> (i64, i64) {
-    let start = |d: NaiveDate| Local.from_local_datetime(&d.and_hms_opt(0, 0, 0).expect("midnight")).earliest().map_or(0, |t| t.timestamp_millis());
+    // where midnight does not exist (a DST jump at 00:00), the day starts at its first real hour
+    let start = |d: NaiveDate| {
+        (0..3)
+            .find_map(|h| Local.from_local_datetime(&d.and_hms_opt(h, 0, 0).expect("an hour")).earliest())
+            .map_or(0, |t| t.timestamp_millis())
+    };
     (start(date), start(date + Duration::days(1)))
 }
 
@@ -55,13 +60,15 @@ pub fn daily_note_date(folders: &Folders, rel: &str) -> Option<NaiveDate> {
     (crate::fileops::daily_note_rel(folders, date) == rel).then_some(date)
 }
 
-const NOTE: &str = "SELECT n.note_path, n.title, f.body, n.mtime, n.content_hash FROM note_index n JOIN note_fts f ON f.note_path = n.note_path";
+const NOTE: &str = "SELECT n.note_path, n.title, '', n.mtime, n.content_hash FROM note_index n";
 
 fn note_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<(NoteText, String)> {
     Ok((NoteText { note_path: r.get(0)?, title: r.get(1)?, body: r.get(2)?, mtime: r.get(3)? }, r.get(4)?))
 }
 
-pub fn sources(conn: &Connection, folders: &Folders, date: NaiveDate) -> rusqlite::Result<DaySources> {
+/// A day's notes from `note_index` alone (an index on `mtime`, the primary key): no bodies are read,
+/// so a whole maintenance plan stays cheap on a large vault (final review I1).
+fn day_notes(conn: &Connection, folders: &Folders, date: NaiveDate) -> rusqlite::Result<Vec<(NoteText, String)>> {
     let (from, to) = day_bounds(date);
     let daily = crate::fileops::daily_note_rel(folders, date);
     let mut rows: Vec<(NoteText, String)> = conn
@@ -75,12 +82,43 @@ pub fn sources(conn: &Connection, folders: &Folders, date: NaiveDate) -> rusqlit
             rows.insert(0, row);
         }
     }
+    Ok(rows)
+}
+
+fn signature_of(rows: &[(NoteText, String)]) -> String {
     use sha2::{Digest, Sha256};
     let mut hasher = Sha256::new();
-    for (n, hash) in &rows {
+    for (n, hash) in rows {
         hasher.update(format!("{}:{hash}\n", n.note_path).as_bytes());
     }
-    Ok(DaySources { date, signature: hex::encode(hasher.finalize()), notes: rows.into_iter().map(|(n, _)| n).collect() })
+    hex::encode(hasher.finalize())
+}
+
+/// What a day's summary must match to be current.
+pub fn signature(conn: &Connection, folders: &Folders, date: NaiveDate) -> rusqlite::Result<String> {
+    Ok(signature_of(&day_notes(conn, folders, date)?))
+}
+
+/// The day's notes with their text (from their chunks), for the model.
+pub fn sources(conn: &Connection, folders: &Folders, date: NaiveDate) -> rusqlite::Result<DaySources> {
+    let mut rows = day_notes(conn, folders, date)?;
+    let signature = signature_of(&rows);
+    for (n, _) in rows.iter_mut() {
+        let parts: Vec<(String, String)> =
+            conn.prepare("SELECT heading, text FROM chunk WHERE note_path = ?1 ORDER BY ord")?.query_map([&n.note_path], |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<Result<_, _>>()?;
+        let mut last = String::new();
+        let mut body = String::new();
+        for (heading, text) in parts {
+            if !heading.is_empty() && heading != last {
+                body.push_str(&format!("## {heading}\n"));
+                last = heading;
+            }
+            body.push_str(&text);
+            body.push_str("\n\n");
+        }
+        n.body = body;
+    }
+    Ok(DaySources { date, signature, notes: rows.into_iter().map(|(n, _)| n).collect() })
 }
 
 /// Every past day that has notes: last-change days and daily-note dates, newest first.
@@ -122,7 +160,7 @@ pub fn plan(conn: &Connection, folders: &Folders, today: NaiveDate) -> rusqlite:
         let key = d.format("%Y-%m-%d").to_string();
         match stored.iter().find(|(date, _)| *date == key) {
             Some((_, sig)) => {
-                if *sig != sources(conn, folders, d)?.signature {
+                if *sig != signature(conn, folders, d)? {
                     stale.push(d);
                 }
             }
@@ -136,6 +174,7 @@ pub fn plan(conn: &Connection, folders: &Folders, today: NaiveDate) -> rusqlite:
 }
 
 const DAYS: [&str; 7] = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+const DAYS_TR: [&str; 7] = ["Pazartesi", "Salı", "Çarşamba", "Perşembe", "Cuma", "Cumartesi", "Pazar"];
 
 /// The request that summarises one day.
 pub fn request(day: &DaySources) -> Value {
@@ -189,8 +228,9 @@ pub fn save(conn: &Connection, day: &DaySources, text: &str, now: DateTime<Fixed
         params![key, text, serde_json::to_string(&paths).unwrap_or_default(), now.to_rfc3339(), day.signature],
     )?;
     // the weekday's names are searchable too ("salı", "Tuesday")
-    let weekday = DAYS[day.date.weekday().num_days_from_monday() as usize];
-    tx.execute("INSERT INTO summary_fts (date, text) VALUES (?1, ?2)", params![key, format!("{key} {weekday}\n{text}")])?;
+    let n = day.date.weekday().num_days_from_monday() as usize;
+    let names = format!("{} {}", DAYS[n], DAYS_TR[n]);
+    tx.execute("INSERT INTO summary_fts (date, text) VALUES (?1, ?2)", params![key, format!("{key} {names}\n{text}")])?;
     tx.commit()
 }
 
@@ -213,7 +253,7 @@ pub fn get(conn: &Connection, folders: &Folders, date: NaiveDate) -> rusqlite::R
         })
         .optional()?;
     let Some((text, paths, generated_at, signature)) = row else { return Ok(None) };
-    let stale = sources(conn, folders, date)?.signature != signature;
+    let stale = self::signature(conn, folders, date)? != signature;
     Ok(Some(DaySummary { date: key, text, sources: serde_json::from_str(&paths).unwrap_or_default(), generated_at, stale }))
 }
 
@@ -399,6 +439,7 @@ mod tests {
         save(&conn, &sources(&conn, &f, d("2026-10-05")).unwrap(), "- Market alışverişi [[B]]", now()).unwrap();
         assert_eq!(find_days(&conn, "sunum ne zaman hazırlandı", None, 2).unwrap(), [d("2026-10-06")]);
         assert_eq!(find_days(&conn, "Monday", None, 2).unwrap(), [d("2026-10-05")], "weekday names are searchable");
+        assert_eq!(find_days(&conn, "pazartesi ne yaptım", None, 2).unwrap(), [d("2026-10-05")], "in Turkish too");
         assert_eq!(source_paths(&conn, d("2026-10-06")).unwrap(), ["notes/a.md"]);
         assert_eq!(daily_note_date(&f, "daily/2026/2026-10-06.md"), Some(d("2026-10-06")));
         assert_eq!(daily_note_date(&f, "notes/2026-10-06.md"), None);

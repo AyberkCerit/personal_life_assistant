@@ -115,6 +115,11 @@ pub fn build(cache: &Connection, question: &str, turns: &[Turn], now: DateTime<F
     // FR-MEM-005: chunks from the hybrid search (keywords alone until the embedding model is there)
     let mut found = String::new();
     let mut sources: Vec<String> = Vec::new();
+    // a third of the share is kept for the days the summaries point at: the chunks would often
+    // fill it all, and a vague "what did I do that day" needs those days most (final review I4)
+    let days = crate::summary::find_days(cache, question, memory, 2)?;
+    let day_share = if days.is_empty() { 0 } else { found_budget / 3 };
+    found_budget -= day_share;
     for h in crate::memory::hybrid(cache, question, memory, reports, 12)? {
         if in_recent.contains(&h.note_path) {
             if !sources.contains(&h.note_path) {
@@ -134,7 +139,8 @@ pub fn build(cache: &Connection, question: &str, turns: &[Turn], now: DateTime<F
         }
     }
     // FR-MEM-008: a day's summary only points at the day; its notes' raw text is what goes in
-    for day in crate::summary::find_days(cache, question, memory, 2)? {
+    found_budget += day_share;
+    for day in days {
         for path in crate::summary::source_paths(cache, day)? {
             if sources.contains(&path) || in_recent.contains(&path) {
                 continue;

@@ -3,20 +3,21 @@
   import CalendarDays from "@lucide/svelte/icons/calendar-days";
   import FileText from "@lucide/svelte/icons/file-text";
   import RefreshCw from "@lucide/svelte/icons/refresh-cw";
-  import { api, type DaySummary } from "./api";
-  import { lang, t, tf } from "./i18n";
+  import { api, type DayInfo } from "./api";
+  import { lang, t, tf, type Key } from "./i18n";
   import { answerParts } from "./qa";
   import Button from "./ui/Button.svelte";
 
   // FR-MEM-006, owner decision B: a daily note shows its day's summary above it; nothing is
   // written into the note (FR-MEM-007).
   let { path, onOpenNote, onOpenCited }: { path: string; onOpenNote: (path: string) => void; onOpenCited: (target: string) => void } = $props();
-  let summary = $state<DaySummary | null>(null);
+  let day = $state<DayInfo | null>(null);
+  const summary = $derived(day?.summary ?? null);
   let working = $state(false);
   let error = $state<string | null>(null);
 
   async function load() {
-    summary = await api.daySummary(path).catch(() => null);
+    day = await api.daySummary(path).catch(() => null);
   }
 
   async function again() {
@@ -35,13 +36,18 @@
 
   onMount(() => {
     void load();
-    const unSummary = api.onSummaryChanged((date) => {
-      if (path.endsWith(`${date}.md`)) {
-        working = false;
-        void load();
-      }
+    const unSummary = api.onSummaryChanged((e) => {
+      if (!path.endsWith(`${e.date}.md`)) return;
+      working = false;
+      error = e.error ? t(`summary.error.${e.error}` as Key) : null; // final review I2: never stuck
+      void load();
     });
-    const unIndex = api.onIndexChanged(() => void load()); // the day's notes changed: maybe stale now
+    // the day's notes changed: maybe stale now (once things settle, not on every save)
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const unIndex = api.onIndexChanged(() => {
+      clearTimeout(timer);
+      timer = setTimeout(() => void load(), 1500);
+    });
     return () => {
       void unSummary.then((f) => f());
       void unIndex.then((f) => f());
@@ -49,7 +55,7 @@
   });
 </script>
 
-{#if summary || working}
+{#if summary || working || day?.past}
   <details class="day" open>
     <summary><CalendarDays size={14} strokeWidth={2} aria-hidden="true" />{t("summary.title")}</summary>
     <div class="column">
@@ -71,13 +77,15 @@
           <span class="muted">{tf("summary.generated", { when: when(summary.generated_at) })}</span>
         </div>
         {#if summary.stale}<p class="muted">{t("summary.stale")}</p>{/if}
+      {:else if !working}
+        <p class="muted">{t("summary.none")}</p>
       {/if}
       {#if error}<p class="error" role="alert">{error}</p>{/if}
       <div class="actions">
         {#if working}
           <span class="muted" role="status">{t("summary.working")}</span>
         {:else}
-          <Button variant="quiet" icon={RefreshCw} onclick={() => void again()}>{t("summary.again")}</Button>
+          <Button variant="quiet" icon={RefreshCw} onclick={() => void again()}>{summary ? t("summary.again") : t("summary.make")}</Button>
         {/if}
       </div>
     </div>
