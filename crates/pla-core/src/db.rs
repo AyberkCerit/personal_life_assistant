@@ -35,6 +35,12 @@ pub fn open_databases(dir: &Path) -> Result<Databases, DbError> {
     migrate(&mut pla, PLA_MIGRATIONS, Some(&dir.join("pla.before-upgrade.db")))?;
     let cache = match open_cache(dir) {
         Ok(c) => c,
+        // busy or locked (another window has it open) is not damage: nothing is deleted
+        Err(DbError::Sqlite(rusqlite::Error::SqliteFailure(e, _)))
+            if matches!(e.code, rusqlite::ErrorCode::DatabaseBusy | rusqlite::ErrorCode::DatabaseLocked) =>
+        {
+            return Err(DbError::Sqlite(rusqlite::Error::SqliteFailure(e, None)));
+        }
         Err(_) => {
             // FR-MEM-012: cache.db holds nothing that is not in the vault or pla.db; a damaged one
             // is started over and the indexer fills it again in the background.

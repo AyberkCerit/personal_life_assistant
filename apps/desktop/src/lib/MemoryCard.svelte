@@ -59,7 +59,7 @@
     {:else}
       <p role="status">{t("memory.ready")} {#if progress?.total}<span class="line">{tf("memory.indexed", { total: progress.total })}</span>{/if}</p>
     {/if}
-  {:else if download?.state === "running"}
+  {:else if download?.state === "running" && download.progress.total > 0}
     {@const p = download.progress}
     <div class="bar" role="progressbar" aria-label={t("memory.title")} aria-valuemin="0" aria-valuemax="100" aria-valuenow={Math.floor((p.received / p.total) * 100)}>
       <span style:width={`${(p.received / p.total) * 100}%`}></span>

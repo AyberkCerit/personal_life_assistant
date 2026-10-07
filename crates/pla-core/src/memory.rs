@@ -13,6 +13,8 @@ use crate::qa::context::tokens;
 pub const DIMENSIONS: usize = 768;
 const MIN_TOKENS: usize = 200;
 const MAX_TOKENS: usize = 400;
+/// The longest run of characters kept as one word.
+const MAX_WORD_CHARS: usize = 600;
 
 /// Makes `sqlite-vec` part of every connection opened from now on. Called before the first open.
 pub fn register_vec() {
@@ -59,11 +61,17 @@ pub struct Chunk {
 fn split_long(text: &str) -> Vec<String> {
     let mut out = Vec::new();
     let mut current = String::new();
-    for word in text.split_inclusive([' ', '\n']) {
-        if !current.is_empty() && tokens(&current) + tokens(word) > MAX_TOKENS {
+    // a run with no space (a base64 image, minified JSON, a long URL) is cut by characters, so no
+    // chunk outgrows the embedding window (final review I1)
+    let words = text.split_inclusive([' ', '\n']).flat_map(|w| {
+        let chars: Vec<char> = w.chars().collect();
+        chars.chunks(MAX_WORD_CHARS).map(|c| c.iter().collect::<String>()).collect::<Vec<_>>()
+    });
+    for word in words {
+        if !current.is_empty() && tokens(&current) + tokens(&word) > MAX_TOKENS {
             out.push(std::mem::take(&mut current).trim().to_owned());
         }
-        current.push_str(word);
+        current.push_str(&word);
     }
     if !current.trim().is_empty() {
         out.push(current.trim().to_owned());
@@ -127,13 +135,14 @@ fn hash(text: &str) -> String {
 
 /// FR-MEM-002: keeps the chunks (and vectors) of `rel` whose text did not change; the rest wait
 /// for embedding. Called inside the indexer's transaction for the note.
-pub fn sync_chunks(conn: &Connection, rel: &str, body: &str) -> rusqlite::Result<()> {
+pub fn sync_chunks(conn: &Connection, rel: &str, title: &str, body: &str) -> rusqlite::Result<()> {
     let new = chunk(body);
     let old: Vec<(i64, String)> =
         conn.prepare("SELECT chunk_id, text_hash FROM chunk WHERE note_path = ?1")?.query_map([rel], |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<Result<_, _>>()?;
     let mut keep: Vec<i64> = Vec::new();
     for (ord, c) in new.iter().enumerate() {
-        let h = hash(&format!("{}\n{}", c.heading, c.text));
+        // the title is part of what is embedded, so a new title makes a new chunk
+        let h = hash(&format!("{title}\n{}\n{}", c.heading, c.text));
         match old.iter().find(|(id, oh)| *oh == h && !keep.contains(id)) {
             Some((id, _)) => {
                 conn.execute("UPDATE chunk SET ord = ?2 WHERE chunk_id = ?1", params![id, ord as i64])?;
@@ -145,7 +154,7 @@ pub fn sync_chunks(conn: &Connection, rel: &str, body: &str) -> rusqlite::Result
                     params![rel, ord as i64, c.heading, c.text, c.tokens as i64, h],
                 )?;
                 let id = conn.last_insert_rowid();
-                conn.execute("INSERT INTO chunk_fts (rowid, text) VALUES (?1, ?2)", params![id, format!("{}\n{}", c.heading, c.text)])?;
+                conn.execute("INSERT INTO chunk_fts (rowid, title, text) VALUES (?1, ?2, ?3)", params![id, title, format!("{}\n{}", c.heading, c.text)])?;
                 keep.push(id);
             }
         }
@@ -194,32 +203,61 @@ pub struct EmbedReport {
 /// or `stop` is set. What is done stays done: a group is written as soon as it is embedded.
 pub fn embed_pending(conn: &Connection, embedder: &mut dyn Embedder, batch: usize, until: Instant, stop: &AtomicBool) -> Result<EmbedReport, EmbedError> {
     let model = embedder.model_id().to_owned();
+    // FR-MEM-013: another model's vectors go at once; they would fill the vector search's top k
+    // with rows it then has to drop (final review M3)
+    conn.execute(
+        "DELETE FROM chunk_vec WHERE chunk_id IN (SELECT chunk_id FROM chunk WHERE embedded_model IS NOT NULL AND embedded_model <> ?1)",
+        [&model],
+    )?;
+    conn.execute("UPDATE chunk SET embedded_model = NULL WHERE embedded_model IS NOT NULL AND embedded_model <> ?1", [&model])?;
     let mut embedded = 0;
     while Instant::now() < until && !stop.load(Ordering::SeqCst) {
-        let group: Vec<(i64, String)> = conn
+        let group: Vec<(i64, String, String)> = conn
             .prepare(
-                "SELECT c.chunk_id, coalesce(n.title, ''), c.heading, c.text FROM chunk c LEFT JOIN note_index n ON n.note_path = c.note_path
-                 WHERE c.embedded_model IS NOT ?1 ORDER BY c.chunk_id LIMIT ?2",
+                "SELECT c.chunk_id, c.text_hash, coalesce(n.title, ''), c.heading, c.text FROM chunk c
+                 LEFT JOIN note_index n ON n.note_path = c.note_path
+                 WHERE c.embedded_model IS NULL ORDER BY c.chunk_id LIMIT ?1",
             )?
-            .query_map(params![model, batch as i64], |r| Ok((r.get(0)?, document_text(&r.get::<_, String>(1)?, &r.get::<_, String>(2)?, &r.get::<_, String>(3)?))))?
+            .query_map([batch as i64], |r| {
+                Ok((r.get(0)?, r.get(1)?, document_text(&r.get::<_, String>(2)?, &r.get::<_, String>(3)?, &r.get::<_, String>(4)?)))
+            })?
             .collect::<Result<_, _>>()?;
         if group.is_empty() {
             break;
         }
-        let texts: Vec<String> = group.iter().map(|(_, t)| t.clone()).collect();
-        let vectors = embedder.embed(&texts, stop)?;
-        if vectors.len() != group.len() || vectors.iter().any(|v| v.len() != DIMENSIONS) {
-            return Err(EmbedError::Model(LlmError::BadResponse));
-        }
+        let texts: Vec<String> = group.iter().map(|(_, _, t)| t.clone()).collect();
+        let vectors: Vec<Option<Vec<f32>>> = match embedder.embed(&texts, stop) {
+            Ok(v) if v.len() == group.len() => v.into_iter().map(Some).collect(),
+            Ok(_) => return Err(EmbedError::Model(LlmError::BadResponse)),
+            // the server refused the group: one text at a time, so one bad chunk cannot hold up
+            // every chunk after it (final review I1)
+            Err(LlmError::Status(_)) => {
+                let mut one_by_one = Vec::new();
+                for t in &texts {
+                    match embedder.embed(std::slice::from_ref(t), stop) {
+                        Ok(mut v) if v.len() == 1 => one_by_one.push(v.pop()),
+                        Ok(_) | Err(LlmError::Status(_)) => one_by_one.push(None),
+                        Err(e) => return Err(e.into()),
+                    }
+                }
+                one_by_one
+            }
+            Err(e) => return Err(e.into()),
+        };
         let tx = conn.unchecked_transaction()?;
-        for ((id, _), v) in group.iter().zip(&vectors) {
-            // the chunk may have changed meanwhile: only a row still there gets its vector
-            let still: Option<i64> = tx.query_row("SELECT chunk_id FROM chunk WHERE chunk_id = ?1", [id], |r| r.get(0)).optional()?;
-            if still.is_none() {
+        for ((id, hash, _), v) in group.iter().zip(&vectors) {
+            // the chunk may have changed or its id been reused meanwhile: only the same text
+            // gets this vector (final review I4)
+            let same: Option<i64> =
+                tx.query_row("SELECT chunk_id FROM chunk WHERE chunk_id = ?1 AND text_hash = ?2", params![id, hash], |r| r.get(0)).optional()?;
+            if same.is_none() {
                 continue;
             }
             tx.execute("DELETE FROM chunk_vec WHERE chunk_id = ?1", [id])?;
-            tx.execute("INSERT INTO chunk_vec (chunk_id, embedding) VALUES (?1, ?2)", params![id, as_blob(v)])?;
+            if let Some(v) = v.as_ref().filter(|v| v.len() == DIMENSIONS) {
+                tx.execute("INSERT INTO chunk_vec (chunk_id, embedding) VALUES (?1, ?2)", params![id, as_blob(v)])?;
+            }
+            // a chunk the model refuses counts as done, without a vector: keywords still find it
             tx.execute("UPDATE chunk SET embedded_model = ?2 WHERE chunk_id = ?1", params![id, model])?;
         }
         tx.commit()?;
@@ -262,7 +300,7 @@ pub fn hybrid(conn: &Connection, question: &str, query: Option<(&[f32], &str)>, 
     };
     if let Some(q) = crate::index::or_query(question) {
         let ids: Vec<i64> = conn
-            .prepare("SELECT rowid FROM chunk_fts WHERE chunk_fts MATCH ?1 ORDER BY rank LIMIT ?2")?
+            .prepare("SELECT rowid FROM chunk_fts WHERE chunk_fts MATCH ?1 ORDER BY bm25(chunk_fts, 8.0, 1.0) LIMIT ?2")?
             .query_map(params![q, CANDIDATES as i64], |r| r.get(0))?
             .collect::<Result<_, _>>()?;
         for (rank, id) in ids.into_iter().enumerate() {
@@ -414,6 +452,46 @@ mod tests {
         assert_eq!(r.embedded, 0, "no time left");
         let r = embed_pending(&conn, &mut model, 2, far(), &AtomicBool::new(false)).unwrap();
         assert_eq!((r.embedded, r.left, model.calls), (5, 0, 3));
+    }
+
+    /// Refuses (as llama-server does an input over its window) any text with "zzzz" in it.
+    struct Picky;
+    impl Embedder for Picky {
+        fn model_id(&self) -> &str {
+            "picky"
+        }
+        fn embed(&mut self, texts: &[String], _: &AtomicBool) -> Result<Vec<Vec<f32>>, LlmError> {
+            if texts.iter().any(|t| t.contains("zzzz")) {
+                return Err(LlmError::Status(400));
+            }
+            Ok(texts.iter().map(|_| vec![0.5; DIMENSIONS]).collect())
+        }
+    }
+
+    #[test]
+    fn one_refused_chunk_does_not_hold_up_the_rest() {
+        // final review I1
+        let (_t, conn) = cache();
+        let blob = "A".repeat(20_000); // a pasted base64 image: no spaces at all
+        assert!(chunk(&blob).iter().all(|c| c.tokens <= MAX_TOKENS), "cut by characters too");
+        crate::index::index_note(&conn, "notes/bad.md", "# Bad\n\nzzzz bozuk", 1, 1).unwrap();
+        for i in 0..3 {
+            crate::index::index_note(&conn, &format!("notes/{i}.md"), &format!("# İyi {i}\n\nmetin {i}"), 1, 1).unwrap();
+        }
+        let r = embed_pending(&conn, &mut Picky, 8, far(), &AtomicBool::new(false)).unwrap();
+        assert_eq!(r.left, 0, "the refused chunk is done without a vector");
+        let vectors: i64 = conn.query_row("SELECT count(*) FROM chunk_vec", [], |r| r.get(0)).unwrap();
+        assert_eq!(vectors, 3);
+        assert_eq!(hybrid(&conn, "bozuk", None, "reports", 3).unwrap()[0].note_path, "notes/bad.md", "keywords still find it");
+    }
+
+    #[test]
+    fn a_note_is_found_by_its_title_without_the_model() {
+        // final review I3: the keyword fallback weighs the title, as the note search did
+        let (_t, conn) = cache();
+        crate::index::index_note(&conn, "notes/PLA.md", "# Kararlar\n\nTauri seçildi.", 1, 1).unwrap();
+        crate::index::index_note(&conn, "notes/Diğer.md", "# Diğer\n\nBaşka şeyler.", 1, 1).unwrap();
+        assert_eq!(hybrid(&conn, "PLA nedir", None, "reports", 3).unwrap()[0].note_path, "notes/PLA.md");
     }
 
     #[test]

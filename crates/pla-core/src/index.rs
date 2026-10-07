@@ -218,7 +218,7 @@ pub fn index_note(conn: &Connection, rel: &str, text: &str, mtime: i64, size: i6
         ],
     )?;
     tx.execute("INSERT INTO note_fts (note_path, title, body) VALUES (?1, ?2, ?3)", params![rel, note.title, note.body])?;
-    crate::memory::sync_chunks(&tx, rel, &note.body)?; // FR-MEM-002: only changed chunks lose their vector
+    crate::memory::sync_chunks(&tx, rel, &note.title, &note.body)?; // FR-MEM-002: only changed chunks lose their vector
     for link in &note.links {
         tx.execute("INSERT INTO link (source_path, target_path, line_text, line) VALUES (?1, ?2, ?3, ?4)", params![rel, link.target, link.line_text, link.line as i64])?;
     }

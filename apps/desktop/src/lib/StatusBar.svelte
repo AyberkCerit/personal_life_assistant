@@ -39,7 +39,7 @@
   {#if status.busy}<span>{t("status.busy")}</span>{/if}
   <span>{status.queued} {t("status.queued")}</span>
   <span>{status.added} {t("status.added")}</span>
-  {#if memory && memory.pending > 0}<span>{tf("memory.status", { done: memory.total - memory.pending, total: memory.total })}</span>{/if}
+  {#if memory && memory.pending > 0}<span>{tf("memory.status", { done: memory.total - memory.pending, total: memory.total })}{#if status.paused} ({t("memory.paused")}){/if}</span>{/if}
   {#if status.last_error}
     <span class="error" title={status.last_error}><Icon icon={CircleAlert} size="sm" />{status.last_error}</span>
   {/if}

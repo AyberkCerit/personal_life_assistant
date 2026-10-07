@@ -88,9 +88,13 @@ pub fn start_download(app: &AppHandle) -> Result<(), String> {
                 let _ = events.emit("memory-download", s);
             },
             move |path| {
+                // the server is made and the shared slot taken out before any lock is waited on:
+                // the session lock is never held while the worker holds the embedder (final review)
+                let new_host = host(&done_app, path);
                 let state = done_app.state::<AppState>();
-                if let Some(session) = state.session.lock().expect("session lock").as_ref() {
-                    *session.embeds.lock().expect("embeds lock") = host(&done_app, path);
+                let slot = state.session.lock().expect("session lock").as_ref().map(|s| Arc::clone(&s.embeds));
+                if let Some(slot) = slot {
+                    *slot.lock().expect("embeds lock") = new_host;
                 }
                 let _ = done_app.emit("memory-changed", ());
             },

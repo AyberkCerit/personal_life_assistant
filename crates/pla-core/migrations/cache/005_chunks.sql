@@ -13,7 +13,7 @@ CREATE TABLE chunk (
 );
 CREATE INDEX chunk_note ON chunk(note_path);
 CREATE INDEX chunk_model ON chunk(embedded_model);
-CREATE VIRTUAL TABLE chunk_fts USING fts5(text);
+CREATE VIRTUAL TABLE chunk_fts USING fts5(title, text);
 CREATE VIRTUAL TABLE chunk_vec USING vec0(chunk_id INTEGER PRIMARY KEY, embedding float[768] distance_metric=cosine);
 DELETE FROM note_index;
 DELETE FROM note_fts;

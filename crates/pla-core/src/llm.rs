@@ -136,6 +136,15 @@ fn chat_agent() -> ureq::Agent {
         .into()
 }
 
+/// Eight chunks take a few seconds on a CPU; more means the server is stuck (FR-MEM-003).
+fn embed_agent() -> ureq::Agent {
+    ureq::Agent::config_builder()
+        .proxy(None)
+        .timeout_global(Some(Duration::from_secs(30)))
+        .build()
+        .into()
+}
+
 /// One health probe must not outlive the startup limit (FR-MDL-014).
 fn health_agent() -> ureq::Agent {
     ureq::Agent::config_builder()
@@ -316,8 +325,7 @@ impl LlamaServer {
     /// FR-MEM-004: one vector per text (L2-normalised by the server).
     pub fn embed(&self, texts: &[String]) -> Result<Vec<Vec<f32>>, LlmError> {
         self.settle();
-        let mut response = self
-            .agent
+        let mut response = embed_agent()
             .post(format!("{}/v1/embeddings", self.base_url))
             .header("Authorization", &format!("Bearer {}", self.api_key))
             .send_json(serde_json::json!({ "input": texts }))
@@ -466,12 +474,18 @@ pub struct ModelHost {
     start_attempts: u32,
     /// The model file's name: stored with each vector it makes (FR-MEM-013).
     model_id: String,
+    /// When the embedding server last failed to start: it is not tried again for a while, so a
+    /// question is not held up and the indexer does not spawn it every 2 s (final review I2).
+    failed_at: Option<Instant>,
 }
+
+/// How long a failed embedding server is left alone.
+const EMBED_RETRY_AFTER: Duration = Duration::from_secs(300);
 
 impl ModelHost {
     pub fn new(cfg: ServerConfig, idle_after: Duration) -> Self {
         let model_id = cfg.model.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-        Self { cfg, idle_after, server: None, last_used: Instant::now(), start_attempts: 0, model_id }
+        Self { cfg, idle_after, server: None, last_used: Instant::now(), start_attempts: 0, model_id, failed_at: None }
     }
 
     pub fn is_running(&self) -> bool {
@@ -499,6 +513,9 @@ impl ModelHost {
             self.server = None;
         }
         if self.server.is_none() {
+            if self.cfg.embedding && self.failed_at.is_some_and(|t| t.elapsed() < EMBED_RETRY_AFTER) {
+                return Err(LlmError::Exited("the embedding server failed to start a moment ago".into()));
+            }
             self.start_attempts += 1;
             let started = match LlamaServer::start(&self.cfg) {
                 Err(LlmError::MissingBinary(p)) => Err(LlmError::MissingBinary(p)),
@@ -508,7 +525,15 @@ impl ModelHost {
                     LlamaServer::start(&self.cfg)
                 }
                 ok => ok,
-            }?;
+            };
+            let started = match started {
+                Ok(s) => s,
+                Err(e) => {
+                    self.failed_at = Some(Instant::now());
+                    return Err(e);
+                }
+            };
+            self.failed_at = None;
             self.server = Some(started);
         }
         Ok(self.server.as_ref().expect("server was just started"))
@@ -677,6 +702,21 @@ mod tests {
         assert!(!args.contains("--reasoning") && !args.contains("api-key"));
         let host = ModelHost::new(cfg, Duration::from_secs(60));
         assert_eq!(crate::memory::Embedder::model_id(&host), "embeddinggemma-300M-Q8_0.gguf");
+    }
+
+    #[test]
+    fn a_failed_embedding_server_is_left_alone_for_a_while() {
+        // final review I2: no respawn every 2 s, no long wait for every question
+        let (_tmp, mut cfg) = dying_config();
+        cfg.embedding = true;
+        let mut host = ModelHost::new(cfg, Duration::from_secs(60));
+        let stop = std::sync::atomic::AtomicBool::new(false);
+        assert!(crate::memory::Embedder::embed(&mut host, &["x".into()], &stop).is_err());
+        let tried = host.start_attempts();
+        let started = Instant::now();
+        assert!(crate::memory::Embedder::embed(&mut host, &["x".into()], &stop).is_err());
+        assert_eq!(host.start_attempts(), tried, "not started again");
+        assert!(started.elapsed() < Duration::from_secs(1));
     }
 
     #[test]

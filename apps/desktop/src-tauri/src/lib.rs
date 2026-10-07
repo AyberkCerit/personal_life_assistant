@@ -125,6 +125,7 @@ pub fn run() {
             // model) explicitly. The job object in pla-core is the backstop for crashes.
             use tauri::Manager;
             handle.state::<commands::AppState>().downloads.shutdown(std::time::Duration::from_secs(2));
+            handle.state::<commands::AppState>().memory_downloads.shutdown(std::time::Duration::from_secs(2));
             let session = handle.state::<commands::AppState>().session.lock().expect("session lock").take();
             drop(session);
         }
