@@ -11,7 +11,7 @@ const PLA_MIGRATIONS: &[&str] = &[
     include_str!("../migrations/pla/004_reminder_seen.sql"),
     include_str!("../migrations/pla/005_qa.sql"),
 ];
-const CACHE_MIGRATIONS: &[&str] = &[include_str!("../migrations/cache/001_init.sql"), include_str!("../migrations/cache/002_link_line.sql"), include_str!("../migrations/cache/003_tag_keys.sql"), include_str!("../migrations/cache/004_yaml_frontmatter.sql")];
+const CACHE_MIGRATIONS: &[&str] = &[include_str!("../migrations/cache/001_init.sql"), include_str!("../migrations/cache/002_link_line.sql"), include_str!("../migrations/cache/003_tag_keys.sql"), include_str!("../migrations/cache/004_yaml_frontmatter.sql"), include_str!("../migrations/cache/005_chunks.sql")];
 
 pub struct Databases {
     pub pla: Connection,
@@ -33,13 +33,34 @@ pub fn open_databases(dir: &Path) -> Result<Databases, DbError> {
     std::fs::create_dir_all(dir)?;
     let mut pla = connect(&dir.join("pla.db"))?;
     migrate(&mut pla, PLA_MIGRATIONS, Some(&dir.join("pla.before-upgrade.db")))?;
-    let mut cache = connect(&dir.join("cache.db"))?;
-    migrate(&mut cache, CACHE_MIGRATIONS, None)?;
+    let cache = match open_cache(dir) {
+        Ok(c) => c,
+        Err(_) => {
+            // FR-MEM-012: cache.db holds nothing that is not in the vault or pla.db; a damaged one
+            // is started over and the indexer fills it again in the background.
+            for name in ["cache.db", "cache.db-wal", "cache.db-shm"] {
+                let _ = std::fs::remove_file(dir.join(name));
+            }
+            open_cache(dir)?
+        }
+    };
     Ok(Databases { pla, cache })
+}
+
+/// cache.db at the current schema, refused when SQLite finds it damaged.
+fn open_cache(dir: &Path) -> Result<Connection, DbError> {
+    let mut cache = connect(&dir.join("cache.db"))?;
+    let check: String = cache.query_row("PRAGMA quick_check", [], |r| r.get(0))?;
+    if check != "ok" {
+        return Err(DbError::Sqlite(rusqlite::Error::SqliteFailure(rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_CORRUPT), Some(check))));
+    }
+    migrate(&mut cache, CACHE_MIGRATIONS, None)?;
+    Ok(cache)
 }
 
 /// A connection with PLA's pragmas (busy timeout, WAL, foreign keys); no migration.
 pub fn connect(path: &Path) -> Result<Connection, DbError> {
+    crate::memory::register_vec(); // cache.db's vectors (FR-MEM-004)
     let conn = Connection::open(path)?;
     // A second writer (another window, a restarting worker) waits instead of failing.
     conn.busy_timeout(std::time::Duration::from_secs(5))?;
@@ -83,6 +104,20 @@ mod tests {
     fn tables(conn: &Connection) -> Vec<String> {
         let mut st = conn.prepare("SELECT name FROM sqlite_master WHERE type IN ('table') ORDER BY name").unwrap();
         st.query_map([], |r| r.get(0)).unwrap().map(Result::unwrap).collect()
+    }
+
+    #[test]
+    fn a_damaged_cache_is_started_over() {
+        // FR-MEM-012: the user's data (pla.db) stays; the rebuildable cache is made again
+        let tmp = tempfile::tempdir().unwrap();
+        let dbs = open_databases(tmp.path()).unwrap();
+        dbs.pla.execute("INSERT INTO qa_turn (turn_id, question, answer, created_at) VALUES ('t', 'q', 'a', 'x')", []).unwrap();
+        drop(dbs);
+        std::fs::write(tmp.path().join("cache.db"), b"this is not a database at all, just bytes".repeat(200)).unwrap();
+        let dbs = open_databases(tmp.path()).unwrap();
+        let chunks: i64 = dbs.cache.query_row("SELECT count(*) FROM chunk", [], |r| r.get(0)).unwrap();
+        let kept: i64 = dbs.pla.query_row("SELECT count(*) FROM qa_turn", [], |r| r.get(0)).unwrap();
+        assert_eq!((chunks, kept), (0, 1));
     }
 
     #[test]

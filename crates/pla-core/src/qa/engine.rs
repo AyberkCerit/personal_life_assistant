@@ -246,10 +246,11 @@ pub fn answer(
     env: &ToolEnv<'_>,
     question: &str,
     turns: &[Turn],
+    memory: context::Memory<'_>,
     cancel: &AtomicBool,
     on: &mut dyn FnMut(Progress),
 ) -> Result<Answer, QaError> {
-    let ctx = context::build(env.cache, question, turns, env.now)?;
+    let ctx = context::build(env.cache, question, turns, env.now, memory, &env.vault.config.folders.reports)?;
     let mut calls: Vec<ToolRecord> = Vec::new(); // as the model sees them
     let mut shown: Vec<ToolRecord> = Vec::new(); // as the user sees them
     let mut tool_left = ctx.tool_budget;
@@ -397,7 +398,7 @@ mod tests {
             "Yarın 10:00 için hatırlatıcı ekledim.",
         );
         let mut events = Vec::new();
-        let a = answer(&mut model, &tool_env, "Yarın saat 10'da doktor randevum var, hatırlat", &[], &AtomicBool::new(false), &mut |p| events.push(p)).unwrap();
+        let a = answer(&mut model, &tool_env, "Yarın saat 10'da doktor randevum var, hatırlat", &[], None, &AtomicBool::new(false), &mut |p| events.push(p)).unwrap();
         assert_eq!(a.tools.len(), 1);
         assert_eq!(a.tools[0].undo.as_ref().unwrap().kind, "task");
         assert_eq!(a.text, "Yarın 10:00 için hatırlatıcı ekledim.");
@@ -419,10 +420,10 @@ mod tests {
         let tool_env = ToolEnv { vault: &e.vault, pla: &e.pla, cache: &e.cache, now: now(), validation: ValidationSettings::default() };
         let call = "{\"tool\":\"add_task\",\"args\":{\"title\":\"Annemi ara\",\"date\":\"2026-10-09\",\"time\":\"10:00\",\"remind\":true}}";
         let mut model = scripted(&[call], "Tamam.");
-        let a = answer(&mut model, &tool_env, "Cuma günü annemi aramam lazım", &[], &AtomicBool::new(false), &mut |_| {}).unwrap();
+        let a = answer(&mut model, &tool_env, "Cuma günü annemi aramam lazım", &[], None, &AtomicBool::new(false), &mut |_| {}).unwrap();
         assert_eq!((a.tools[0].result["time"].clone(), a.tools[0].result["remind"].clone()), (Value::Null, Value::Bool(false)));
         let mut model = scripted(&[call], "Tamam.");
-        let a = answer(&mut model, &tool_env, "Cuma 10'da annemi ara", &[], &AtomicBool::new(false), &mut |_| {}).unwrap();
+        let a = answer(&mut model, &tool_env, "Cuma 10'da annemi ara", &[], None, &AtomicBool::new(false), &mut |_| {}).unwrap();
         assert_eq!(a.tools[0].result["time"], "10:00", "said, so kept");
     }
 
@@ -442,7 +443,7 @@ mod tests {
         // final review C1: the task stays, so its undo must too
         let e = env();
         let tool_env = ToolEnv { vault: &e.vault, pla: &e.pla, cache: &e.cache, now: now(), validation: ValidationSettings::default() };
-        let err = answer(&mut Breaks, &tool_env, "Yarın doktor", &[], &AtomicBool::new(false), &mut |_| {}).unwrap_err();
+        let err = answer(&mut Breaks, &tool_env, "Yarın doktor", &[], None, &AtomicBool::new(false), &mut |_| {}).unwrap_err();
         let QaError::Model { tools, .. } = err else { panic!("expected a model error") };
         assert_eq!(tools.len(), 1);
         assert!(tools[0].undo.is_some());
@@ -454,7 +455,7 @@ mod tests {
         let tool_env = ToolEnv { vault: &e.vault, pla: &e.pla, cache: &e.cache, now: now(), validation: ValidationSettings::default() };
         let cancel = AtomicBool::new(false);
         let mut model = scripted(&["{\"tool\":\"add_task\",\"args\":{\"title\":\"x\",\"date\":\"2026-10-07\"}}"], "");
-        let err = answer(&mut model, &tool_env, "x ekle", &[], &cancel, &mut |p| {
+        let err = answer(&mut model, &tool_env, "x ekle", &[], None, &cancel, &mut |p| {
             if matches!(p, Progress::Working(None)) {
                 cancel.store(true, Ordering::SeqCst); // Stop lands while the model decides
             }
@@ -471,7 +472,7 @@ mod tests {
         let call = "{\"tool\":\"add_task\",\"args\":{\"title\":\"Market alışverişi\",\"date\":\"2026-10-10\"}}";
         let again = "{\"tool\":\"add_task\",\"args\":{\"title\":\"market ALIŞVERİŞİ\",\"date\":\"2026-10-10\"}}";
         let mut model = scripted(&[call, again, call], "Ekledim.");
-        let a = answer(&mut model, &tool_env, "Cumartesi markete gitmem gerekiyor", &[], &AtomicBool::new(false), &mut |_| {}).unwrap();
+        let a = answer(&mut model, &tool_env, "Cumartesi markete gitmem gerekiyor", &[], None, &AtomicBool::new(false), &mut |_| {}).unwrap();
         assert_eq!(a.tools.len(), 1);
         let n: i64 = e.pla.query_row("SELECT count(*) FROM task", [], |r| r.get(0)).unwrap();
         assert_eq!(n, 1);
@@ -484,7 +485,7 @@ mod tests {
         let tool_env = ToolEnv { vault: &e.vault, pla: &e.pla, cache: &e.cache, now: now(), validation: ValidationSettings::default() };
         let bad = "{\"tool\":\"add_task\",\"args\":{\"title\":\"x\",\"date\":\"yarın\"}}";
         let mut model = scripted(&[bad, bad], "Ekleyemedim.");
-        let a = answer(&mut model, &tool_env, "x ekle", &[], &AtomicBool::new(false), &mut |_| {}).unwrap();
+        let a = answer(&mut model, &tool_env, "x ekle", &[], None, &AtomicBool::new(false), &mut |_| {}).unwrap();
         assert_eq!(a.tools.len(), 1, "only the second refusal reaches the user");
         assert!(a.tools[0].error.as_deref().unwrap().contains("not a date"));
         let second = model.bodies[1]["messages"].as_array().unwrap();
@@ -498,7 +499,7 @@ mod tests {
         let q = |list: &str| format!("{{\"tool\":\"query_tasks\",\"args\":{{\"list\":\"{list}\"}}}}");
         let calls = [q("today"), q("upcoming"), q("completed"), q("all"), q("today")];
         let mut model = scripted(&calls.iter().map(String::as_str).collect::<Vec<_>>(), "Tamam.");
-        let a = answer(&mut model, &tool_env, "görevlerim", &[], &AtomicBool::new(false), &mut |_| {}).unwrap();
+        let a = answer(&mut model, &tool_env, "görevlerim", &[], None, &AtomicBool::new(false), &mut |_| {}).unwrap();
         assert_eq!(a.tools.len(), MAX_CALLS);
     }
 
@@ -510,7 +511,7 @@ mod tests {
         let cancel = AtomicBool::new(false);
         let mut model = scripted(&[], "bir iki üç dört beş");
         let mut seen = 0;
-        let err = answer(&mut model, &tool_env, "say", &[], &cancel, &mut |p| {
+        let err = answer(&mut model, &tool_env, "say", &[], None, &cancel, &mut |p| {
             if matches!(p, Progress::Token(_)) {
                 seen += 1;
                 if seen == 2 {
@@ -530,10 +531,10 @@ mod tests {
         crate::index::index_note(&e.cache, "notes/PLA.md", "# PLA\n\nKarar: Tauri kullanılacak.", 0, 1).unwrap();
         let tool_env = ToolEnv { vault: &e.vault, pla: &e.pla, cache: &e.cache, now: now(), validation: ValidationSettings::default() };
         let mut model = scripted(&[], "Tauri seçildi ([[PLA]]).");
-        let a = answer(&mut model, &tool_env, "PLA kararları neler", &[], &AtomicBool::new(false), &mut |_| {}).unwrap();
+        let a = answer(&mut model, &tool_env, "PLA kararları neler", &[], None, &AtomicBool::new(false), &mut |_| {}).unwrap();
         assert_eq!(a.sources, ["notes/PLA.md"]);
         let mut model = scripted(&[], "Tauri seçildi.");
-        let a = answer(&mut model, &tool_env, "PLA kararları neler", &[], &AtomicBool::new(false), &mut |_| {}).unwrap();
+        let a = answer(&mut model, &tool_env, "PLA kararları neler", &[], None, &AtomicBool::new(false), &mut |_| {}).unwrap();
         assert_eq!(a.sources, ["notes/PLA.md"], "uncited: the notes its context came from");
         assert_eq!(cited("[[A|x]] ve [[B#h]] ve [[A]]"), ["A", "B"]);
     }
@@ -561,7 +562,7 @@ mod tests {
             new_topic: false,
         };
         let mut model = scripted(&[], "Cuma boş.");
-        answer(&mut model, &tool_env, "Peki ya cuma?", &[earlier], &AtomicBool::new(false), &mut |_| {}).unwrap();
+        answer(&mut model, &tool_env, "Peki ya cuma?", &[earlier], None, &AtomicBool::new(false), &mut |_| {}).unwrap();
         let msgs = model.bodies[1]["messages"].as_array().unwrap();
         assert_eq!(msgs[1]["content"], "Yarın ne işim var?");
         assert_eq!(msgs[2]["content"], "Dişçi.");

@@ -218,6 +218,7 @@ pub fn index_note(conn: &Connection, rel: &str, text: &str, mtime: i64, size: i6
         ],
     )?;
     tx.execute("INSERT INTO note_fts (note_path, title, body) VALUES (?1, ?2, ?3)", params![rel, note.title, note.body])?;
+    crate::memory::sync_chunks(&tx, rel, &note.body)?; // FR-MEM-002: only changed chunks lose their vector
     for link in &note.links {
         tx.execute("INSERT INTO link (source_path, target_path, line_text, line) VALUES (?1, ?2, ?3, ?4)", params![rel, link.target, link.line_text, link.line as i64])?;
     }
@@ -234,6 +235,7 @@ fn delete_rows(conn: &Connection, rel: &str) -> rusqlite::Result<()> {
 pub fn remove_note(conn: &Connection, rel: &str) -> rusqlite::Result<()> {
     let tx = conn.unchecked_transaction()?;
     delete_rows(&tx, rel)?;
+    crate::memory::drop_chunks(&tx, rel)?;
     tx.commit()
 }
 
@@ -456,21 +458,28 @@ fn retrieval_words(text: &str) -> Vec<String> {
     out
 }
 
+/// An FTS5 query matching any of the question's words (Turkish i/ı either way, as a prefix).
+pub(crate) fn or_query(question: &str) -> Option<String> {
+    let words = retrieval_words(question);
+    if words.is_empty() {
+        return None;
+    }
+    Some(
+        words
+            .iter()
+            .map(|w| {
+                let variants: Vec<String> = i_variants(w).into_iter().map(|v| format!("\"{}\"*", v.replace('"', "\"\""))).collect();
+                format!("({})", variants.join(" OR "))
+            })
+            .collect::<Vec<_>>()
+            .join(" OR "),
+    )
+}
+
 /// FR-MEM-005 (keyword half): notes sharing any of the question's words, best first. Unlike
 /// `search`, a note does not need every word (a question is not a search box).
 pub fn retrieve(conn: &Connection, question: &str, limit: usize) -> rusqlite::Result<Vec<NoteText>> {
-    let words = retrieval_words(question);
-    if words.is_empty() {
-        return Ok(Vec::new());
-    }
-    let query = words
-        .iter()
-        .map(|w| {
-            let variants: Vec<String> = i_variants(w).into_iter().map(|v| format!("\"{}\"*", v.replace('"', "\"\""))).collect();
-            format!("({})", variants.join(" OR "))
-        })
-        .collect::<Vec<_>>()
-        .join(" OR ");
+    let Some(query) = or_query(question) else { return Ok(Vec::new()) };
     conn.prepare(
         "SELECT f.note_path, n.title, f.body, n.mtime FROM note_fts f JOIN note_index n ON n.note_path = f.note_path
          WHERE note_fts MATCH ?1 ORDER BY bm25(note_fts, 0.0, 8.0, 1.0) LIMIT ?2",
