@@ -66,11 +66,12 @@ fn note_block(n: &NoteText, body: &str) -> String {
     format!("Note [[{}]], last changed {day}:\n{}\n\n", n.title, body.trim())
 }
 
-/// A chunk found for the question, as the model reads it.
+/// A chunk found for the question, as the model reads it. Its section is a Markdown heading inside
+/// the text: written next to the note's name, the model cited the section as if it were a note.
 fn chunk_block(h: &crate::memory::ChunkHit) -> String {
     let day = stamp(h.mtime).split(' ').next().unwrap_or_default().to_owned();
-    let under = if h.heading.is_empty() { String::new() } else { format!(" (section: {})", h.heading) };
-    format!("Note [[{}]]{under}, last changed {day}:\n{}\n\n", h.title, h.text.trim())
+    let under = if h.heading.is_empty() { String::new() } else { format!("## {}\n", h.heading) };
+    format!("Note [[{}]], last changed {day}:\n{under}{}\n\n", h.title, h.text.trim())
 }
 
 /// What semantic memory adds to a question: its vector and the model that made it (FR-MEM-005).
