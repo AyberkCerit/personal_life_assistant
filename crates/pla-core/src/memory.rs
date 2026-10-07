@@ -34,6 +34,8 @@ pub trait Embedder {
     fn model_id(&self) -> &str;
     /// One vector per text, in order. Stops with `LlmError::Cancelled` once `stop` is set.
     fn embed(&mut self, texts: &[String], stop: &AtomicBool) -> Result<Vec<Vec<f32>>, LlmError>;
+    /// Called while nothing else happens: lets the host stop an idle server (FR-MDL-013).
+    fn tick(&mut self) {}
 }
 
 /// EmbeddingGemma's prompts: a question, and a document with its title.

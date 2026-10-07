@@ -45,6 +45,10 @@ pub struct Session {
     pub cache: Mutex<Connection>,
     /// For the worker's own reading connection while it answers a question (FR-QA-003).
     pub cache_path: std::path::PathBuf,
+    /// The embedding server, when its model is there (FR-MEM-004); shared with the indexer.
+    pub embeds: crate::memory_cmds::Embeds,
+    /// Background AI paused (FR-SCH-014): the indexer stops embedding too.
+    pub memory_pause: Arc<AtomicBool>,
     pub worker: WorkerHandle,
 }
 
@@ -56,6 +60,8 @@ pub struct AppState {
     pub paused: AtomicBool,
     /// The model download outlives vault switches (model-manager spec § 5).
     pub downloads: crate::model_download::ModelDownloads,
+    /// The embedding model's download, next to the language model's.
+    pub memory_downloads: crate::model_download::ModelDownloads,
     /// Held for every load-modify-save of settings.json, and while a vault opens, so a finished
     /// download, a vault switch and the tray hint never overwrite each other (final review I5).
     pub settings_lock: Mutex<()>,
@@ -145,9 +151,21 @@ fn start_session(app: &AppHandle, root: &Path, settings: &AppSettings, own: Arc<
         handle.set_paused(true);
     }
     let index_app = app.clone();
+    let embeds: crate::memory_cmds::Embeds = Arc::new(Mutex::new(crate::memory_cmds::model_file().and_then(|m| crate::memory_cmds::host(app, m))));
+    let memory_pause = Arc::new(AtomicBool::new(paused));
+    let (progress_app, worker_status) = (app.clone(), Arc::clone(&status));
+    let memory = crate::indexer::MemoryJob {
+        embeds: Arc::clone(&embeds),
+        pause: Arc::clone(&memory_pause),
+        // two models at once would fight for the CPU: embedding waits while the worker is busy
+        busy: Box::new(move || worker_status.lock().expect("status lock").busy),
+        progress: Box::new(move |pending, total| {
+            let _ = progress_app.emit("memory-progress", serde_json::json!({ "pending": pending, "total": total }));
+        }),
+    };
     let indexer = crate::indexer::spawn(vault.root.clone(), dir.join("cache.db"), Box::new(move || {
         let _ = index_app.emit("index-changed", ());
-    }));
+    }), Some(memory));
     let cache = dbs.cache;
     let watch_handle = watch(vault.clone(), own, handle.sender(), indexer.sender(), app.clone()).ok();
     let sched_db = connect(&dir.join("pla.db")).map_err(|e| e.to_string())?;
@@ -165,7 +183,7 @@ fn start_session(app: &AppHandle, root: &Path, settings: &AppSettings, own: Arc<
             }
         }
     });
-    Ok(Session { vault, scheduler, pending, db: Mutex::new(ui_db), status, _watch: watch_handle, indexer, cache: Mutex::new(cache), cache_path: dir.join("cache.db"), worker: handle })
+    Ok(Session { vault, scheduler, pending, db: Mutex::new(ui_db), status, _watch: watch_handle, indexer, cache: Mutex::new(cache), cache_path: dir.join("cache.db"), embeds, memory_pause, worker: handle })
 }
 
 fn with_vault<T>(state: &State<AppState>, f: impl FnOnce(&Vault) -> Result<T, FileError>) -> Result<T, String> {
@@ -595,6 +613,7 @@ pub fn apply_pause(app: &AppHandle, paused: bool) {
     state.paused.store(paused, Ordering::SeqCst);
     if let Some(session) = state.session.lock().expect("session lock").as_ref() {
         session.worker.set_paused(paused);
+        session.memory_pause.store(paused, Ordering::SeqCst);
     }
     crate::tray::set_pause_checked(app, paused);
     let _ = app.emit("paused-changed", paused);
@@ -784,6 +803,10 @@ pub fn model_download_start(app: AppHandle, state: State<AppState>) -> Result<()
                 if let Some(installed) = describe_model(&path, Some(entry.id)) {
                     let _ = install_model(&done_app, &path, Some(entry.id), &installed);
                     crate::notify::model_ready(&done_app);
+                }
+                // owner decision A: the embedding model follows the language model
+                if crate::memory_cmds::model_file().is_none() {
+                    let _ = crate::memory_cmds::start_download(&done_app);
                 }
             },
         )

@@ -10,6 +10,47 @@ use std::time::Duration;
 
 use pla_core::db::connect;
 use pla_core::index;
+use pla_core::memory;
+
+/// FR-MEM-003 in the background: what the indexer needs to embed chunks while nothing else runs.
+pub struct MemoryJob {
+    pub embeds: crate::memory_cmds::Embeds,
+    /// Background AI paused (FR-SCH-014).
+    pub pause: Arc<AtomicBool>,
+    /// Whether the worker is using the language model right now.
+    pub busy: Box<dyn Fn() -> bool + Send>,
+    /// Chunks left and all chunks, after each batch (the status bar shows it).
+    pub progress: Box<dyn Fn(usize, usize) + Send>,
+}
+
+/// How long the indexer waits for work before it embeds a batch.
+const IDLE: Duration = Duration::from_secs(2);
+/// One batch's time: short, so a note change is indexed soon after.
+const SLICE: Duration = Duration::from_millis(1500);
+
+/// Embeds one slice of pending chunks, if allowed now; reports progress when it changed.
+fn embed_step(conn: &rusqlite::Connection, job: &MemoryJob, stop: &AtomicBool, last: &mut Option<(usize, usize)>) {
+    let mut guard = job.embeds.lock().expect("embeds lock");
+    let Some(embedder) = guard.as_mut() else { return };
+    embedder.tick(); // stops an idle server (FR-MDL-013)
+    if job.pause.load(Ordering::SeqCst) || (job.busy)() {
+        return;
+    }
+    let model = embedder.model_id().to_owned();
+    let pending = memory::pending(conn, &model).unwrap_or(0);
+    let total = memory::total(conn).unwrap_or(0);
+    if pending > 0 {
+        let pause_or_stop = AtomicBool::new(stop.load(Ordering::SeqCst) || job.pause.load(Ordering::SeqCst));
+        if let Err(e) = memory::embed_pending(conn, embedder.as_mut(), 8, std::time::Instant::now() + SLICE, &pause_or_stop) {
+            eprintln!("PLA: embedding failed: {e}");
+        }
+    }
+    let now = (memory::pending(conn, &model).unwrap_or(pending), total);
+    if *last != Some(now) {
+        *last = Some(now);
+        (job.progress)(now.0, now.1);
+    }
+}
 
 pub enum IndexCommand {
     /// A note changed, appeared or vanished.
@@ -76,24 +117,31 @@ fn looks_like_a_file(path: &Path) -> bool {
 
 /// Starts the indexer for the vault at `root` writing to `cache`; `changed` is called after each
 /// batch that changed the index (the UI refreshes backlinks and tags).
-pub fn spawn(root: PathBuf, cache: PathBuf, changed: Box<dyn Fn() + Send>) -> IndexerHandle {
+pub fn spawn(root: PathBuf, cache: PathBuf, changed: Box<dyn Fn() + Send>, memory: Option<MemoryJob>) -> IndexerHandle {
     let (tx, rx) = mpsc::channel();
     let stop = Arc::new(AtomicBool::new(false));
     let thread_stop = Arc::clone(&stop);
-    let join = std::thread::Builder::new().name("pla-indexer".into()).spawn(move || run(&root, &cache, rx, changed, &thread_stop)).expect("spawn indexer");
+    let join = std::thread::Builder::new().name("pla-indexer".into()).spawn(move || run(&root, &cache, rx, changed, &thread_stop, memory)).expect("spawn indexer");
     IndexerHandle { tx, stop, join: Some(join) }
 }
 
-fn run(root: &Path, cache: &Path, rx: Receiver<IndexCommand>, changed: Box<dyn Fn() + Send>, stop: &AtomicBool) {
+fn run(root: &Path, cache: &Path, rx: Receiver<IndexCommand>, changed: Box<dyn Fn() + Send>, stop: &AtomicBool, memory: Option<MemoryJob>) {
     let Ok(conn) = connect(cache) else { return };
     if let Err(e) = index::sync_vault_until(&conn, root, stop) {
         eprintln!("PLA: index sync failed: {e}");
     }
     changed();
+    let mut last = None;
     loop {
-        let first = match rx.recv() {
-            Ok(IndexCommand::Shutdown) | Err(_) => return,
+        let first = match rx.recv_timeout(IDLE) {
+            Ok(IndexCommand::Shutdown) | Err(RecvTimeoutError::Disconnected) => return,
             Ok(c) => c,
+            Err(RecvTimeoutError::Timeout) => {
+                if let Some(job) = &memory {
+                    embed_step(&conn, job, stop, &mut last);
+                }
+                continue;
+            }
         };
         // Take what arrived meanwhile too, then tell the UI once.
         let mut batch = vec![first];
@@ -141,6 +189,55 @@ mod tests {
         assert!(index_events(root, &[root.join("arşiv/2026.10")]).1, "a vanished folder with a dot in its name too");
     }
 
+    struct Ones;
+    impl pla_core::memory::Embedder for Ones {
+        fn model_id(&self) -> &str {
+            "ones"
+        }
+        fn embed(&mut self, texts: &[String], _: &AtomicBool) -> Result<Vec<Vec<f32>>, pla_core::llm::LlmError> {
+            Ok(texts.iter().map(|_| vec![1.0; pla_core::memory::DIMENSIONS]).collect())
+        }
+    }
+
+    #[test]
+    fn chunks_are_embedded_in_the_background_unless_paused_or_busy() {
+        // FR-MEM-003, FR-SCH-014
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().join("kasa");
+        std::fs::create_dir_all(root.join("notes")).unwrap();
+        std::fs::write(root.join("notes/a.md"), "# A\n\nYarın dişçi.").unwrap();
+        let cache = tmp.path().join("data/cache.db");
+        pla_core::db::open_databases(cache.parent().unwrap()).unwrap();
+        let pause = Arc::new(AtomicBool::new(true));
+        let busy = Arc::new(AtomicBool::new(false));
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let (b, s) = (Arc::clone(&busy), Arc::clone(&seen));
+        let job = MemoryJob {
+            embeds: Arc::new(Mutex::new(Some(Box::new(Ones)))),
+            pause: Arc::clone(&pause),
+            busy: Box::new(move || b.load(Ordering::SeqCst)),
+            progress: Box::new(move |p, t| s.lock().unwrap().push((p, t))),
+        };
+        let handle = spawn(root, cache.clone(), Box::new(|| {}), Some(job));
+        let reader = connect(&cache).unwrap();
+        let pending = || pla_core::memory::pending(&reader, "ones").unwrap();
+        std::thread::sleep(Duration::from_millis(2600));
+        assert_eq!(pending(), 1, "paused: nothing embedded");
+        busy.store(true, Ordering::SeqCst);
+        pause.store(false, Ordering::SeqCst);
+        std::thread::sleep(Duration::from_millis(2600));
+        assert_eq!(pending(), 1, "the worker is busy: still waiting");
+        busy.store(false, Ordering::SeqCst);
+        let start = Instant::now();
+        while pending() > 0 {
+            assert!(start.elapsed() < Duration::from_secs(8), "never embedded");
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        std::thread::sleep(Duration::from_millis(100));
+        assert_eq!(seen.lock().unwrap().last(), Some(&(0, 1)), "the status bar hears it is done");
+        drop(handle);
+    }
+
     #[test]
     fn the_indexer_syncs_at_start_and_follows_touches() {
         let tmp = tempfile::tempdir().unwrap();
@@ -151,7 +248,7 @@ mod tests {
         pla_core::db::open_databases(cache.parent().unwrap()).unwrap();
         let calls = Arc::new(Mutex::new(0));
         let seen = Arc::clone(&calls);
-        let handle = spawn(root.clone(), cache.clone(), Box::new(move || *seen.lock().unwrap() += 1));
+        let handle = spawn(root.clone(), cache.clone(), Box::new(move || *seen.lock().unwrap() += 1), None);
         let reader = connect(&cache).unwrap();
         let wait = |pred: &dyn Fn() -> bool| {
             let start = Instant::now();

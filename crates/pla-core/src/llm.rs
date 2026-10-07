@@ -528,6 +528,10 @@ impl crate::memory::Embedder for ModelHost {
         self.last_used = Instant::now();
         vectors
     }
+
+    fn tick(&mut self) {
+        self.stop_if_idle();
+    }
 }
 
 impl crate::qa::ChatModel for ModelHost {
