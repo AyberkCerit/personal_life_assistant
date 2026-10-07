@@ -110,6 +110,8 @@ export interface SavedImage { path: string; embed: string }
 /** FR-MEM-003/004: the embedding model and how far the notes are embedded. */
 export interface MemoryStatus { installed: boolean; entry: CatalogEntry; download: DownloadState | null; pending: number; total: number }
 export interface MemoryProgress { pending: number; total: number }
+/** FR-MEM-006: a day's summary (cache only). */
+export interface DaySummary { date: string; text: string; sources: string[]; generated_at: string; stale: boolean }
 import type { QaEvent, QaTurn } from "./qa";
 export interface PendingReminders { due: DueReminder[]; missed: DueReminder[] }
 
@@ -143,6 +145,9 @@ export const api = {
   qaClear: () => call<void>("qa_clear"),
   qaUndo: (turnId: string, index: number) => call<void>("qa_undo", { turnId, index }),
   onQaEvent: (cb: (e: QaEvent) => void) => on<QaEvent>("qa-event", cb),
+  daySummary: (path: string) => call<DaySummary | null>("day_summary", { path }),
+  summaryRegenerate: (path: string) => call<void>("summary_regenerate", { path }),
+  onSummaryChanged: (cb: (date: string) => void) => on<string>("summary-changed", cb),
   memoryStatus: () => call<MemoryStatus>("memory_status"),
   memoryDownloadStart: () => call<void>("memory_download_start"),
   memoryDownloadPause: () => call<void>("memory_download_pause"),

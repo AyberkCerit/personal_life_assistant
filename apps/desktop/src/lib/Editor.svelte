@@ -19,6 +19,7 @@
   import { mediaExtension } from "./editorMedia";
   import { ImageCache, mediaError } from "./media";
   import Properties from "./Properties.svelte";
+  import DaySummary from "./DaySummary.svelte";
   import type { FrontMatter } from "./api";
 
   let {
@@ -28,6 +29,8 @@
     onOpenLink = () => {},
     suggest = async () => [],
     onTag = () => {},
+    onOpenNote = () => {},
+    onOpenCited = () => {},
   }: {
     path: string;
     reveal?: string | null;
@@ -38,6 +41,9 @@
     suggest?: (query: string) => Promise<{ label: string; detail: string | null; insert: string }[]>;
     /** FR-EDT-006: a tag chip in the properties strip was clicked. */
     onTag?: (tag: string) => void;
+    /** FR-MEM-006: a source note or a note the day's summary names. */
+    onOpenNote?: (path: string) => void;
+    onOpenCited?: (target: string) => void;
   } = $props();
 
   // FR-EDT-006/007: the strip follows the text as it is typed (a short pause, not every key).
@@ -230,6 +236,7 @@
     {#snippet actions()}<Button onclick={() => (imageError = null)}>{t("image.dismiss")}</Button>{/snippet}
   </Banner>
 {/if}
+<DaySummary {path} {onOpenNote} {onOpenCited} />
 <Properties {meta} {onTag} />
 <div class="editor" bind:this={host}></div>
 
