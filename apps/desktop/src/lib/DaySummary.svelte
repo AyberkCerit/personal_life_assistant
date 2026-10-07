@@ -58,7 +58,8 @@
           {#each summary.text.split("\n").map((l) => l.replace(/^\s*[-*•]\s*/, "").trim()).filter(Boolean) as line, i (i)}
             <li>
               {#each answerParts(line) as part, j (j)}
-                {#if part.link}<button class="link" onclick={() => onOpenCited(part.link!)}>{part.text}</button>{:else}{part.text}{/if}
+                <!-- the day's own note is the one open: naming it after each point is noise -->
+                {#if part.link && part.link !== summary.date}<button class="link" onclick={() => onOpenCited(part.link!)}>{part.text}</button>{:else if !part.link}{part.text}{/if}
               {/each}
             </li>
           {/each}
