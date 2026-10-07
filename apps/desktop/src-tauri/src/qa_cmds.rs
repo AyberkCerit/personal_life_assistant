@@ -67,6 +67,7 @@ pub fn qa_ask(app: AppHandle, state: State<AppState>, question: String, new_topi
         question,
         new_topic,
         cache_path: session.cache_path.clone(),
+        memory: Arc::clone(&session.embeds),
         cancel,
         on: Box::new(move |event| {
             let _ = &guard; // lives as long as the job

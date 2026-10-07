@@ -50,6 +50,8 @@ pub struct AskJob {
     pub question: String,
     pub new_topic: bool,
     pub cache_path: std::path::PathBuf,
+    /// The embedding server (FR-MEM-003/005); `None` inside until its model is there.
+    pub memory: crate::memory_cmds::Embeds,
     pub cancel: Arc<AtomicBool>,
     pub on: Box<dyn Fn(QaEvent) + Send>,
 }
@@ -404,7 +406,7 @@ impl Worker {
 
     /// FR-QA-003…016 on the worker thread, which owns the model and pla.db (tools write there).
     fn ask(&mut self, job: AskJob) {
-        let AskJob { turn_id, question, new_topic, cache_path, cancel, on } = job;
+        let AskJob { turn_id, question, new_topic, cache_path, memory, cancel, on } = job;
         let fail = |code: &str, detail: String| on(QaEvent::Failed { turn_id: turn_id.clone(), code: code.into(), detail });
         let Some(model) = self.extractor.as_mut().and_then(|x| x.chat_model()) else {
             fail("no_model", String::new());
@@ -415,11 +417,26 @@ impl Worker {
             Err(e) => return fail("db", e.to_string()),
         };
         let turns = qa::follow_up(&self.conn, new_topic).unwrap_or_default();
-        let now = (self.clock)();
-        let env = ToolEnv { vault: &self.vault, pla: &self.conn, cache: &cache, now, validation: PipelineSettings::default().validation };
+        // FR-MEM-003: chunks still waiting are embedded first, at most 10 s (the rest later), then
+        // the question's own vector joins the keyword search.
+        // Busy from here on: the panel shows it and the indexer leaves the CPU to the question.
         self.status.busy = true;
         (self.notify)(&self.status);
-        let result = engine::answer(model, &env, &question, &turns, &cancel, &mut |p| {
+        let mut vector: Option<(Vec<f32>, String)> = None;
+        if let Some(embedder) = memory.lock().expect("embeds lock").as_mut() {
+            let pending = pla_core::memory::embed_pending(&cache, embedder.as_mut(), 8, Instant::now() + Duration::from_secs(10), &cancel);
+            // a server that could not start is not asked again for the question (final review I2)
+            let server_down = matches!(pending, Err(pla_core::memory::EmbedError::Model(ref e)) if !matches!(e, LlmError::Status(_) | LlmError::Cancelled));
+            if !server_down {
+                if let Ok(mut v) = embedder.embed(&[pla_core::memory::query_text(&question)], &cancel) {
+                    vector = v.pop().map(|v| (v, embedder.model_id().to_owned()));
+                }
+            }
+        }
+        let memory_arg = vector.as_ref().map(|(v, m)| (v.as_slice(), m.as_str()));
+        let now = (self.clock)();
+        let env = ToolEnv { vault: &self.vault, pla: &self.conn, cache: &cache, now, validation: PipelineSettings::default().validation };
+        let result = engine::answer(model, &env, &question, &turns, memory_arg, &cancel, &mut |p| {
             let event = match p {
                 Progress::Working(tool) => QaEvent::Working { turn_id: turn_id.clone(), tool },
                 Progress::Tool(record) => QaEvent::Tool { turn_id: turn_id.clone(), record },
@@ -552,6 +569,7 @@ mod tests {
             question: question.into(),
             new_topic: false,
             cache_path: data.join("cache.db"),
+            memory: Arc::new(Mutex::new(None)),
             cancel: Arc::new(AtomicBool::new(false)),
             on: Box::new(move |e| {
                 let _ = tx.lock().unwrap().send(e);

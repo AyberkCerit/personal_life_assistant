@@ -28,6 +28,7 @@
   import Backlinks from "./lib/Backlinks.svelte";
   import QuickOpen from "./lib/QuickOpen.svelte";
   import AssistantPanel from "./lib/AssistantPanel.svelte";
+  import MemoryBanner from "./lib/MemoryBanner.svelte";
   import Sparkles from "@lucide/svelte/icons/sparkles";
   import { fold } from "./lib/media";
   import SearchPanel from "./lib/SearchPanel.svelte";
@@ -66,6 +67,7 @@
   let assistant: ReturnType<typeof AssistantPanel> | undefined = $state();
   let quickOpen = $state(false);
   let treeDialog = $state(false); // a tree dialog (move, delete, template…) is open
+  let memory = $state<{ pending: number; total: number } | null>(null); // FR-MEM-003 progress
 
   let searchPanel: ReturnType<typeof SearchPanel> | undefined = $state();
   let settingsSection = $state<Section>("general"); // kept here: a language switch re-mounts the window
@@ -358,6 +360,7 @@
       if (finished) tasksVersion++;
     });
     const unTree = api.onTreeChanged(() => void refresh());
+    const unMemory = api.onMemoryProgress((p) => (memory = p));
     const unTasks = api.onTasksChanged(() => tasksVersion++);
     const unNew = api.onNewNote(() => document.querySelector<HTMLInputElement>(".tree input")?.focus());
     const unPaused = api.onPausedChanged((p) => (status = { ...status, paused: p }));
@@ -408,6 +411,7 @@
     return () => {
       void unStatus.then((f) => f());
       void unTree.then((f) => f());
+      void unMemory.then((f) => f());
       void unClose.then((f) => f());
       void unTasks.then((f) => f());
       void unNew.then((f) => f());
@@ -459,6 +463,7 @@
     </aside>
     <section class="main">
       <ModelBanner queued={status.queued} forceOpen={showModel} onOpened={() => (showModel = false)} />
+      <MemoryBanner languageModel={status.model !== "not_installed"} />
       <ReminderBanner version={tasksVersion + panelEdits} onChanged={() => tasksVersion++} />
       {#if error}<Banner kind="danger" icon={CircleAlert} role="alert">{t("error.generic")}: {error}</Banner>{/if}
       {#if center === "metrics"}
@@ -503,7 +508,7 @@
         <Backlinks path={center === "editor" ? current : null} onOpen={(p, line) => void openNote(p, line)} />
       {/if}
     </aside>
-    <StatusBar {status} onResume={() => void api.setPaused(false)} download={modelDownload} onShowModel={() => (showModel = true)} onSettings={openSettings} />
+    <StatusBar {status} onResume={() => void api.setPaused(false)} download={modelDownload} onShowModel={() => (showModel = true)} onSettings={openSettings} {memory} />
     <AddedToast onChanged={() => tasksVersion++} />
   </div>
 {/if}

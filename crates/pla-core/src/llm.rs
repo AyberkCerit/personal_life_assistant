@@ -23,15 +23,40 @@ pub struct ServerConfig {
     pub ctx_size: u32,
     pub threads: u32,
     pub startup_timeout: Duration,
+    /// Run as the embedding server (FR-MEM-004) instead of the chat model.
+    pub embedding: bool,
 }
 
 impl ServerConfig {
     pub fn new(server_bin: PathBuf, model: PathBuf) -> Self {
-        Self { server_bin, model, ctx_size: 8192, threads: 4, startup_timeout: Duration::from_secs(30) }
+        Self { server_bin, model, ctx_size: 8192, threads: 4, startup_timeout: Duration::from_secs(30), embedding: false }
+    }
+
+    /// EmbeddingGemma: a 2 048-token window, one batch as large as a whole input.
+    pub fn embedding(server_bin: PathBuf, model: PathBuf) -> Self {
+        Self { server_bin, model, ctx_size: 2048, threads: 4, startup_timeout: Duration::from_secs(30), embedding: true }
     }
 
     pub fn args(&self, port: u16) -> Vec<String> {
         let mut args: Vec<String> = vec!["-m".into(), self.model.to_string_lossy().into_owned()];
+        if self.embedding {
+            for (flag, value) in [
+                ("-t", self.threads.to_string()),
+                ("-c", self.ctx_size.to_string()),
+                ("-ngl", "0".into()),
+                ("-np", "1".into()),
+                ("--host", "127.0.0.1".into()),
+                ("--port", port.to_string()),
+                ("-ub", self.ctx_size.to_string()),
+                ("-b", self.ctx_size.to_string()),
+            ] {
+                args.push(flag.into());
+                args.push(value);
+            }
+            args.push("--embeddings".into());
+            args.push("--no-webui".into());
+            return args;
+        }
         for (flag, value) in [
             ("-t", self.threads.to_string()),
             ("-c", self.ctx_size.to_string()),
@@ -107,6 +132,15 @@ fn chat_agent() -> ureq::Agent {
     ureq::Agent::config_builder()
         .proxy(None)
         .timeout_global(Some(Duration::from_secs(600)))
+        .build()
+        .into()
+}
+
+/// Eight chunks take a few seconds on a CPU; more means the server is stuck (FR-MEM-003).
+fn embed_agent() -> ureq::Agent {
+    ureq::Agent::config_builder()
+        .proxy(None)
+        .timeout_global(Some(Duration::from_secs(30)))
         .build()
         .into()
 }
@@ -288,6 +322,25 @@ impl LlamaServer {
         body["choices"][0]["message"]["content"].as_str().map(str::to_owned).ok_or(LlmError::BadResponse)
     }
 
+    /// FR-MEM-004: one vector per text (L2-normalised by the server).
+    pub fn embed(&self, texts: &[String]) -> Result<Vec<Vec<f32>>, LlmError> {
+        self.settle();
+        let mut response = embed_agent()
+            .post(format!("{}/v1/embeddings", self.base_url))
+            .header("Authorization", &format!("Bearer {}", self.api_key))
+            .send_json(serde_json::json!({ "input": texts }))
+            .map_err(http_error)?;
+        let body: Value = response.body_mut().read_json().map_err(|e| LlmError::Http(e.to_string()))?;
+        let data = body["data"].as_array().ok_or(LlmError::BadResponse)?;
+        let mut out = vec![Vec::new(); texts.len()];
+        for item in data {
+            let i = item["index"].as_u64().ok_or(LlmError::BadResponse)? as usize;
+            let v: Vec<f32> = item["embedding"].as_array().ok_or(LlmError::BadResponse)?.iter().filter_map(|x| x.as_f64().map(|f| f as f32)).collect();
+            *out.get_mut(i).ok_or(LlmError::BadResponse)? = v;
+        }
+        Ok(out)
+    }
+
     pub fn extract(&self, reference: NaiveDate, text: &str) -> Result<RawExtraction, LlmError> {
         Ok(parse_extraction(&self.extract_raw(reference, text)?)?)
     }
@@ -419,11 +472,20 @@ pub struct ModelHost {
     server: Option<LlamaServer>,
     last_used: Instant,
     start_attempts: u32,
+    /// The model file's name: stored with each vector it makes (FR-MEM-013).
+    model_id: String,
+    /// When the embedding server last failed to start: it is not tried again for a while, so a
+    /// question is not held up and the indexer does not spawn it every 2 s (final review I2).
+    failed_at: Option<Instant>,
 }
+
+/// How long a failed embedding server is left alone.
+const EMBED_RETRY_AFTER: Duration = Duration::from_secs(300);
 
 impl ModelHost {
     pub fn new(cfg: ServerConfig, idle_after: Duration) -> Self {
-        Self { cfg, idle_after, server: None, last_used: Instant::now(), start_attempts: 0 }
+        let model_id = cfg.model.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        Self { cfg, idle_after, server: None, last_used: Instant::now(), start_attempts: 0, model_id, failed_at: None }
     }
 
     pub fn is_running(&self) -> bool {
@@ -451,6 +513,9 @@ impl ModelHost {
             self.server = None;
         }
         if self.server.is_none() {
+            if self.cfg.embedding && self.failed_at.is_some_and(|t| t.elapsed() < EMBED_RETRY_AFTER) {
+                return Err(LlmError::Exited("the embedding server failed to start a moment ago".into()));
+            }
             self.start_attempts += 1;
             let started = match LlamaServer::start(&self.cfg) {
                 Err(LlmError::MissingBinary(p)) => Err(LlmError::MissingBinary(p)),
@@ -460,10 +525,37 @@ impl ModelHost {
                     LlamaServer::start(&self.cfg)
                 }
                 ok => ok,
-            }?;
+            };
+            let started = match started {
+                Ok(s) => s,
+                Err(e) => {
+                    self.failed_at = Some(Instant::now());
+                    return Err(e);
+                }
+            };
+            self.failed_at = None;
             self.server = Some(started);
         }
         Ok(self.server.as_ref().expect("server was just started"))
+    }
+}
+
+impl crate::memory::Embedder for ModelHost {
+    fn model_id(&self) -> &str {
+        self.model_id.as_str()
+    }
+
+    fn embed(&mut self, texts: &[String], stop: &AtomicBool) -> Result<Vec<Vec<f32>>, LlmError> {
+        if stop.load(Ordering::SeqCst) {
+            return Err(LlmError::Cancelled);
+        }
+        let vectors = self.server()?.embed(texts);
+        self.last_used = Instant::now();
+        vectors
+    }
+
+    fn tick(&mut self) {
+        self.stop_if_idle();
     }
 }
 
@@ -597,6 +689,34 @@ mod tests {
             assert!(args.contains(expected), "missing `{expected}` in `{args}`");
         }
         assert!(!args.contains("api-key"), "API key must not appear on the command line (NFR-SEC-002)");
+    }
+
+    #[test]
+    fn the_embedding_server_has_its_own_flags() {
+        // FR-MEM-004: same local-only rules, embedding mode, one batch per input
+        let cfg = ServerConfig::embedding("llama-server.exe".into(), "embeddinggemma-300M-Q8_0.gguf".into());
+        let args = cfg.args(5556).join(" ");
+        for expected in ["--host 127.0.0.1", "--port 5556", "-c 2048", "-ub 2048", "-b 2048", "--embeddings", "-ngl 0"] {
+            assert!(args.contains(expected), "missing `{expected}` in `{args}`");
+        }
+        assert!(!args.contains("--reasoning") && !args.contains("api-key"));
+        let host = ModelHost::new(cfg, Duration::from_secs(60));
+        assert_eq!(crate::memory::Embedder::model_id(&host), "embeddinggemma-300M-Q8_0.gguf");
+    }
+
+    #[test]
+    fn a_failed_embedding_server_is_left_alone_for_a_while() {
+        // final review I2: no respawn every 2 s, no long wait for every question
+        let (_tmp, mut cfg) = dying_config();
+        cfg.embedding = true;
+        let mut host = ModelHost::new(cfg, Duration::from_secs(60));
+        let stop = std::sync::atomic::AtomicBool::new(false);
+        assert!(crate::memory::Embedder::embed(&mut host, &["x".into()], &stop).is_err());
+        let tried = host.start_attempts();
+        let started = Instant::now();
+        assert!(crate::memory::Embedder::embed(&mut host, &["x".into()], &stop).is_err());
+        assert_eq!(host.start_attempts(), tried, "not started again");
+        assert!(started.elapsed() < Duration::from_secs(1));
     }
 
     #[test]

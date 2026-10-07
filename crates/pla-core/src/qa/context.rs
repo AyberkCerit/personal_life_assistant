@@ -66,28 +66,19 @@ fn note_block(n: &NoteText, body: &str) -> String {
     format!("Note [[{}]], last changed {day}:\n{}\n\n", n.title, body.trim())
 }
 
-/// The paragraphs of `body` that hold one of the question's words (or the first one).
-fn paragraphs_for(body: &str, words: &[String]) -> String {
-    let parts: Vec<&str> = body.split("\n\n").map(str::trim).filter(|p| !p.is_empty()).collect();
-    let hit = |p: &str| {
-        let folded = index::key(p);
-        words.iter().any(|w| folded.contains(w.as_str()))
-    };
-    let picked: Vec<&str> = parts.iter().copied().filter(|p| hit(p)).take(4).collect();
-    if picked.is_empty() { parts.first().copied().unwrap_or_default().to_owned() } else { picked.join("\n\n") }
+/// A chunk found for the question, as the model reads it. Its section is a Markdown heading inside
+/// the text: written next to the note's name, the model cited the section as if it were a note.
+fn chunk_block(h: &crate::memory::ChunkHit) -> String {
+    let day = stamp(h.mtime).split(' ').next().unwrap_or_default().to_owned();
+    let under = if h.heading.is_empty() { String::new() } else { format!("## {}\n", h.heading) };
+    format!("Note [[{}]], last changed {day}:\n{under}{}\n\n", h.title, h.text.trim())
 }
 
-fn question_words(question: &str) -> Vec<String> {
-    question
-        .split(|c: char| !c.is_alphanumeric())
-        .map(index::key)
-        .filter(|w| w.chars().count() >= 4)
-        .map(|w| w.chars().take(5).collect()) // a stem: Turkish suffixes vary
-        .collect()
-}
+/// What semantic memory adds to a question: its vector and the model that made it (FR-MEM-005).
+pub type Memory<'a> = Option<(&'a [f32], &'a str)>;
 
 /// Builds the context for `question` with the earlier `turns` (oldest first).
-pub fn build(cache: &Connection, question: &str, turns: &[Turn], now: DateTime<FixedOffset>) -> rusqlite::Result<Context> {
+pub fn build(cache: &Connection, question: &str, turns: &[Turn], now: DateTime<FixedOffset>, memory: Memory<'_>, reports: &str) -> rusqlite::Result<Context> {
     let room = WINDOW - RESERVED - tokens(question).min(700);
     let (mut recent_budget, mut found_budget, tool_budget) = (room * 2 / 5, room * 2 / 5, room / 5);
 
@@ -121,23 +112,26 @@ pub fn build(cache: &Connection, question: &str, turns: &[Turn], now: DateTime<F
         }
     }
 
-    // FR-MEM-005 (keyword half for now): paragraphs of the notes the question's words lead to.
-    let words = question_words(question);
+    // FR-MEM-005: chunks from the hybrid search (keywords alone until the embedding model is there)
     let mut found = String::new();
-    let mut sources = Vec::new();
-    for n in index::retrieve(cache, question, 8)? {
-        if in_recent.contains(&n.note_path) {
-            sources.push(n.note_path.clone()); // already in full above
+    let mut sources: Vec<String> = Vec::new();
+    for h in crate::memory::hybrid(cache, question, memory, reports, 12)? {
+        if in_recent.contains(&h.note_path) {
+            if !sources.contains(&h.note_path) {
+                sources.push(h.note_path.clone()); // already in full above
+            }
             continue;
         }
-        let block = note_block(&n, &cut(&paragraphs_for(&n.body, &words), 400));
+        let block = chunk_block(&h);
         let cost = tokens(&block);
         if cost > found_budget {
             continue;
         }
         found_budget -= cost;
         found.push_str(&block);
-        sources.push(n.note_path);
+        if !sources.contains(&h.note_path) {
+            sources.push(h.note_path);
+        }
     }
     Ok(Context { recent, found, turns: kept, sources, tool_budget })
 }
@@ -167,10 +161,10 @@ mod tests {
         let ms = now().timestamp_millis();
         index::index_note(&conn, "daily/bugün.md", "# Bugün\n\nDişçi randevusu yarın 10'da.", ms - 3_600_000, 10).unwrap();
         index::index_note(&conn, "notes/PLA.md", "# PLA\n\nGiriş.\n\nKarar: Tauri ve Svelte kullanılacak.\n\nBaşka konu.", ms - 30 * 86_400_000, 10).unwrap();
-        let ctx = build(&conn, "PLA projesinde hangi kararları aldık?", &[], now()).unwrap();
+        let ctx = build(&conn, "PLA projesinde hangi kararları aldık?", &[], now(), None, "reports").unwrap();
         assert!(ctx.recent.contains("Dişçi randevusu"), "the last 48 hours");
         assert!(!ctx.recent.contains("Tauri"), "an old note is not recent");
-        assert!(ctx.found.contains("Karar: Tauri") && !ctx.found.contains("Başka konu"), "the paragraph that matters");
+        assert!(ctx.found.contains("Karar: Tauri"), "the chunk that matters");
         assert_eq!(ctx.sources, ["notes/PLA.md"]);
         assert_eq!(ctx.tool_budget, (WINDOW - RESERVED - tokens("PLA projesinde hangi kararları aldık?")) / 5);
     }
@@ -183,7 +177,7 @@ mod tests {
         let long = "kelime ".repeat(2500); // ~4 300 tokens, more than the recent share
         index::index_note(&conn, "notes/eski.md", &format!("# Eski\n\nESKİ {long}"), ms - 40 * 3_600_000, 10).unwrap();
         index::index_note(&conn, "notes/yeni.md", &format!("# Yeni\n\nYENİ {long}"), ms - 3_600_000, 10).unwrap();
-        let ctx = build(&conn, "ne yaptım", &[], now()).unwrap();
+        let ctx = build(&conn, "ne yaptım", &[], now(), None, "reports").unwrap();
         assert!(ctx.recent.contains("YENİ") && !ctx.recent.contains("ESKİ"), "the newest stays, the oldest goes");
         assert!(tokens(&ctx.recent) <= (WINDOW - RESERVED) * 2 / 5);
     }
@@ -193,7 +187,7 @@ mod tests {
         let (_t, conn) = cache();
         let big = "a ".repeat(3000);
         let turns = [turn("bir", &big), turn("iki", &big), turn("üç", "kısa")];
-        let ctx = build(&conn, "peki ya cuma?", &turns, now()).unwrap();
+        let ctx = build(&conn, "peki ya cuma?", &turns, now(), None, "reports").unwrap();
         assert_eq!(ctx.turns.iter().map(|t| t.question.as_str()).collect::<Vec<_>>(), ["iki", "üç"]);
     }
 }

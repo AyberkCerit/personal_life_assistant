@@ -3,7 +3,7 @@
   import Play from "@lucide/svelte/icons/play";
   import SettingsIcon from "@lucide/svelte/icons/settings";
   import type { DownloadState, WorkerStatus } from "./api";
-  import { lang, t, type Key } from "./i18n";
+  import { lang, t, tf, type Key } from "./i18n";
   import Badge from "./ui/Badge.svelte";
   import Button from "./ui/Button.svelte";
   import Icon from "./ui/Icon.svelte";
@@ -15,12 +15,15 @@
     download = null,
     onShowModel = () => {},
     onSettings = () => {},
+    memory = null,
   }: {
     status: WorkerStatus;
     onResume: () => void;
     download?: DownloadState | null;
     onShowModel?: () => void;
     onSettings?: () => void;
+    /** FR-MEM-003: chunks left to embed and all chunks. */
+    memory?: { pending: number; total: number } | null;
   } = $props();
 </script>
 
@@ -36,6 +39,7 @@
   {#if status.busy}<span>{t("status.busy")}</span>{/if}
   <span>{status.queued} {t("status.queued")}</span>
   <span>{status.added} {t("status.added")}</span>
+  {#if memory && memory.pending > 0}<span>{tf("memory.status", { done: memory.total - memory.pending, total: memory.total })}{#if status.paused} ({t("memory.paused")}){/if}</span>{/if}
   {#if status.last_error}
     <span class="error" title={status.last_error}><Icon icon={CircleAlert} size="sm" />{status.last_error}</span>
   {/if}

@@ -3,6 +3,7 @@
 mod commands;
 pub mod fileops_cmds;
 pub mod media_cmds;
+pub mod memory_cmds;
 pub mod qa_cmds;
 pub mod indexer;
 pub mod links_cmds;
@@ -94,6 +95,9 @@ pub fn run() {
             qa_cmds::qa_history,
             qa_cmds::qa_clear,
             qa_cmds::qa_undo,
+            memory_cmds::memory_status,
+            memory_cmds::memory_download_start,
+            memory_cmds::memory_download_pause,
             links_cmds::search_notes,
             links_cmds::quick_open,
             links_cmds::backlinks,
@@ -121,6 +125,7 @@ pub fn run() {
             // model) explicitly. The job object in pla-core is the backstop for crashes.
             use tauri::Manager;
             handle.state::<commands::AppState>().downloads.shutdown(std::time::Duration::from_secs(2));
+            handle.state::<commands::AppState>().memory_downloads.shutdown(std::time::Duration::from_secs(2));
             let session = handle.state::<commands::AppState>().session.lock().expect("session lock").take();
             drop(session);
         }

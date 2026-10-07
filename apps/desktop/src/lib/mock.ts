@@ -503,6 +503,11 @@ export async function mockBackend<T>(cmd: string, args: Record<string, unknown>)
     case "set_paused":
       for (const cb of mockListeners.get("paused-changed") ?? []) cb(Boolean(args.paused));
       return undefined as T;
+    case "memory_status":
+      return { installed: false, entry: { id: "embeddinggemma-300m-q8", name: "EmbeddingGemma 300M (Q8_0)", file_name: "embeddinggemma-300M-Q8_0.gguf", size: 333590944, sha256: "", url: "", source: "Hugging Face · ggml-org", licence: "Gemma Terms of Use", licence_url: "https://ai.google.dev/gemma/terms" }, download: null, pending: 0, total: 0 } as T;
+    case "memory_download_start":
+    case "memory_download_pause":
+      return undefined as T;
     case "model_status":
       return { installed, recommended: RECOMMENDED, download, models_dir: "C:/Users/me/AppData/Local/PLA/models" } as T;
     case "model_download_start":

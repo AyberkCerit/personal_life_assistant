@@ -11,6 +11,7 @@ pub mod vault;
 pub mod db;
 pub mod llm;
 pub mod media;
+pub mod memory;
 pub mod metrics;
 pub mod models;
 pub mod notes;
