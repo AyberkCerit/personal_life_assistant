@@ -148,6 +148,16 @@ impl AppNotifier {
 }
 
 impl Notifier for AppNotifier {
+    /// FR-MEM-006: the worker (it has the model) summarises the days that need it.
+    fn maintenance(&self) {
+        use tauri::Manager;
+        let state = self.app.state::<crate::commands::AppState>();
+        let guard = state.session.lock().expect("session lock");
+        if let Some(session) = guard.as_ref() {
+            session.worker.send(crate::worker::Command::Summarize { only: None, cache_path: session.cache_path.clone() });
+        }
+    }
+
     fn reminder(&self, reminder: &DueReminder) {
         let _ = self.app.emit("reminder-due", reminder);
         #[cfg(windows)]

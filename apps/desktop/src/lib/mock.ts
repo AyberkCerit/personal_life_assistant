@@ -503,6 +503,12 @@ export async function mockBackend<T>(cmd: string, args: Record<string, unknown>)
     case "set_paused":
       for (const cb of mockListeners.get("paused-changed") ?? []) cb(Boolean(args.paused));
       return undefined as T;
+    case "day_summary":
+      return (/daily\/\d{4}\/\d{4}-\d{2}-\d{2}\.md$/.test(String(args.path))
+        ? { date: "2026-10-06", past: true, summary: { date: "2026-10-06", text: "- Asistan paneli bitti [[PLA]]\n- Akşam spor [[2026-10-06]]", sources: [String(args.path)], generated_at: new Date().toISOString(), stale: false } }
+        : null) as T;
+    case "summary_regenerate":
+      return undefined as T;
     case "memory_status":
       return { installed: false, entry: { id: "embeddinggemma-300m-q8", name: "EmbeddingGemma 300M (Q8_0)", file_name: "embeddinggemma-300M-Q8_0.gguf", size: 333590944, sha256: "", url: "", source: "Hugging Face · ggml-org", licence: "Gemma Terms of Use", licence_url: "https://ai.google.dev/gemma/terms" }, download: null, pending: 0, total: 0 } as T;
     case "memory_download_start":

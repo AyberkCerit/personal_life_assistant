@@ -45,6 +45,13 @@ fn embed_step(conn: &rusqlite::Connection, job: &MemoryJob, stop: &AtomicBool, l
             eprintln!("PLA: embedding failed: {e}");
         }
     }
+    // FR-MEM-008: the days' summaries get vectors once the chunks have theirs
+    if memory::pending(conn, &model).unwrap_or(pending) == 0 {
+        let pause_or_stop = AtomicBool::new(stop.load(Ordering::SeqCst) || job.pause.load(Ordering::SeqCst));
+        if let Err(e) = pla_core::summary::embed_pending(conn, embedder.as_mut(), std::time::Instant::now() + SLICE, &pause_or_stop) {
+            eprintln!("PLA: embedding summaries failed: {e}");
+        }
+    }
     let now = (memory::pending(conn, &model).unwrap_or(pending), total);
     if *last != Some(now) {
         *last = Some(now);

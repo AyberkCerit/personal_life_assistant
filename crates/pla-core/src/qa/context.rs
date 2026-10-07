@@ -115,6 +115,11 @@ pub fn build(cache: &Connection, question: &str, turns: &[Turn], now: DateTime<F
     // FR-MEM-005: chunks from the hybrid search (keywords alone until the embedding model is there)
     let mut found = String::new();
     let mut sources: Vec<String> = Vec::new();
+    // a third of the share is kept for the days the summaries point at: the chunks would often
+    // fill it all, and a vague "what did I do that day" needs those days most (final review I4)
+    let days = crate::summary::find_days(cache, question, memory, 2)?;
+    let day_share = if days.is_empty() { 0 } else { found_budget / 3 };
+    found_budget -= day_share;
     for h in crate::memory::hybrid(cache, question, memory, reports, 12)? {
         if in_recent.contains(&h.note_path) {
             if !sources.contains(&h.note_path) {
@@ -131,6 +136,36 @@ pub fn build(cache: &Connection, question: &str, turns: &[Turn], now: DateTime<F
         found.push_str(&block);
         if !sources.contains(&h.note_path) {
             sources.push(h.note_path);
+        }
+    }
+    // FR-MEM-008: a day's summary only points at the day; its notes' raw text is what goes in
+    found_budget += day_share;
+    for day in days {
+        for path in crate::summary::source_paths(cache, day)? {
+            if sources.contains(&path) || in_recent.contains(&path) {
+                continue;
+            }
+            let hits: Vec<crate::memory::ChunkHit> = cache
+                .prepare(
+                    "SELECT c.note_path, coalesce(n.title, ''), c.heading, c.text, coalesce(n.mtime, 0) FROM chunk c
+                     LEFT JOIN note_index n ON n.note_path = c.note_path WHERE c.note_path = ?1 ORDER BY c.ord LIMIT 2",
+                )?
+                .query_map([&path], |r| {
+                    Ok(crate::memory::ChunkHit { note_path: r.get(0)?, title: r.get(1)?, heading: r.get(2)?, text: r.get(3)?, mtime: r.get(4)?, score: 0.0 })
+                })?
+                .collect::<Result<_, _>>()?;
+            for h in hits {
+                let block = chunk_block(&h);
+                let cost = tokens(&block);
+                if cost > found_budget {
+                    continue;
+                }
+                found_budget -= cost;
+                found.push_str(&block);
+                if !sources.contains(&h.note_path) {
+                    sources.push(h.note_path);
+                }
+            }
         }
     }
     Ok(Context { recent, found, turns: kept, sources, tool_budget })
@@ -167,6 +202,21 @@ mod tests {
         assert!(ctx.found.contains("Karar: Tauri"), "the chunk that matters");
         assert_eq!(ctx.sources, ["notes/PLA.md"]);
         assert_eq!(ctx.tool_budget, (WINDOW - RESERVED - tokens("PLA projesinde hangi kararları aldık?")) / 5);
+    }
+
+    #[test]
+    fn a_summary_brings_its_days_raw_notes_not_itself() {
+        // FR-MEM-008: the summary finds the day, the answer reads the notes
+        let (_t, conn) = cache();
+        let old = now().timestamp_millis() - 9 * 86_400_000;
+        index::index_note(&conn, "notes/Toplantı.md", "# Toplantı\n\nBütçe kararı: 40 bin.", old, 10).unwrap();
+        let day = crate::summary::day_of(old).unwrap();
+        let src = crate::summary::sources(&conn, &crate::vault::Folders::default(), day).unwrap();
+        crate::summary::save(&conn, &src, "- Yönetim kurulu buluştu [[Toplantı]]", now()).unwrap();
+        let ctx = build(&conn, "yönetim kurulu ne dedi", &[], now(), None, "reports").unwrap();
+        assert!(ctx.found.contains("Bütçe kararı: 40 bin"), "the raw note: {}", ctx.found);
+        assert!(!ctx.found.contains("Yönetim kurulu buluştu"), "not the summary");
+        assert_eq!(ctx.sources, ["notes/Toplantı.md"]);
     }
 
     #[test]

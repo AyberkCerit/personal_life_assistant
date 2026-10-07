@@ -476,7 +476,7 @@
         />
       {:else if current}
         {#key current}
-          <Editor bind:this={editor} path={current} {reveal} onSavedCopy={() => void refresh()} onOpenLink={(target) => void followLink(target)} suggest={suggestLinks} onTag={(tag) => void searchTag(tag)} />
+          <Editor bind:this={editor} path={current} {reveal} onSavedCopy={() => void refresh()} onOpenLink={(target) => void followLink(target)} suggest={suggestLinks} onTag={(tag) => void searchTag(tag)} onOpenNote={(p) => void openNote(p)} onOpenCited={(target) => void openCited(target)} />
         {/key}
       {:else}
         <EmptyState icon={FileText} title={t("editor.empty")} />

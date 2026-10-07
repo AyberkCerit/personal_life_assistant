@@ -41,6 +41,9 @@ pub enum Command {
     DropModel(std::sync::mpsc::Sender<()>),
     /// FR-QA-003: answer a question with the same model; extraction waits (see `WorkerHandle::ask`).
     Ask(AskJob),
+    /// FR-MEM-006: summarise the days that need it (maintenance), or `only` this day (the user
+    /// asked for it again).
+    Summarize { only: Option<chrono::NaiveDate>, cache_path: std::path::PathBuf },
     Shutdown,
 }
 
@@ -83,6 +86,8 @@ pub struct WorkerHandle {
     pause: Arc<AtomicBool>,
     dropping: Arc<AtomicBool>,
     asking: Arc<AtomicUsize>,
+    /// Stops a running summary request: a question, a model removal or closing comes first.
+    interrupt: Arc<AtomicBool>,
     /// The Stop switch of the question being answered: closing the session flips it (final review C2).
     ask_cancel: Arc<Mutex<Option<Arc<AtomicBool>>>>,
     join: Option<JoinHandle<()>>,
@@ -103,6 +108,7 @@ impl WorkerHandle {
     /// drops the model; `done` hears when llama-server is gone (settings final review I1).
     pub fn drop_model(&self, done: Sender<()>) {
         self.dropping.store(true, Ordering::SeqCst);
+        self.interrupt.store(true, Ordering::SeqCst);
         self.send(Command::DropModel(done));
     }
 
@@ -110,6 +116,7 @@ impl WorkerHandle {
     /// (the rest stays queued, as with a pause) and goes on after the answer.
     pub fn ask(&self, job: AskJob) {
         self.asking.fetch_add(1, Ordering::SeqCst);
+        self.interrupt.store(true, Ordering::SeqCst);
         *self.ask_cancel.lock().expect("ask lock") = Some(Arc::clone(&job.cancel));
         self.send(Command::Ask(job));
     }
@@ -122,6 +129,7 @@ impl WorkerHandle {
 
     fn stop(&mut self) {
         self.cancel.store(true, Ordering::SeqCst);
+        self.interrupt.store(true, Ordering::SeqCst);
         if let Some(c) = self.ask_cancel.lock().expect("ask lock").as_ref() {
             c.store(true, Ordering::SeqCst); // a question must not hold up a vault switch or quitting
         }
@@ -193,6 +201,8 @@ pub struct AddedItem {
 }
 
 type AddedListener = Box<dyn Fn(&[AddedItem]) + Send>;
+/// A day summarised (`None`) or why it was not (`no_model`, `busy`, `no_notes`, `model`).
+type SummaryListener = Box<dyn Fn(&str, Option<&str>) + Send>;
 
 type Notify = Box<dyn Fn(&WorkerStatus) + Send>;
 type Clock = Box<dyn Fn() -> DateTime<FixedOffset> + Send>;
@@ -212,7 +222,10 @@ pub struct Worker {
     pause: Arc<AtomicBool>,
     dropping: Arc<AtomicBool>,
     asking: Arc<AtomicUsize>,
+    interrupt: Arc<AtomicBool>,
     on_added: Option<AddedListener>,
+    /// Hears each day summarised (the note's box refreshes).
+    on_summary: Option<SummaryListener>,
     /// Reads titles of added items while the main connection is busy in the pipeline.
     reader: Option<Connection>,
 }
@@ -234,7 +247,9 @@ impl Worker {
             pause: Arc::new(AtomicBool::new(false)),
             dropping: Arc::new(AtomicBool::new(false)),
             asking: Arc::new(AtomicUsize::new(0)),
+            interrupt: Arc::new(AtomicBool::new(false)),
             on_added: None,
+            on_summary: None,
             reader,
             status: WorkerStatus { queued: 0, model, busy: false, last_error: None, added: 0, paused: false },
         }
@@ -242,6 +257,11 @@ impl Worker {
 
     pub fn with_added_listener(mut self, listener: AddedListener) -> Self {
         self.on_added = Some(listener);
+        self
+    }
+
+    pub fn with_summary_listener(mut self, listener: SummaryListener) -> Self {
+        self.on_summary = Some(listener);
         self
     }
 
@@ -262,10 +282,10 @@ impl Worker {
 
     pub fn spawn(self) -> WorkerHandle {
         let (tx, rx) = mpsc::channel();
-        let (cancel, pause, dropping, asking) =
-            (Arc::clone(&self.cancel), Arc::clone(&self.pause), Arc::clone(&self.dropping), Arc::clone(&self.asking));
+        let (cancel, pause, dropping, asking, interrupt) =
+            (Arc::clone(&self.cancel), Arc::clone(&self.pause), Arc::clone(&self.dropping), Arc::clone(&self.asking), Arc::clone(&self.interrupt));
         let join = std::thread::Builder::new().name("pla-worker".into()).spawn(move || self.run(rx)).expect("spawn worker");
-        WorkerHandle { tx, cancel, pause, dropping, asking, ask_cancel: Arc::new(Mutex::new(None)), join: Some(join) }
+        WorkerHandle { tx, cancel, pause, dropping, asking, interrupt, ask_cancel: Arc::new(Mutex::new(None)), join: Some(join) }
     }
 
     fn run(mut self, rx: Receiver<Command>) {
@@ -312,6 +332,10 @@ impl Worker {
                     self.ask(job);
                     self.asking.fetch_sub(1, Ordering::SeqCst);
                     self.process(); // what the question interrupted
+                }
+                Ok(Command::Summarize { only, cache_path }) => {
+                    self.summarize(only, &cache_path);
+                    self.process(); // what the summaries waited for
                 }
                 Ok(Command::Rescan) => {
                     if let Err(e) = enqueue_all(&self.vault, &self.conn, (self.clock)()) {
@@ -401,6 +425,76 @@ impl Worker {
         }
         self.status.model = self.model_state();
         self.status.queued = queued_notes(&self.conn).map_or(0, |q| q.len());
+        self.publish();
+    }
+
+    /// FR-MEM-006/007: one day at a time, newest first; a question, a pause or closing stops it
+    /// between two days (the rest waits for the next maintenance). Only cache.db is written.
+    fn summarize(&mut self, only: Option<chrono::NaiveDate>, cache_path: &std::path::Path) {
+        // a day the user asked for always hears how it went (final review I2)
+        let tell = |listener: &Option<SummaryListener>, why: &str| {
+            if let (Some(day), Some(l)) = (only, listener) {
+                l(&day.format("%Y-%m-%d").to_string(), Some(why));
+            }
+        };
+        if self.status.paused && only.is_none() {
+            return; // background AI paused (FR-SCH-014); a day the user asks for still goes
+        }
+        self.interrupt.store(false, Ordering::SeqCst);
+        let Some(model) = self.extractor.as_mut().and_then(|x| x.chat_model()) else {
+            tell(&self.on_summary, "no_model");
+            return;
+        };
+        let Ok(cache) = pla_core::db::connect(cache_path) else {
+            tell(&self.on_summary, "model");
+            return;
+        };
+        let folders = self.vault.config.folders.clone();
+        let today = (self.clock)().date_naive();
+        let days = match only {
+            Some(d) => vec![d],
+            None => pla_core::summary::plan(&cache, &folders, today).unwrap_or_default(),
+        };
+        for day in days {
+            let interrupted = self.cancel.load(Ordering::SeqCst)
+                || self.dropping.load(Ordering::SeqCst)
+                || self.asking.load(Ordering::SeqCst) > 0
+                || (self.pause.load(Ordering::SeqCst) && only.is_none());
+            if interrupted {
+                tell(&self.on_summary, "busy");
+                break;
+            }
+            let Ok(sources) = pla_core::summary::sources(&cache, &folders, day) else { continue };
+            if sources.notes.is_empty() {
+                tell(&self.on_summary, "no_notes");
+                continue;
+            }
+            self.status.busy = true;
+            (self.notify)(&self.status);
+            // a question, a model removal or closing stops the request itself (final review I3)
+            match pla_core::summary::summarize(model, &sources, &self.interrupt) {
+                Ok(text) if !text.is_empty() => {
+                    if pla_core::summary::save(&cache, &sources, &text, (self.clock)()).is_ok() {
+                        if let Some(listener) = &self.on_summary {
+                            listener(&day.format("%Y-%m-%d").to_string(), None);
+                        }
+                    }
+                }
+                Ok(_) => tell(&self.on_summary, "model"),
+                Err(LlmError::Cancelled) => {
+                    tell(&self.on_summary, "busy");
+                    break;
+                }
+                Err(e) => {
+                    // the model is not answering: the next maintenance tries again, and it shows
+                    self.status.last_error = Some(e.to_string());
+                    tell(&self.on_summary, "model");
+                    break;
+                }
+            }
+        }
+        self.status.busy = false;
+        self.status.model = self.model_state();
         self.publish();
     }
 
@@ -640,6 +734,52 @@ mod tests {
         drop(handle);
         assert!(started.elapsed() < Duration::from_secs(2), "closing took {:?}", started.elapsed());
         assert!(rx.try_iter().any(|e| matches!(e, QaEvent::Done { .. })), "the stopped turn still ends");
+    }
+
+    #[test]
+    fn past_days_are_summarised_into_the_cache_only() {
+        // FR-MEM-006/007
+        let tmp = tempfile::tempdir().unwrap();
+        let vault = open_vault(tmp.path()).unwrap();
+        let data = tmp.path().join(".data");
+        let dbs = open_databases(&data).unwrap();
+        let old = Local::now().timestamp_millis() - 3 * 86_400_000;
+        pla_core::index::index_note(&dbs.cache, "notes/a.md", "# A\n\nBütçe toplantısı.", old, 10).unwrap();
+        let (tx, rx) = std::sync::mpsc::channel();
+        let tx = Mutex::new(tx);
+        let handle = Worker::new(vault, dbs.pla, Some(Box::new(Chatty { extract_delay: Duration::ZERO })), Box::new(|_| {}))
+            .with_summary_listener(Box::new(move |d, _| {
+                let _ = tx.lock().unwrap().send(d.to_owned());
+            }))
+            .spawn();
+        handle.send(Command::Summarize { only: None, cache_path: data.join("cache.db") });
+        let day = rx.recv_timeout(Duration::from_secs(10)).expect("a day was summarised");
+        let reader = rusqlite::Connection::open(data.join("cache.db")).unwrap();
+        let saved: i64 = reader.query_row("SELECT count(*) FROM daily_summary WHERE date = ?1", [&day], |r| r.get(0)).unwrap();
+        assert_eq!(saved, 1);
+        assert_eq!(task_count(&data), 0, "a summary never writes records");
+        handle.shutdown();
+    }
+
+    #[test]
+    fn a_day_asked_for_without_a_model_hears_why() {
+        // final review I2: the box must not show "summarising…" forever
+        let tmp = tempfile::tempdir().unwrap();
+        let vault = open_vault(tmp.path()).unwrap();
+        let data = tmp.path().join(".data");
+        let dbs = open_databases(&data).unwrap();
+        let (tx, rx) = std::sync::mpsc::channel();
+        let tx = Mutex::new(tx);
+        let handle = Worker::new(vault, dbs.pla, None, Box::new(|_| {}))
+            .with_summary_listener(Box::new(move |d, why| {
+                let _ = tx.lock().unwrap().send((d.to_owned(), why.map(str::to_owned)));
+            }))
+            .spawn();
+        let day = chrono::NaiveDate::from_ymd_opt(2026, 10, 5).unwrap();
+        handle.send(Command::Summarize { only: Some(day), cache_path: data.join("cache.db") });
+        let (d, why) = rx.recv_timeout(Duration::from_secs(5)).expect("an answer");
+        assert_eq!((d.as_str(), why.as_deref()), ("2026-10-05", Some("no_model")));
+        handle.shutdown();
     }
 
     #[test]
