@@ -28,6 +28,8 @@ pub trait Notifier: Send {
     fn tasks_changed(&self);
     /// A backup ran (or failed), so the settings screen can refresh its status.
     fn backup_changed(&self) {}
+    /// The daily maintenance window is open: the model may summarise past days (FR-MEM-006).
+    fn maintenance(&self) {}
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -124,6 +126,7 @@ impl Scheduler {
             && self.probe.on_ac_power()
         {
             self.run_maintenance(now);
+            self.notifier.maintenance();
         }
     }
 

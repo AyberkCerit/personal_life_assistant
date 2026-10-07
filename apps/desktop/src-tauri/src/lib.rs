@@ -4,6 +4,7 @@ mod commands;
 pub mod fileops_cmds;
 pub mod media_cmds;
 pub mod memory_cmds;
+pub mod summary_cmds;
 pub mod qa_cmds;
 pub mod indexer;
 pub mod links_cmds;
@@ -98,6 +99,8 @@ pub fn run() {
             memory_cmds::memory_status,
             memory_cmds::memory_download_start,
             memory_cmds::memory_download_pause,
+            summary_cmds::day_summary,
+            summary_cmds::summary_regenerate,
             links_cmds::search_notes,
             links_cmds::quick_open,
             links_cmds::backlinks,

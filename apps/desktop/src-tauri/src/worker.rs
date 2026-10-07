@@ -41,6 +41,9 @@ pub enum Command {
     DropModel(std::sync::mpsc::Sender<()>),
     /// FR-QA-003: answer a question with the same model; extraction waits (see `WorkerHandle::ask`).
     Ask(AskJob),
+    /// FR-MEM-006: summarise the days that need it (maintenance), or `only` this day (the user
+    /// asked for it again).
+    Summarize { only: Option<chrono::NaiveDate>, cache_path: std::path::PathBuf },
     Shutdown,
 }
 
@@ -193,6 +196,7 @@ pub struct AddedItem {
 }
 
 type AddedListener = Box<dyn Fn(&[AddedItem]) + Send>;
+type SummaryListener = Box<dyn Fn(&str) + Send>;
 
 type Notify = Box<dyn Fn(&WorkerStatus) + Send>;
 type Clock = Box<dyn Fn() -> DateTime<FixedOffset> + Send>;
@@ -213,6 +217,8 @@ pub struct Worker {
     dropping: Arc<AtomicBool>,
     asking: Arc<AtomicUsize>,
     on_added: Option<AddedListener>,
+    /// Hears each day summarised (the note's box refreshes).
+    on_summary: Option<SummaryListener>,
     /// Reads titles of added items while the main connection is busy in the pipeline.
     reader: Option<Connection>,
 }
@@ -235,6 +241,7 @@ impl Worker {
             dropping: Arc::new(AtomicBool::new(false)),
             asking: Arc::new(AtomicUsize::new(0)),
             on_added: None,
+            on_summary: None,
             reader,
             status: WorkerStatus { queued: 0, model, busy: false, last_error: None, added: 0, paused: false },
         }
@@ -242,6 +249,11 @@ impl Worker {
 
     pub fn with_added_listener(mut self, listener: AddedListener) -> Self {
         self.on_added = Some(listener);
+        self
+    }
+
+    pub fn with_summary_listener(mut self, listener: SummaryListener) -> Self {
+        self.on_summary = Some(listener);
         self
     }
 
@@ -312,6 +324,10 @@ impl Worker {
                     self.ask(job);
                     self.asking.fetch_sub(1, Ordering::SeqCst);
                     self.process(); // what the question interrupted
+                }
+                Ok(Command::Summarize { only, cache_path }) => {
+                    self.summarize(only, &cache_path);
+                    self.process(); // what the summaries waited for
                 }
                 Ok(Command::Rescan) => {
                     if let Err(e) = enqueue_all(&self.vault, &self.conn, (self.clock)()) {
@@ -401,6 +417,52 @@ impl Worker {
         }
         self.status.model = self.model_state();
         self.status.queued = queued_notes(&self.conn).map_or(0, |q| q.len());
+        self.publish();
+    }
+
+    /// FR-MEM-006/007: one day at a time, newest first; a question, a pause or closing stops it
+    /// between two days (the rest waits for the next maintenance). Only cache.db is written.
+    fn summarize(&mut self, only: Option<chrono::NaiveDate>, cache_path: &std::path::Path) {
+        if self.status.paused && only.is_none() {
+            return; // background AI paused (FR-SCH-014); a day the user asks for still goes
+        }
+        let Some(model) = self.extractor.as_mut().and_then(|x| x.chat_model()) else { return };
+        let Ok(cache) = pla_core::db::connect(cache_path) else { return };
+        let folders = self.vault.config.folders.clone();
+        let today = (self.clock)().date_naive();
+        let days = match only {
+            Some(d) => vec![d],
+            None => pla_core::summary::plan(&cache, &folders, today).unwrap_or_default(),
+        };
+        let never = AtomicBool::new(false);
+        for day in days {
+            let interrupted = self.cancel.load(Ordering::SeqCst)
+                || self.dropping.load(Ordering::SeqCst)
+                || self.asking.load(Ordering::SeqCst) > 0
+                || (self.pause.load(Ordering::SeqCst) && only.is_none());
+            if interrupted {
+                break;
+            }
+            let Ok(sources) = pla_core::summary::sources(&cache, &folders, day) else { continue };
+            if sources.notes.is_empty() {
+                continue;
+            }
+            self.status.busy = true;
+            (self.notify)(&self.status);
+            match pla_core::summary::summarize(model, &sources, &never) {
+                Ok(text) if !text.is_empty() => {
+                    if pla_core::summary::save(&cache, &sources, &text, (self.clock)()).is_ok() {
+                        if let Some(listener) = &self.on_summary {
+                            listener(&day.format("%Y-%m-%d").to_string());
+                        }
+                    }
+                }
+                Ok(_) => {}
+                Err(_) => break, // the model is not answering: the next maintenance tries again
+            }
+        }
+        self.status.busy = false;
+        self.status.model = self.model_state();
         self.publish();
     }
 
@@ -640,6 +702,31 @@ mod tests {
         drop(handle);
         assert!(started.elapsed() < Duration::from_secs(2), "closing took {:?}", started.elapsed());
         assert!(rx.try_iter().any(|e| matches!(e, QaEvent::Done { .. })), "the stopped turn still ends");
+    }
+
+    #[test]
+    fn past_days_are_summarised_into_the_cache_only() {
+        // FR-MEM-006/007
+        let tmp = tempfile::tempdir().unwrap();
+        let vault = open_vault(tmp.path()).unwrap();
+        let data = tmp.path().join(".data");
+        let dbs = open_databases(&data).unwrap();
+        let old = Local::now().timestamp_millis() - 3 * 86_400_000;
+        pla_core::index::index_note(&dbs.cache, "notes/a.md", "# A\n\nBütçe toplantısı.", old, 10).unwrap();
+        let (tx, rx) = std::sync::mpsc::channel();
+        let tx = Mutex::new(tx);
+        let handle = Worker::new(vault, dbs.pla, Some(Box::new(Chatty { extract_delay: Duration::ZERO })), Box::new(|_| {}))
+            .with_summary_listener(Box::new(move |d| {
+                let _ = tx.lock().unwrap().send(d.to_owned());
+            }))
+            .spawn();
+        handle.send(Command::Summarize { only: None, cache_path: data.join("cache.db") });
+        let day = rx.recv_timeout(Duration::from_secs(10)).expect("a day was summarised");
+        let reader = rusqlite::Connection::open(data.join("cache.db")).unwrap();
+        let saved: i64 = reader.query_row("SELECT count(*) FROM daily_summary WHERE date = ?1", [&day], |r| r.get(0)).unwrap();
+        assert_eq!(saved, 1);
+        assert_eq!(task_count(&data), 0, "a summary never writes records");
+        handle.shutdown();
     }
 
     #[test]
