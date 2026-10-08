@@ -118,12 +118,16 @@ pub fn strings() -> &'static Strings {
     pick(UI_LANG.load(Ordering::SeqCst), os_turkish())
 }
 
+/// `tauri.conf.json > identifier`, which the installer writes on the Start menu shortcut as its
+/// AppUserModelID: Windows shows a release build's notifications under that name (build.rs).
+pub(crate) const IDENTIFIER: &str = env!("PLA_IDENTIFIER");
+
 pub(crate) fn app_id() -> &'static str {
     // Decision 8: an unpackaged dev build has no registered app id.
     if cfg!(debug_assertions) {
         tauri_winrt_notification::Toast::POWERSHELL_APP_ID
     } else {
-        "dev.ayberkcerit.pla"
+        IDENTIFIER
     }
 }
 

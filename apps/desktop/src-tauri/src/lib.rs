@@ -190,4 +190,39 @@ mod tests {
         let conf: serde_json::Value = serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
         assert_eq!(conf["bundle"]["resources"]["llama/"], "llama/");
     }
+
+    #[test]
+    fn every_manifest_carries_the_same_version() {
+        // Packaging: the installer's name, the About screen and Windows' app list agree
+        let conf: serde_json::Value = serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
+        let npm: serde_json::Value = serde_json::from_str(include_str!("../../package.json")).unwrap();
+        let version = conf["version"].as_str().unwrap();
+        assert_eq!(npm["version"], version);
+        assert_eq!(env!("CARGO_PKG_VERSION"), version);
+        assert!(include_str!("../../../../crates/pla-core/Cargo.toml").contains(&format!("version = \"{version}\"")));
+    }
+
+    #[test]
+    fn notifications_use_the_identifier_the_installer_registers() {
+        // Packaging: the Start menu shortcut's AppUserModelID is the bundle identifier
+        let conf: serde_json::Value = serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
+        assert_eq!(conf["identifier"], crate::notify::IDENTIFIER);
+    }
+
+    #[test]
+    fn the_installer_is_per_user_and_keeps_the_vault_safe() {
+        // Owner decisions 2026-10-08: NSIS for this user only, no admin; WebView2 bootstrapper inside
+        let conf: serde_json::Value = serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
+        let bundle = &conf["bundle"];
+        assert_eq!(bundle["active"], true);
+        assert_eq!(bundle["targets"], serde_json::json!(["nsis"]));
+        let nsis = &bundle["windows"]["nsis"];
+        assert_eq!(nsis["installMode"], "currentUser");
+        assert_eq!(nsis["installerHooks"], "installer/hooks.nsh");
+        assert_eq!(bundle["windows"]["webviewInstallMode"]["type"], "embedBootstrapper");
+        // NFR-SEC-010: the hook deletes PLA's folders only when asked, and never one holding the vault
+        let hooks = include_str!("../installer/hooks.nsh");
+        assert!(hooks.contains("$DeleteAppDataCheckboxState = 1"), "only when the box is ticked");
+        assert!(hooks.contains("/M=.pla"), "looks for a vault first");
+    }
 }
