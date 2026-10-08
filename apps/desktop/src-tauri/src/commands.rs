@@ -244,6 +244,10 @@ pub fn open_vault(app: AppHandle, state: State<AppState>, path: String) -> Resul
 
 /// Opens `path` as the vault and remembers it; the caller holds the settings lock.
 fn open_vault_locked(app: &AppHandle, state: &State<AppState>, path: &Path) -> Result<VaultInfo, String> {
+    // NFR-SEC-010: the uninstaller may delete PLA's own folders, so a vault never lives there
+    if pla_core::vault::inside_app_data(path, &pla_core::vault::app_data_roots()) {
+        return Err(format!("app_data|{}", path.display()));
+    }
     let root = app_root()?;
     let settings = load_settings(&root).map_err(|e| e.to_string())?.settings;
     // Stop the previous vault before opening the next, outside the lock: one writer per pla.db.

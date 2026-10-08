@@ -16,6 +16,7 @@ pub enum PrepareError {
     Network(PathBuf),
     NotFolder(PathBuf),
     Relative(PathBuf),
+    AppData(PathBuf),
     NotWritable { path: PathBuf, reason: String },
 }
 
@@ -25,6 +26,7 @@ impl std::fmt::Display for PrepareError {
             Self::Network(p) => write!(f, "network|{}", p.display()),
             Self::NotFolder(p) => write!(f, "not_folder|{}", p.display()),
             Self::Relative(p) => write!(f, "relative|{}", p.display()),
+            Self::AppData(p) => write!(f, "app_data|{}", p.display()),
             Self::NotWritable { path, reason } => write!(f, "not_writable|{}|{reason}", path.display()),
         }
     }
@@ -40,6 +42,7 @@ pub fn prepare_folder(path: &Path) -> Result<bool, PrepareError> {
         FolderState::Network => return Err(PrepareError::Network(path.to_path_buf())),
         FolderState::NotFolder => return Err(PrepareError::NotFolder(path.to_path_buf())),
         FolderState::Relative => return Err(PrepareError::Relative(path.to_path_buf())),
+        FolderState::AppData => return Err(PrepareError::AppData(path.to_path_buf())),
         FolderState::Missing => {
             std::fs::create_dir_all(path).map_err(not_writable)?;
             true
@@ -188,6 +191,16 @@ mod tests {
         assert_eq!(prepare_folder(unc), Err(PrepareError::Network(unc.to_path_buf())));
         assert_eq!(std::env::current_dir().unwrap(), before);
         assert!(!before.join("Notlar").exists(), "nothing created next to the process");
+    }
+
+    #[test]
+    fn plas_own_data_folders_are_refused() {
+        // NFR-SEC-010: the uninstaller may delete them
+        let Some(root) = pla_core::vault::app_data_roots().into_iter().next() else { return };
+        let inside = root.join("Notlar");
+        assert_eq!(prepare_folder(&inside), Err(PrepareError::AppData(inside.clone())));
+        assert!(!inside.exists(), "nothing created");
+        assert!(PrepareError::AppData(inside).to_string().starts_with("app_data|"));
     }
 
     #[test]

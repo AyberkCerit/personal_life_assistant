@@ -340,7 +340,7 @@ export async function mockBackend<T>(cmd: string, args: Record<string, unknown>)
     case "inspect_vault_folder": {
       // Browser check: the name picks the state ("notlar" = notes, "\\\\" = network, ".txt" = file).
       const p = String(args.path).trim();
-      const state = p.startsWith("\\\\") ? "network" : !/^[A-Za-z]:[\\/]/.test(p) ? "relative" : p.endsWith(".txt") ? "not_folder" : /notlar/i.test(p) ? "notes" : "missing";
+      const state = p.startsWith("\\\\") ? "network" : !/^[A-Za-z]:[\\/]/.test(p) ? "relative" : /appdata[\\/](roaming|local)[\\/]pla([\\/]|$)/i.test(p) ? "app_data" : p.endsWith(".txt") ? "not_folder" : /notlar/i.test(p) ? "notes" : "missing";
       return { check: { state, md_files: state === "notes" ? 128 : 0, more: false }, in_onedrive: /onedrive/i.test(p) } as T;
     }
     case "setup_vault":

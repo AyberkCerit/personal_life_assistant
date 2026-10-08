@@ -125,6 +125,8 @@ pub enum FolderState {
     NotFolder,
     /// Not a full path (`Notlar`, `C:Notlar`): it would depend on PLA's working folder.
     Relative,
+    /// Inside PLA's own data folders, which the uninstaller may delete (NFR-SEC-010).
+    AppData,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -157,6 +159,9 @@ pub fn folder_state(path: &Path) -> FolderState {
     }
     if !path.is_absolute() {
         return FolderState::Relative;
+    }
+    if inside_app_data(path, &app_data_roots()) {
+        return FolderState::AppData;
     }
     if !path.exists() {
         return FolderState::Missing;
@@ -233,6 +238,22 @@ pub fn data_dir(app_root: &Path, vault_id: &str) -> Result<PathBuf, VaultError> 
 /// `%APPDATA%/PLA` on Windows.
 pub fn default_app_root() -> Option<PathBuf> {
     std::env::var_os("APPDATA").map(|p| PathBuf::from(p).join("PLA"))
+}
+
+/// PLA's own folders: `%APPDATA%\PLA` (settings, databases) and `%LOCALAPPDATA%\PLA` (models). The
+/// uninstaller may delete both (NFR-SEC-010), so neither may hold the vault.
+pub fn app_data_roots() -> Vec<PathBuf> {
+    ["APPDATA", "LOCALAPPDATA"].iter().filter_map(|k| std::env::var_os(k)).map(|p| PathBuf::from(p).join("PLA")).collect()
+}
+
+/// Whether `path` is one of `roots` or inside one, compared as Windows does (case-insensitively).
+pub fn inside_app_data(path: &Path, roots: &[PathBuf]) -> bool {
+    let parts = |p: &Path| p.components().map(|c| c.as_os_str().to_string_lossy().to_lowercase()).collect::<Vec<_>>();
+    let path = parts(path);
+    roots.iter().any(|root| {
+        let root = parts(root);
+        !root.is_empty() && path.starts_with(&root)
+    })
 }
 
 const ROOT_MARKER: &str = "vault_root";
@@ -446,6 +467,18 @@ notes = \"Notlar/Arşiv\"
         std::fs::write(tmp.path().join(".pla/config"), "vault_id = \"../../evil\"\n").unwrap();
         assert!(matches!(open_vault(tmp.path()), Err(VaultError::InvalidVaultId(_))));
         assert!(matches!(data_dir(Path::new("C:/app"), "../x"), Err(VaultError::InvalidVaultId(_))));
+    }
+
+    #[test]
+    fn a_folder_inside_plas_own_data_cannot_be_the_vault() {
+        // NFR-SEC-010: the uninstaller may delete these folders; a vault there would go with them
+        let roots = [PathBuf::from(r"C:\Users\a\AppData\Roaming\PLA"), PathBuf::from(r"C:\Users\a\AppData\Local\PLA")];
+        for p in [r"C:\Users\a\AppData\Roaming\PLA", r"c:\users\A\appdata\roaming\pla\Notlar", r"C:\Users\a\AppData\Local\PLA\models\x"] {
+            assert!(inside_app_data(Path::new(p), &roots), "{p}");
+        }
+        for p in [r"C:\Users\a\AppData\Roaming\PLA Notlar", r"C:\Users\a\AppData\Roaming", r"D:\PLA", r"C:\Users\a\Documents\PLA Vault"] {
+            assert!(!inside_app_data(Path::new(p), &roots), "{p}");
+        }
     }
 
     #[test]
