@@ -10,7 +10,7 @@
    ```
 
 2. Kurulumu çalıştır. Yönetici izni istemez; PLA yalnız senin kullanıcı hesabına,
-   `%LOCALAPPDATA%\Programs\PLA` altına kurulur.
+   `%LOCALAPPDATA%\PLA` altına kurulur.
 3. **"Windows bilgisayarınızı korudu" uyarısı:** PLA henüz kod imzası taşımıyor, bu yüzden
    SmartScreen bilinmeyen yayıncı uyarısı gösterir. **Ek bilgi → Yine de çalıştır** ile devam et.
 4. Windows 10'da WebView2 yoksa kurulum onu kendiliğinden yükler (internet gerekir); Windows 11'de
@@ -31,7 +31,9 @@ olduğu gibi kalır. PLA kendiliğinden güncellenmez ve güncelleme denetimi i�
   Yeniden kurarsan her şey kaldığı yerden sürer.
 - **İşaretli:** şunlar da silinir:
   - `%APPDATA%\PLA`: ayarlar, görevler, metrikler, asistan geçmişi, yedekler;
-  - `%LOCALAPPDATA%\PLA`: indirilen dil ve embedding modelleri.
+  - `%LOCALAPPDATA%\PLA`: indirilen dil ve embedding modelleri (program da buradadır).
+
+Kutu boşken modeller program silindikten sonra da `%LOCALAPPDATA%\PLA\models` içinde kalır.
 
 **Notların (vault klasörün) hiçbir durumda silinmez.** PLA vault'u kendi veri klasörlerinin içine
 koymana izin vermez; yine de orada bir vault bulunursa kaldırıcı o klasörü silmeden bırakır.
@@ -43,7 +45,7 @@ koymana izin vermez; yine de orada bir vault bulunursa kaldırıcı o klasörü 
 | Notların | Seçtiğin vault klasörü (PLA'ya ait değil) |
 | Ayarlar, görevler, metrikler, asistan geçmişi | `%APPDATA%\PLA` |
 | Dil ve embedding modelleri | `%LOCALAPPDATA%\PLA\models` |
-| Program | `%LOCALAPPDATA%\Programs\PLA` |
+| Program | `%LOCALAPPDATA%\PLA` (modellerin yanında) |
 
 ## Kurulum dosyasını kendin derlemek
 

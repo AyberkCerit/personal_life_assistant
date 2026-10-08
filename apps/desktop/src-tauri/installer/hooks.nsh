@@ -29,12 +29,19 @@ FunctionEnd
   ${EndIf}
 !macroend
 
+!macro NSIS_HOOK_POSTINSTALL
+  ; The uninstaller takes its language from this value and asks with a dialog when it is missing;
+  ; Tauri writes it only when the installer shows its own language selector, which PLA does not.
+  WriteRegStr HKCU "${MANUPRODUCTKEY}" "Installer Language" $LANGUAGE
+!macroend
+
 !macro NSIS_HOOK_POSTUNINSTALL
   ; an update uninstalls the old version first: everything stays then
   ${If} $UpdateMode <> 1
     SetShellVarContext current
     ; WebView2's cache and storage, which PLA does not use for anything of the user's
-    RmDir /r "$LOCALAPPDATA\${BUNDLEID}"
+    ; /REBOOTOK: WebView2 processes may still hold files for a moment after PLA was closed
+    RmDir /r /REBOOTOK "$LOCALAPPDATA\${BUNDLEID}"
     ${If} $DeleteAppDataCheckboxState = 1
       !insertmacro PLA_DELETE_UNLESS_VAULT "$APPDATA\PLA"
       !insertmacro PLA_DELETE_UNLESS_VAULT "$LOCALAPPDATA\PLA"

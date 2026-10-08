@@ -224,5 +224,7 @@ mod tests {
         let hooks = include_str!("../installer/hooks.nsh");
         assert!(hooks.contains("$DeleteAppDataCheckboxState = 1"), "only when the box is ticked");
         assert!(hooks.contains("/M=.pla"), "looks for a vault first");
+        // without this value the uninstaller opens with a language dialog
+        assert!(hooks.contains("\"Installer Language\" $LANGUAGE"));
     }
 }
