@@ -334,13 +334,13 @@ export async function mockBackend<T>(cmd: string, args: Record<string, unknown>)
   const path = String(args.path ?? "");
   switch (cmd) {
     case "startup":
-      return { vault_path: vault, first_run: vault === null, show_wizard: !setupDone, language: mockLang, settings_recovered: false, theme: "dark", error: null, inbox: vault ? "inbox" : null } as T;
+      return { vault_path: vault, first_run: vault === null, show_wizard: !setupDone, language: mockLang, settings_recovered: false, theme: "dark", error: null, inbox: vault ? "inbox" : null, vault_in_app_data: false } as T;
     case "wizard_defaults":
       return { suggested_vault: String.raw`C:\Users\ayse\OneDrive\Belgeler\PLA Vault` } as T;
     case "inspect_vault_folder": {
       // Browser check: the name picks the state ("notlar" = notes, "\\\\" = network, ".txt" = file).
       const p = String(args.path).trim();
-      const state = p.startsWith("\\\\") ? "network" : !/^[A-Za-z]:[\\/]/.test(p) ? "relative" : p.endsWith(".txt") ? "not_folder" : /notlar/i.test(p) ? "notes" : "missing";
+      const state = p.startsWith("\\\\") ? "network" : !/^[A-Za-z]:[\\/]/.test(p) ? "relative" : /appdata[\\/](roaming|local)[\\/]pla([\\/]|$)/i.test(p) ? "app_data" : p.endsWith(".txt") ? "not_folder" : /notlar/i.test(p) ? "notes" : "missing";
       return { check: { state, md_files: state === "notes" ? 128 : 0, more: false }, in_onedrive: /onedrive/i.test(p) } as T;
     }
     case "setup_vault":

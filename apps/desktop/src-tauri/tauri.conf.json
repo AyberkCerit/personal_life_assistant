@@ -17,5 +17,24 @@
       "csp": "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:"
     }
   },
-  "bundle": { "active": false, "resources": { "llama/": "llama/" }, "icon": ["icons/32x32.png", "icons/128x128.png", "icons/icon.ico"] }
+  "bundle": {
+    "active": true,
+    "targets": ["nsis"],
+    "resources": { "llama/": "llama/" },
+    "icon": ["icons/32x32.png", "icons/128x128.png", "icons/icon.ico"],
+    "publisher": "Ayberk Cerit",
+    "copyright": "© 2026 Ayberk Cerit",
+    "shortDescription": "Offline personal assistant for your notes",
+    "windows": {
+      "webviewInstallMode": { "type": "embedBootstrapper", "silent": true },
+      "nsis": {
+        "installMode": "currentUser",
+        "languages": ["Turkish", "English"],
+        "displayLanguageSelector": false,
+        "customLanguageFiles": { "Turkish": "installer/Turkish.nsh", "English": "installer/English.nsh" },
+        "installerHooks": "installer/hooks.nsh",
+        "installerIcon": "icons/icon.ico"
+      }
+    }
+  }
 }

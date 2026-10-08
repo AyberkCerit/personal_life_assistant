@@ -76,3 +76,6 @@ research/f1-model-eval/.venv/
 # Superpowers implementation plans (kept locally, not versioned)
 docs/superpowers/
 .superpowers/
+
+# Release installers (npm run release)
+dist-release/

@@ -4,15 +4,13 @@ import { copyFileSync, existsSync, mkdirSync, readdirSync, rmSync } from "node:f
 import { spawnSync } from "node:child_process";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { LLAMA_BUILD as BUILD, LLAMA_FILES as FILES } from "./release-lib.mjs";
 
-const BUILD = "11280";
 const here = dirname(fileURLToPath(import.meta.url));
 const desktop = resolve(here, "..");
 const fromArg = process.argv.indexOf("--from");
 const source = fromArg > 0 ? resolve(process.argv[fromArg + 1]) : resolve(desktop, "../../research/f1-model-eval/bin");
 const target = join(desktop, "src-tauri", "llama");
-// Measured: llama-server does not start without any of these (plan Task 3).
-const FILES = ["llama-server.exe", "llama-server-impl.dll", "llama.dll", "llama-common.dll", "ggml.dll", "ggml-base.dll", "mtmd.dll", "libomp.dll", "LICENSE-LLVM-OpenMP"];
 
 if (!existsSync(join(source, "llama-server.exe"))) {
   console.error(`No llama-server.exe in ${source}. Pass --from <folder> with llama.cpp b${BUILD} (Windows x64, CPU).`);

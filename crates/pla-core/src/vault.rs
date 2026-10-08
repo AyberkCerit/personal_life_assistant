@@ -125,6 +125,8 @@ pub enum FolderState {
     NotFolder,
     /// Not a full path (`Notlar`, `C:Notlar`): it would depend on PLA's working folder.
     Relative,
+    /// Inside PLA's own data folders, which the uninstaller may delete (NFR-SEC-010).
+    AppData,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -157,6 +159,9 @@ pub fn folder_state(path: &Path) -> FolderState {
     }
     if !path.is_absolute() {
         return FolderState::Relative;
+    }
+    if inside_app_data(path, &app_data_roots()) {
+        return FolderState::AppData;
     }
     if !path.exists() {
         return FolderState::Missing;
@@ -233,6 +238,56 @@ pub fn data_dir(app_root: &Path, vault_id: &str) -> Result<PathBuf, VaultError> 
 /// `%APPDATA%/PLA` on Windows.
 pub fn default_app_root() -> Option<PathBuf> {
     std::env::var_os("APPDATA").map(|p| PathBuf::from(p).join("PLA"))
+}
+
+/// PLA's own folders: `%APPDATA%\PLA` (settings, databases) and `%LOCALAPPDATA%\PLA` (models). The
+/// uninstaller may delete both (NFR-SEC-010), so neither may hold the vault.
+pub fn app_data_roots() -> Vec<PathBuf> {
+    ["APPDATA", "LOCALAPPDATA"].iter().filter_map(|k| std::env::var_os(k)).map(|p| PathBuf::from(p).join("PLA")).collect()
+}
+
+/// Whether `path` is one of `roots` or inside one, compared as Windows does (case-insensitively),
+/// both as written and where it really is (junctions, `\\?\`, `..`; final review M3).
+pub fn inside_app_data(path: &Path, roots: &[PathBuf]) -> bool {
+    let within = |p: &[String]| roots.iter().any(|r| [parts(r), parts(&resolved(r))].iter().any(|r| !r.is_empty() && p.starts_with(r)));
+    within(&parts(path)) || within(&parts(&resolved(path)))
+}
+
+/// `p`'s components in lower case, `\\?\C:` read as `C:` and `.`/`..` applied.
+fn parts(p: &Path) -> Vec<String> {
+    let text = p.to_string_lossy();
+    let plain = text.strip_prefix(r"\\?\").filter(|t| t.as_bytes().get(1) == Some(&b':')).unwrap_or(&text);
+    let mut out: Vec<String> = Vec::new();
+    for c in Path::new(plain).components() {
+        match c {
+            std::path::Component::CurDir => {}
+            std::path::Component::ParentDir => {
+                if out.len() > 2 {
+                    out.pop();
+                }
+            }
+            c => out.push(c.as_os_str().to_string_lossy().to_lowercase()),
+        }
+    }
+    out
+}
+
+/// `p` with its nearest existing ancestor resolved by the file system (a junction becomes its target).
+fn resolved(p: &Path) -> PathBuf {
+    let mut rest = Vec::new();
+    let mut at = p;
+    loop {
+        if let Ok(real) = std::fs::canonicalize(at) {
+            return rest.iter().rev().fold(real, |acc: PathBuf, c| acc.join(c));
+        }
+        match (at.parent(), at.file_name()) {
+            (Some(parent), Some(name)) => {
+                rest.push(name.to_owned());
+                at = parent;
+            }
+            _ => return p.to_path_buf(),
+        }
+    }
 }
 
 const ROOT_MARKER: &str = "vault_root";
@@ -446,6 +501,32 @@ notes = \"Notlar/Arşiv\"
         std::fs::write(tmp.path().join(".pla/config"), "vault_id = \"../../evil\"\n").unwrap();
         assert!(matches!(open_vault(tmp.path()), Err(VaultError::InvalidVaultId(_))));
         assert!(matches!(data_dir(Path::new("C:/app"), "../x"), Err(VaultError::InvalidVaultId(_))));
+    }
+
+    #[test]
+    fn a_folder_inside_plas_own_data_cannot_be_the_vault() {
+        // NFR-SEC-010: the uninstaller may delete these folders; a vault there would go with them
+        let roots = [PathBuf::from(r"C:\Users\a\AppData\Roaming\PLA"), PathBuf::from(r"C:\Users\a\AppData\Local\PLA")];
+        for p in [r"C:\Users\a\AppData\Roaming\PLA", r"c:\users\A\appdata\roaming\pla\Notlar", r"C:\Users\a\AppData\Local\PLA\models\x", r"\\?\C:\Users\a\AppData\Roaming\PLA\Notlar", r"C:\Users\a\AppData\Roaming\x\..\PLA\Notlar"] {
+            assert!(inside_app_data(Path::new(p), &roots), "{p}");
+        }
+        for p in [r"C:\Users\a\AppData\Roaming\PLA Notlar", r"C:\Users\a\AppData\Roaming", r"D:\PLA", r"C:\Users\a\Documents\PLA Vault"] {
+            assert!(!inside_app_data(Path::new(p), &roots), "{p}");
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_junction_into_plas_data_is_seen_through() {
+        // final review M3: the check compares where the folder really is
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().join("PLA");
+        std::fs::create_dir_all(root.join("Notlar")).unwrap();
+        let link = tmp.path().join("kisayol");
+        let ok = std::process::Command::new("cmd").args(["/C", "mklink", "/J"]).arg(&link).arg(&root).output().unwrap().status.success();
+        assert!(ok, "mklink /J");
+        assert!(inside_app_data(&link.join("Notlar"), &[root.clone()]));
+        assert!(inside_app_data(&link.join("Yeni klasör"), &[root]), "a folder still to be made");
     }
 
     #[test]

@@ -22,11 +22,11 @@ export function prevStep(step: Step): Step {
   return STEPS[Math.max(STEPS.indexOf(step) - 1, 0)];
 }
 
-export type FolderState = "missing" | "empty" | "notes" | "other" | "network" | "not_folder" | "relative";
+export type FolderState = "missing" | "empty" | "notes" | "other" | "network" | "not_folder" | "relative" | "app_data";
 export interface FolderReport { check: { state: FolderState; md_files: number; more: boolean }; in_onedrive: boolean }
 export interface Advice { key: Key; tone: "info" | "warning" | "danger"; usable: boolean; count?: string }
 
-const REFUSED: FolderState[] = ["network", "not_folder", "relative"];
+const REFUSED: FolderState[] = ["network", "not_folder", "relative", "app_data"];
 
 /** What choosing this folder will do, shown before the user commits to it (FR-SET-005…007). */
 export function folderAdvice(report: FolderReport): Advice[] {
@@ -44,7 +44,7 @@ const REASONS: Record<string, Key> = { access_denied: "wizard.reason.access_deni
 /** Reads `setup_vault`'s `<code>|<path>|<reason>` errors; anything else is shown as it came. */
 export function setupError(err: string): { key: Key; path: string; reason: string; reasonKey?: Key } {
   const [code, path = "", ...rest] = err.split("|");
-  if (code === "network" || code === "not_folder" || code === "not_writable" || code === "relative") {
+  if (code === "network" || code === "not_folder" || code === "not_writable" || code === "relative" || code === "app_data") {
     const reason = rest.join("|");
     return reason in REASONS ? { key: `wizard.error.${code}` as Key, path, reason: "", reasonKey: REASONS[reason] } : { key: `wizard.error.${code}` as Key, path, reason };
   }

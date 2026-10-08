@@ -18,6 +18,7 @@ describe("first-run wizard", () => {
     expect(folderAdvice(report("network"))[0]).toMatchObject({ tone: "danger", usable: false });
     expect(folderAdvice(report("not_folder"))[0]).toMatchObject({ tone: "danger", usable: false });
     expect(folderAdvice(report("relative"))[0]).toMatchObject({ key: "wizard.folder.relative", tone: "danger", usable: false });
+    expect(folderAdvice(report("app_data"))[0]).toMatchObject({ key: "wizard.folder.app_data", tone: "danger", usable: false });
     const synced = folderAdvice(report("empty", 0, true));
     expect(synced.map((a) => a.key)).toEqual(["wizard.folder.empty", "wizard.folder.onedrive"]);
     expect(synced[1]).toMatchObject({ tone: "warning", usable: true });
@@ -32,6 +33,7 @@ describe("first-run wizard", () => {
     expect(setupError(String.raw`not_writable|C:\Windows\Kasa|access_denied`)).toMatchObject({ reason: "", reasonKey: "wizard.reason.access_denied" });
     expect(setupError(String.raw`network|\\sunucu\paylasim`)).toEqual({ key: "wizard.error.network", path: String.raw`\\sunucu\paylasim`, reason: "" });
     expect(setupError("relative|Notlar")).toMatchObject({ key: "wizard.error.relative", path: "Notlar" });
+    expect(setupError(String.raw`app_data|C:\Users\a\AppData\Roaming\PLA\Notlar`)).toMatchObject({ key: "wizard.error.app_data", path: String.raw`C:\Users\a\AppData\Roaming\PLA\Notlar` });
     expect(setupError("something else")).toEqual({ key: "wizard.error.other", path: "", reason: "something else" });
   });
 
