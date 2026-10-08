@@ -54,6 +54,7 @@
   let reveal = $state<string | null>(null);
   let editor: ReturnType<typeof Editor> | undefined = $state();
   let error = $state<string | null>(null);
+  let vaultInAppData = $state(false);
   let settingsOpen = $state(false);
   // The middle pane: the note editor or the metrics view (SRS S-06).
   let center = $state<"editor" | "metrics">("editor");
@@ -346,6 +347,7 @@
       wizard = info.show_wizard;
       document.documentElement.dataset.theme = info.theme;
       error = info.error;
+      vaultInAppData = info.vault_in_app_data;
       vaultPath = info.vault_path;
       inbox = info.inbox ?? "inbox";
       if (vaultPath) {
@@ -466,6 +468,7 @@
       <MemoryBanner languageModel={status.model !== "not_installed"} />
       <ReminderBanner version={tasksVersion + panelEdits} onChanged={() => tasksVersion++} />
       {#if error}<Banner kind="danger" icon={CircleAlert} role="alert">{t("error.generic")}: {error}</Banner>{/if}
+      {#if vaultInAppData}<Banner kind="warning" icon={CircleAlert} role="alert">{t("vault.inAppData")}</Banner>{/if}
       {#if center === "metrics"}
         <MetricsView
           bind:selected={metricKind}

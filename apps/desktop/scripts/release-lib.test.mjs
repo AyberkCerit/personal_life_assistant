@@ -1,14 +1,21 @@
 import { describe, expect, it } from "vitest";
-import { LLAMA_FILES, installerName, llamaProblems, signConfig, versionProblems } from "./release-lib.mjs";
+import { LLAMA_FILES, LLAMA_REQUIRED, installerName, llamaProblems, signConfig, strayFiles, versionProblems } from "./release-lib.mjs";
 
 describe("release checks", () => {
   it("names the llama-server files that are missing", () => {
-    // without them the installed PLA cannot run a language model
-    const all = [...LLAMA_FILES, "ggml-cpu-haswell.dll", "README.md"];
+    // without them the installed PLA cannot run a language model, or ships without its licence
+    const all = [...LLAMA_REQUIRED, "ggml-cpu-haswell.dll", "README.md"];
+    expect(LLAMA_REQUIRED).toContain("LICENSE-llama.cpp.txt");
     expect(llamaProblems(all)).toEqual([]);
     expect(llamaProblems(all.filter((f) => f !== "llama.dll"))).toEqual(["llama.dll"]);
-    expect(llamaProblems(LLAMA_FILES)).toEqual(["ggml-cpu-*.dll"]);
-    expect(llamaProblems(["README.md"])).toHaveLength(LLAMA_FILES.length + 1);
+    expect(llamaProblems(LLAMA_REQUIRED)).toEqual(["ggml-cpu-*.dll"]);
+    expect(llamaProblems(["README.md"])).toHaveLength(LLAMA_REQUIRED.length + 1);
+  });
+
+  it("finds files that do not belong in the installer", () => {
+    // final review M6: the whole llama/ folder is bundled
+    expect(strayFiles([...LLAMA_REQUIRED, "ggml-cpu-haswell.dll", "README.md"])).toEqual([]);
+    expect(strayFiles(["llama.dll", "gemma.gguf", "notlar.txt"])).toEqual(["gemma.gguf", "notlar.txt"]);
   });
 
   it("wants one version in every manifest", () => {
@@ -24,7 +31,8 @@ describe("release checks", () => {
     // owner decision: unsigned until there is a certificate (NFR-SEC-009)
     expect(signConfig(undefined)).toBeNull();
     expect(signConfig("  ")).toBeNull();
-    expect(JSON.parse(signConfig("signtool sign /a %1"))).toEqual({ bundle: { windows: { signCommand: "signtool sign /a %1" } } });
+    expect(signConfig("signtool sign /a %1")).toEqual({ bundle: { windows: { signCommand: "signtool sign /a %1" } } });
     expect(() => signConfig("signtool sign /a")).toThrow(/%1/);
+    expect(() => signConfig("cmd /C echo %1>>log")).toThrow(/separate/);
   });
 });

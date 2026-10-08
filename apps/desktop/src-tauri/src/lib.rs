@@ -220,10 +220,13 @@ mod tests {
         assert_eq!(nsis["installMode"], "currentUser");
         assert_eq!(nsis["installerHooks"], "installer/hooks.nsh");
         assert_eq!(bundle["windows"]["webviewInstallMode"]["type"], "embedBootstrapper");
-        // NFR-SEC-010: the hook deletes PLA's folders only when asked, and never one holding the vault
+        // NFR-SEC-010: what the hooks do is tested with makensis (scripts/installer-hooks.test.mjs);
+        // here, that Tauri's installer calls them: it inserts only these macro names
         let hooks = include_str!("../installer/hooks.nsh");
-        assert!(hooks.contains("$DeleteAppDataCheckboxState = 1"), "only when the box is ticked");
-        assert!(hooks.contains("/M=.pla"), "looks for a vault first");
+        for name in ["NSIS_HOOK_POSTINSTALL", "NSIS_HOOK_PREUNINSTALL", "NSIS_HOOK_POSTUNINSTALL"] {
+            assert!(hooks.contains(&format!("!macro {name}\n")) || hooks.contains(&format!("!macro {name}\r\n")), "{name}");
+        }
+        assert!(hooks.contains("!insertmacro PLA_REMOVE_DATA \"$APPDATA\\PLA\" \"$LOCALAPPDATA\\PLA\""), "on PLA's real folders");
         // without this value the uninstaller opens with a language dialog
         assert!(hooks.contains("\"Installer Language\" $LANGUAGE"));
     }

@@ -98,6 +98,9 @@ pub struct StartupInfo {
     theme: String,
     error: Option<String>,
     inbox: Option<String>,
+    /// The remembered vault lies in PLA's own data folders (from before PLA refused that): it still
+    /// opens, but the user is told to move it before uninstalling (NFR-SEC-010).
+    vault_in_app_data: bool,
 }
 
 #[derive(Serialize)]
@@ -217,10 +220,12 @@ pub fn startup(app: AppHandle, state: State<AppState>) -> Result<StartupInfo, St
         theme: theme.to_owned(),
         error: None,
         inbox: None,
+        vault_in_app_data: false,
     };
     if let Some(running) = state.session.lock().expect("session lock").as_ref() {
         info.vault_path = Some(running.vault.root.to_string_lossy().into_owned());
         info.inbox = Some(running.vault.config.folders.inbox.clone());
+        info.vault_in_app_data = pla_core::vault::inside_app_data(&running.vault.root, &pla_core::vault::app_data_roots());
         return Ok(info);
     }
     if let Some(path) = loaded.settings.vault_path.clone() {
@@ -228,6 +233,7 @@ pub fn startup(app: AppHandle, state: State<AppState>) -> Result<StartupInfo, St
             Ok(session) => {
                 info.vault_path = Some(session.vault.root.to_string_lossy().into_owned());
                 info.inbox = Some(session.vault.config.folders.inbox.clone());
+                info.vault_in_app_data = pla_core::vault::inside_app_data(&session.vault.root, &pla_core::vault::app_data_roots());
                 *state.session.lock().expect("session lock") = Some(session);
             }
             Err(e) => info.error = Some(format!("{}: {e}", path.display())),
@@ -239,7 +245,7 @@ pub fn startup(app: AppHandle, state: State<AppState>) -> Result<StartupInfo, St
 #[tauri::command]
 pub fn open_vault(app: AppHandle, state: State<AppState>, path: String) -> Result<VaultInfo, String> {
     let _settings_guard = state.settings_lock.lock().expect("settings lock");
-    open_vault_locked(&app, &state, Path::new(&path))
+    open_vault_locked(&app, &state, &crate::wizard::clean_path(&path))
 }
 
 /// Opens `path` as the vault and remembers it; the caller holds the settings lock.

@@ -35,6 +35,8 @@ export interface StartupInfo {
   theme: "dark" | "light";
   error: string | null;
   inbox: string | null;
+  /** The vault lies in PLA's own data folders, which uninstalling may delete (NFR-SEC-010). */
+  vault_in_app_data: boolean;
 }
 export interface WorkerStatus {
   queued: number;

@@ -334,7 +334,7 @@ export async function mockBackend<T>(cmd: string, args: Record<string, unknown>)
   const path = String(args.path ?? "");
   switch (cmd) {
     case "startup":
-      return { vault_path: vault, first_run: vault === null, show_wizard: !setupDone, language: mockLang, settings_recovered: false, theme: "dark", error: null, inbox: vault ? "inbox" : null } as T;
+      return { vault_path: vault, first_run: vault === null, show_wizard: !setupDone, language: mockLang, settings_recovered: false, theme: "dark", error: null, inbox: vault ? "inbox" : null, vault_in_app_data: false } as T;
     case "wizard_defaults":
       return { suggested_vault: String.raw`C:\Users\ayse\OneDrive\Belgeler\PLA Vault` } as T;
     case "inspect_vault_folder": {

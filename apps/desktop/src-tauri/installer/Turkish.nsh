@@ -27,3 +27,4 @@ LangString webview2Downloading ${LANG_TURKISH} "WebView2 önyükleyicisi indiril
 LangString webview2InstallError ${LANG_TURKISH} "Hata: WebView2 yüklemesi $1 hata koduyla başarısız oldu."
 LangString webview2InstallSuccess ${LANG_TURKISH} "WebView2 başarıyla yüklendi"
 LangString deleteAppData ${LANG_TURKISH} "Verilerimi de sil (görevler, ayarlar, modeller)"
+LangString plaFolderKept ${LANG_TURKISH} "Bu klasör silinmedi, çünkü içinde notların ya da başka bir yere giden bir bağlantı var. İçindekileri kontrol edip istersen kendin silebilirsin:"

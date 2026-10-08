@@ -27,3 +27,4 @@ LangString webview2Downloading ${LANG_ENGLISH} "Downloading WebView2 bootstrappe
 LangString webview2InstallError ${LANG_ENGLISH} "Error: Installing WebView2 failed with exit code $1"
 LangString webview2InstallSuccess ${LANG_ENGLISH} "WebView2 installed successfully"
 LangString deleteAppData ${LANG_ENGLISH} "Also delete my data (tasks, settings, models)"
+LangString plaFolderKept ${LANG_ENGLISH} "This folder was not deleted because it holds your notes or a link to somewhere else. Check what is inside and delete it yourself if you want:"
