@@ -1,4 +1,4 @@
-﻿; Tauri English.nsh (tauri-cli 2.12.1, MIT/Apache-2.0) with PLA's text for the uninstaller's
+; Tauri English.nsh (tauri-cli 2.12.1, MIT/Apache-2.0) with PLA's text for the uninstaller's
 ; "delete app data" box: it also removes %APPDATA%\PLA and %LOCALAPPDATA%\PLA (hooks.nsh).
 LangString addOrReinstall ${LANG_ENGLISH} "Add/Reinstall components"
 LangString alreadyInstalled ${LANG_ENGLISH} "Already Installed"
