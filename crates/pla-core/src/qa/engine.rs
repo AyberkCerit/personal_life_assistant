@@ -297,6 +297,21 @@ fn worth_suggesting(question: &str, done: &[ToolRecord]) -> bool {
     !question.trim_end().ends_with('?') && words >= 4 && !done.iter().any(|r| r.ok && r.tool != "search_notes")
 }
 
+/// Where the message "bunu" points at was kept already: a note offered and saved, or written. The
+/// real window wrote it twice after Save.
+fn already_kept(question: &str, turns: &[Turn]) -> Option<String> {
+    if !points_back(question) && question.split_whitespace().count() > 4 {
+        return None;
+    }
+    let earlier = referred(turns)?;
+    let turn = turns.iter().rev().find(|t| t.question == earlier)?;
+    turn.tools.iter().find_map(|r| match r.tool.as_str() {
+        "suggest_note" => r.result["saved"].as_str().map(str::to_owned),
+        "create_note" if r.ok => r.result["note"].as_str().map(str::to_owned),
+        _ => None,
+    })
+}
+
 /// A task id the user's words led to: found by query_tasks for this very question. The eval saw the
 /// model add a task and then complete it in the same breath.
 fn found_by_query(done: &[ToolRecord], id: &str) -> bool {
@@ -409,8 +424,11 @@ pub fn answer(
             break; // done already (the real window saw one task added three times): answer now
         }
         on(Progress::Working(Some(tool.clone())));
+        let kept = (tool == "create_note").then(|| already_kept(question, turns)).flatten();
         let ran = if tool == "complete_task" && !found_by_query(&shown, args["task_id"].as_str().unwrap_or_default()) {
             Err("take the task_id from a query_tasks call for what the user said they did".to_owned())
+        } else if let Some(path) = kept {
+            Err(format!("that is saved already as the note {path}; tell the user, write nothing"))
         } else {
             tools::run(env, &tool, &args)
         };
@@ -716,6 +734,29 @@ mod tests {
         assert_eq!(t("06:00", "at 6am"), "06:00");
         assert_eq!(t("03:00", "03:00'te alarm"), "03:00", "written as early as it is");
         assert_eq!(t("10:00", "10'da toplantı"), "10:00");
+    }
+
+    #[test]
+    fn what_was_saved_already_is_not_written_twice() {
+        // the real window: Save on the offer, then "notlarıma ekle bunu" made "… Chapter 1 2.md"
+        let e = env();
+        let tool_env = ToolEnv { vault: &e.vault, pla: &e.pla, cache: &e.cache, now: now(), validation: ValidationSettings::default() };
+        let mut told = turn("bu gün derste işletim sistemleri öğrendik chapter 1 olarak");
+        told.tools = vec![ToolRecord {
+            tool: "suggest_note".into(),
+            args: json!({}),
+            ok: true,
+            result: json!({ "suggested": true, "title": "Ders", "body": "x", "saved": "notes/Ders.md" }),
+            error: None,
+            undo: None,
+        }];
+        let call = "{\"tool\":\"create_note\",\"args\":{\"title\":\"Ders\",\"body\":\"İşletim sistemleri chapter 1\"}}";
+        let mut model = scripted(&[call, call], "Zaten kayıtlı.");
+        let a = answer(&mut model, &tool_env, "notlarıma ekle bunu", &[told], None, "tr", &AtomicBool::new(false), &mut |_| {}).unwrap();
+        assert!(!a.tools.iter().any(|t| t.tool == "create_note" && t.ok), "{:?}", a.tools);
+        assert!(!e.vault.root.join("notes").exists() || std::fs::read_dir(e.vault.root.join("notes")).unwrap().next().is_none());
+        let heard = model.bodies[1]["messages"].as_array().unwrap().iter().any(|m| m["content"].as_str().unwrap_or_default().contains("notes/Ders.md"));
+        assert!(heard, "the model is told where it is");
     }
 
     #[test]
