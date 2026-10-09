@@ -1,0 +1,32 @@
+// Extraction cases (nl-quality plan § 1): one block → model → guard → validation. Reference date 2026-10-09 (Friday) unless `ref`. expect: empty, none_of [kinds], items [partial fields; "value": null = no weight].
+{"id":"prog-guc1","cat":"program","text":"Güç 1 (Pazar)\n- Bench press: 4x4-6\n- Barbell row: 4x4-6\n- Overhead press: 3x4-6\n- Bar curl: 3x4-6\n- Triceps pushdown: 3x4-6","expect":{"none_of":["workout"]}}
+{"id":"prog-guc2","cat":"program","text":"Güç 2 (Pazartesi)\n- Squat: 4x5\n- Deadlift: 3-4x5 (RPE 8)\n- Leg press: 4x5\n- Leg curl: 3x8-10\n- Karın: 10-15 dk (cable crunch + ab wheel veya pallof press)","expect":{"none_of":["workout"]}}
+{"id":"prog-h1","cat":"program","text":"H1: itiş (Çarşamba)\n- Incline dumbbell press: 4x8-12\n- Machine chest press: 3x10-12\n- Seated dumbbell shoulder press: 3x10-12\n- Cable fly: 3x12-15\n- Lateral raise: 4x12-20","expect":{"none_of":["workout"]}}
+{"id":"prog-h2","cat":"program","text":"H2: çekiş (Perşembe)\n- Lat pulldown: 4x8-12\n- Seated cable row: 3x10-12\n- Face pull: 3x15\n- Dumbbell curl: 3x10-12\n- Hammer curl: 2x12","expect":{"none_of":["workout"]}}
+{"id":"prog-h3","cat":"program","text":"H3: bacak (Cuma)\n- Hack squat veya leg press (dar-orta ayak): 4x10-12\n- Romanian deadlift (hafif-orta): 3x8-10\n- Bulgarian split squat: 3x10/bacak\n- Leg extension: 3x12-15\n- Calf raise: 4x12-15","expect":{"none_of":["workout"]}}
+{"id":"prog-en","cat":"program","text":"Push day (Monday)\n- Bench press 4x6-8\n- Incline press 3x8-10\n- Lateral raises 3x12-15","expect":{"none_of":["workout"]}}
+{"id":"prog-plan-cumle","cat":"program","text":"Haftaya programım: pazartesi göğüs, çarşamba sırt, cuma bacak.","expect":{"none_of":["workout"]}}
+{"id":"prog-sabit-plan","cat":"program","text":"Antrenman planı:\nSquat 5x5\nBench 5x5\nRow 5x5","expect":{"none_of":["workout"]}}
+{"id":"prog-gelecek","cat":"program","text":"Yarın bench press 4x6 80 kg deneyeceğim.","expect":{"none_of":["workout"]}}
+{"id":"done-deadlift","cat":"workout","text":"Bugün deadlift 4x6 110 kg yaptım.","expect":{"items":[{"kind":"workout","exercise":"deadlift","sets":4,"reps":6,"value":110}]}}
+{"id":"done-bench-kilo","cat":"workout","text":"bench press 3x8 60 kilo","expect":{"items":[{"kind":"workout","exercise":"bench","sets":3,"reps":8,"value":60}]}}
+{"id":"done-sinav","cat":"workout","text":"Akşam 3x20 şınav çektim.","expect":{"items":[{"kind":"workout","sets":3,"reps":20,"value":null}]}}
+{"id":"done-no-kg","cat":"workout","text":"Bugün bench press 4x6 yaptım, iyi geçti.","expect":{"items":[{"kind":"workout","exercise":"bench","sets":4,"reps":6,"value":null}]}}
+{"id":"done-squat-en","cat":"workout","text":"Squats 5x5 at 100 kg today, felt strong.","expect":{"items":[{"kind":"workout","exercise":"squat","sets":5,"reps":5,"value":100}]}}
+{"id":"done-pullups-en","cat":"workout","text":"Did 4 sets of 8 pull-ups this morning.","expect":{"items":[{"kind":"workout","sets":4,"reps":8,"value":null}]}}
+{"id":"done-lb","cat":"workout","text":"Overhead press 3x5 at 95 lb.","expect":{"items":[{"kind":"workout","sets":3,"reps":5}]}}
+{"id":"done-list-log","cat":"workout","text":"Bugünkü antrenman:\n- Squat 4x5 100 kg\n- Leg press 3x10 180 kg","expect":{"items":[{"kind":"workout","exercise":"squat","value":100},{"kind":"workout","exercise":"leg press","value":180}]}}
+{"id":"done-dun","cat":"workout","text":"Dün 3x12 leg curl 40 kg yaptım.","expect":{"items":[{"kind":"workout","value":40,"date":"yesterday"}]}}
+{"id":"weight-kiloyum","cat":"weight","text":"130 kiloyum","expect":{"items":[{"kind":"weight","value":130}]}}
+{"id":"weight-tartildim","cat":"weight","text":"Sabah tartıldım, 78,4 kg.","expect":{"items":[{"kind":"weight","value":78.4}]}}
+{"id":"weight-hedef","cat":"weight","text":"Hedefim 75 kiloya inmek.","expect":{"empty":true}}
+{"id":"weight-en","cat":"weight","text":"Weighed in at 82.5 kg this morning.","expect":{"items":[{"kind":"weight","value":82.5}]}}
+{"id":"sleep-dun","cat":"other","text":"Dün gece 6 saat uyudum.","expect":{"items":[{"kind":"sleep","value":6}]}}
+{"id":"water-bardak","cat":"other","text":"Bugün 5 bardak su içtim.","expect":{"items":[{"kind":"water"}]}}
+{"id":"steps-bin","cat":"other","text":"12 bin adım attım bugün.","expect":{"items":[{"kind":"steps","value":12000}]}}
+{"id":"task-sinav","cat":"other","text":"20 ekimde işletim sistemleri vizesi var.","expect":{"items":[{"type":"task","date":"2026-10-20"}]}}
+{"id":"task-yarin-saat","cat":"other","text":"Yarın 10'da dişçi.","expect":{"items":[{"date":"tomorrow","time":"10:00"}]}}
+{"id":"diary-ders","cat":"other","text":"Bugün derste işletim sistemleri chapter 1'i işledik, süreçler konusu çok güzeldi.","expect":{"empty":true}}
+{"id":"diary-film","cat":"other","text":"Akşam arkadaşlarla film izledik, çok eğlendik.","expect":{"empty":true}}
+{"id":"recipe-not-metric","cat":"other","text":"Mercimek çorbası: 1 su bardağı mercimek, 2 litre su, 1 soğan.","expect":{"none_of":["water"]}}
+{"id":"shopping-list","cat":"other","text":"Alınacaklar: 2 kg domates, 1 kg peynir, 6 yumurta.","expect":{"none_of":["weight","workout"]}}

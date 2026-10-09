@@ -1,0 +1,72 @@
+// Assistant cases (nl-quality plan § 1). Now is Friday 2026-10-09 21:00. Keys: q, turns [[q, a]], notes [{path, text, age_h}], tasks, ui (tr|en); expect: lang, writes (exact set), reads, args, suggest, no_question, contains.
+{"id":"lang-selam","cat":"language","q":"selam","expect":{"lang":"tr","writes":[],"suggest":false}}
+{"id":"lang-merhaba","cat":"language","q":"merhaba","expect":{"lang":"tr","writes":[],"suggest":false}}
+{"id":"lang-naber","cat":"language","q":"naber nasılsın","expect":{"lang":"tr","writes":[],"suggest":false}}
+{"id":"lang-gunaydin","cat":"language","q":"günaydın","expect":{"lang":"tr","writes":[],"suggest":false}}
+{"id":"lang-tesekkur","cat":"language","q":"tesekkurler","expect":{"lang":"tr","writes":[],"suggest":false}}
+{"id":"lang-sa","cat":"language","q":"sa","expect":{"lang":"tr","writes":[],"suggest":false}}
+{"id":"lang-tamam","cat":"language","q":"tamam","turns":[["yarın neler var","Yarın için kayıtlı bir görevin yok."]],"expect":{"lang":"tr","writes":[]}}
+{"id":"lang-hi","cat":"language","q":"hi","ui":"tr","expect":{"lang":"en","writes":[],"suggest":false}}
+{"id":"lang-hello","cat":"language","q":"hello, how are you?","expect":{"lang":"en","writes":[],"suggest":false}}
+{"id":"lang-thanks","cat":"language","q":"thanks a lot","expect":{"lang":"en","writes":[],"suggest":false}}
+{"id":"lang-iyi-geceler","cat":"language","q":"iyi geceler","expect":{"lang":"tr","writes":[],"suggest":false}}
+{"id":"lang-en-ui-tr-short","cat":"language","q":"ok","turns":[["what is on my list tomorrow?","You have no tasks for tomorrow."]],"expect":{"lang":"en","writes":[]}}
+{"id":"metric-130-kiloyum","cat":"metric","q":"130 kiloyum","expect":{"lang":"tr","writes":["log_metric"],"args":{"log_metric":{"kind":"weight","value":130,"date":"today"}}}}
+{"id":"metric-kilom","cat":"metric","q":"kilom 78.5","expect":{"lang":"tr","writes":["log_metric"],"args":{"log_metric":{"kind":"weight","value":78.5}}}}
+{"id":"metric-sabah-kilo","cat":"metric","q":"bu sabah tartıldım 92 kilo çıktım","expect":{"lang":"tr","writes":["log_metric"],"args":{"log_metric":{"kind":"weight","value":92,"date":"today"}}}}
+{"id":"metric-weigh-en","cat":"metric","q":"I weigh 82 kg today","expect":{"lang":"en","writes":["log_metric"],"args":{"log_metric":{"kind":"weight","value":82}}}}
+{"id":"metric-uyku-dun","cat":"metric","q":"dün gece 6 saat uyudum","expect":{"lang":"tr","writes":["log_metric"],"args":{"log_metric":{"kind":"sleep","value":6}}}}
+{"id":"metric-sleep-en","cat":"metric","q":"slept 7 hours last night","expect":{"lang":"en","writes":["log_metric"],"args":{"log_metric":{"kind":"sleep","value":7}}}}
+{"id":"metric-su-bardak","cat":"metric","q":"bugün 3 bardak su içtim","expect":{"lang":"tr","writes":["log_metric"],"args":{"log_metric":{"kind":"water","value":3}}}}
+{"id":"metric-su-litre","cat":"metric","q":"2 litre su ictim","expect":{"lang":"tr","writes":["log_metric"],"args":{"log_metric":{"kind":"water","value":2}}}}
+{"id":"metric-water-en","cat":"metric","q":"drank 1.5 liters of water","expect":{"lang":"en","writes":["log_metric"],"args":{"log_metric":{"kind":"water","value":1.5}}}}
+{"id":"metric-adim","cat":"metric","q":"bugün 8000 adım attım","expect":{"lang":"tr","writes":["log_metric"],"args":{"log_metric":{"kind":"steps","value":8000}}}}
+{"id":"metric-adim-bin","cat":"metric","q":"10 bin adım yürüdüm","expect":{"lang":"tr","writes":["log_metric"],"args":{"log_metric":{"kind":"steps","value":10000}}}}
+{"id":"metric-steps-en","cat":"metric","q":"walked 12000 steps today","expect":{"lang":"en","writes":["log_metric"],"args":{"log_metric":{"kind":"steps","value":12000}}}}
+{"id":"metric-wish-not-weight","cat":"metric","q":"85 kilo olmak istiyorum","expect":{"lang":"tr","writes":[]}}
+{"id":"task-doktor","cat":"task","q":"Yarın saat 10'da doktor randevum var","expect":{"lang":"tr","writes":["add_task"],"args":{"add_task":{"date":"tomorrow","time":"10:00"}}}}
+{"id":"task-market","cat":"task","q":"pazartesi markete gitmem lazım","expect":{"lang":"tr","writes":["add_task"],"args":{"add_task":{"date":"2026-10-12"}}}}
+{"id":"task-fatura","cat":"task","q":"faturayı yatırmayı unutma, son gün 15 ekim","expect":{"lang":"tr","writes":["add_task"],"args":{"add_task":{"date":"2026-10-15"}}}}
+{"id":"task-annemi-ara","cat":"task","q":"yarın annemi arayacağım","expect":{"lang":"tr","writes":["add_task"],"args":{"add_task":{"date":"tomorrow"}}}}
+{"id":"task-rent-en","cat":"task","q":"I need to pay the rent on Monday","expect":{"lang":"en","writes":["add_task"],"args":{"add_task":{"date":"2026-10-12"}}}}
+{"id":"task-call-en","cat":"task","q":"remind me to call Ali tomorrow at 5 pm","expect":{"lang":"en","writes":["add_task"],"args":{"add_task":{"date":"tomorrow","time":"17:00"}}}}
+{"id":"task-sinav","cat":"task","q":"20 ekimde işletim sistemleri vizesi var","expect":{"lang":"tr","writes":["add_task"],"args":{"add_task":{"date":"2026-10-20"}}}}
+{"id":"task-no-time-copied","cat":"task","q":"cuma kargoyu al","turns":[["yarın 9'da toplantı var","Yarın saat 09:00 için toplantını ekledim."]],"expect":{"lang":"tr","writes":["add_task"],"args":{"add_task":{"date":"2026-10-16"}}}}
+{"id":"note-ekle-bunu","cat":"note","q":"notlarıma ekle bunu","turns":[["bu gün derste işletim sistemleri öğrendik chapter 1 olarak","Bugün işletim sistemleri dersinin 1. bölümünü öğrendiniz."]],"expect":{"lang":"tr","writes":["create_note"],"args":{"create_note":{"body":"işletim"}},"no_question":true}}
+{"id":"note-yeni-ona-ekle","cat":"note","q":"yeni not oluştur ona ekle","turns":[["bu gün derste işletim sistemleri öğrendik chapter 1 olarak","Bugün işletim sistemleri dersinin 1. bölümünü öğrendiniz."]],"expect":{"lang":"tr","writes":["create_note"],"args":{"create_note":{"body":"işletim"}},"no_question":true}}
+{"id":"note-sen-karar-ver","cat":"note","q":"sen karar ver","turns":[["bu gün derste işletim sistemleri öğrendik chapter 1 olarak","Bugün işletim sistemleri dersinin 1. bölümünü öğrendiniz."],["notlarıma ekle bunu","Yeni notun başlığı ne olsun?"]],"expect":{"lang":"tr","writes":["create_note"],"args":{"create_note":{"body":"işletim"}},"no_question":true}}
+{"id":"note-not-al-inline","cat":"note","q":"not al: kitap önerileri Suç ve Ceza, Sefiller, Dune","expect":{"lang":"tr","writes":["create_note"],"args":{"create_note":{"body":"Sefiller"}},"no_question":true}}
+{"id":"note-bunu-not-al","cat":"note","q":"bunu not al","turns":[["toplantıda bütçe 40 bin olarak onaylandı, teslim kasım sonu","Toplantıda bütçe 40 bin olarak onaylanmış, teslim kasım sonu."]],"expect":{"lang":"tr","writes":["create_note"],"args":{"create_note":{"body":"40"}},"no_question":true}}
+{"id":"note-kaydet","cat":"note","q":"bunu kaydet notlarıma","turns":[["wifi şifresi modemin altında yazıyor, misafir ağı PLA-guest","Wifi şifresi modemin altında, misafir ağı PLA-guest."]],"expect":{"lang":"tr","writes":["create_note"],"args":{"create_note":{"body":"guest"}},"no_question":true}}
+{"id":"note-make-en","cat":"note","q":"make a note of this","turns":[["the plumber said the boiler needs a new valve, about 120 euros","The plumber said the boiler needs a new valve for about 120 euros."]],"expect":{"lang":"en","writes":["create_note"],"args":{"create_note":{"body":"valve"}},"no_question":true}}
+{"id":"note-save-en","cat":"note","q":"save this to my notes: gift ideas for mom - scarf, book, plant","expect":{"lang":"en","writes":["create_note"],"args":{"create_note":{"body":"scarf"}},"no_question":true}}
+{"id":"note-olustur-baslikli","cat":"note","q":"tarifler diye bir not oluştur, mercimek çorbası: 1 su bardağı mercimek, 1 soğan, 1 havuç","expect":{"lang":"tr","writes":["create_note"],"args":{"create_note":{"title":"tarif","body":"mercimek"}},"no_question":true}}
+{"id":"note-gunluge-yaz","cat":"note","q":"günlüğüme yaz: bugün koşuya çıktım, hava çok güzeldi","expect":{"lang":"tr","writes":["create_note"],"args":{"create_note":{"body":"koşu"}},"no_question":true}}
+{"id":"suggest-ders","cat":"suggest","q":"bu gün derste işletim sistemleri öğrendik chapter 1 olarak","expect":{"lang":"tr","writes":[],"suggest":true}}
+{"id":"suggest-toplanti","cat":"suggest","q":"toplantıda bütçe 40 bin olarak onaylandı","expect":{"lang":"tr","writes":[],"suggest":true}}
+{"id":"suggest-kitap","cat":"suggest","q":"bugün Suç ve Ceza'yı bitirdim, sonu çok etkileyiciydi","expect":{"lang":"tr","writes":[],"suggest":true}}
+{"id":"suggest-fikir","cat":"suggest","q":"aklıma bir fikir geldi: PLA'ya sesli not özelliği eklenebilir","expect":{"lang":"tr","writes":[],"suggest":true}}
+{"id":"suggest-learned-en","cat":"suggest","q":"today I learned that Rust closures capture by reference by default","expect":{"lang":"en","writes":[],"suggest":true}}
+{"id":"suggest-meeting-en","cat":"suggest","q":"the team decided to ship version 2 in November","expect":{"lang":"en","writes":[],"suggest":true}}
+{"id":"suggest-not-greeting","cat":"suggest","q":"selam naber","expect":{"lang":"tr","writes":[],"suggest":false}}
+{"id":"suggest-not-question","cat":"suggest","q":"bugün ne yaptım?","notes":[{"path":"daily/2026/2026-10-09.md","text":"# 2026-10-09\n\nSabah spor salonuna gittim. Öğleden sonra işletim sistemleri dersi vardı.","age_h":3}],"expect":{"lang":"tr","writes":[],"suggest":false}}
+{"id":"suggest-not-thanks","cat":"suggest","q":"teşekkürler çok yardımcı oldun","expect":{"lang":"tr","writes":[],"suggest":false}}
+{"id":"suggest-not-task","cat":"suggest","q":"yarın 14:00'te dişçi randevum var","expect":{"lang":"tr","writes":["add_task"],"suggest":false}}
+{"id":"query-bugun","cat":"query","q":"bugün ne yaptım?","notes":[{"path":"daily/2026/2026-10-09.md","text":"# 2026-10-09\n\nSabah spor salonuna gittim. Öğleden sonra işletim sistemleri dersi vardı.","age_h":3}],"expect":{"lang":"tr","writes":[],"contains":["spor","işletim"]}}
+{"id":"query-karar","cat":"query","q":"PLA projesinde hangi kararları aldık?","notes":[{"path":"notes/PLA.md","text":"# PLA\n\nKarar: Tauri ve Svelte kullanılacak.\n\nKarar: model Gemma 4 E2B olacak.","age_h":400}],"expect":{"lang":"tr","writes":[],"contains":["tauri","gemma"]}}
+{"id":"query-uyku-hafta","cat":"query","q":"bu hafta kaç saat uyudum?","expect":{"lang":"tr","writes":[],"reads":["query_metrics"],"args":{"query_metrics":{"kind":"sleep"}}}}
+{"id":"query-kilo","cat":"query","q":"kaç kiloyum şu an?","expect":{"lang":"tr","writes":[],"reads":["query_metrics"],"args":{"query_metrics":{"kind":"weight"}}}}
+{"id":"query-yarin","cat":"query","q":"yarın ne işlerim var?","tasks":[{"title":"Annemi ara","date":"tomorrow"}],"expect":{"lang":"tr","writes":[],"reads":["query_tasks"],"contains":["anne"]}}
+{"id":"query-steps-en","cat":"query","q":"how many steps did I walk this week?","expect":{"lang":"en","writes":[],"reads":["query_metrics"],"args":{"query_metrics":{"kind":"steps"}}}}
+{"id":"query-tasks-en","cat":"query","q":"what do I have to do today?","tasks":[{"title":"Pay the bill","date":"today"}],"expect":{"lang":"en","writes":[],"reads":["query_tasks"],"contains":["bill"]}}
+{"id":"query-not-found","cat":"query","q":"geçen ay hangi filmleri izledim?","expect":{"lang":"tr","writes":[]}}
+{"id":"query-ders-notu","cat":"query","q":"işletim sistemleri dersinde neler gördük?","notes":[{"path":"notes/okul/İşletim Sistemleri.md","text":"# İşletim Sistemleri\n\nChapter 1: süreçler ve iş parçacıkları.\n\nChapter 2: zamanlama algoritmaları (FCFS, SJF, Round Robin).","age_h":100}],"expect":{"lang":"tr","writes":[],"contains":["süreç","zamanlama","round"]}}
+{"id":"done-fatura","cat":"complete","q":"faturayı ödedim","tasks":[{"title":"Fatura öde","date":"today"}],"expect":{"lang":"tr","writes":["complete_task"]}}
+{"id":"done-annemi","cat":"complete","q":"annemi aradım, o görevi tamamla","tasks":[{"title":"Annemi ara","date":"today"}],"expect":{"lang":"tr","writes":["complete_task"]}}
+{"id":"done-en","cat":"complete","q":"I paid the rent, mark it done","tasks":[{"title":"Pay the rent","date":"today"}],"expect":{"lang":"en","writes":["complete_task"]}}
+{"id":"follow-uyku","cat":"follow-up","q":"peki son 2 günde?","turns":[["bu hafta kaç saat uyudum?","Bu hafta toplam 0 saat uyku kaydın var."]],"expect":{"lang":"tr","writes":[],"reads":["query_metrics"]}}
+{"id":"follow-saat","cat":"follow-up","q":"saat 3'te olsun","turns":[["yarın berbere gideceğim","Yarın için \"Berbere git\" görevini ekledim."]],"expect":{"lang":"tr","writes":["add_task"],"args":{"add_task":{"time":"15:00","date":"tomorrow"}}}}
+{"id":"follow-en","cat":"follow-up","q":"and last month?","turns":[["how many steps this week?","You walked 0 steps this week."]],"expect":{"lang":"en","writes":[],"reads":["query_metrics"]}}
+{"id":"mixed-task-metric","cat":"task","q":"dün 7 saat uyudum, yarın da 9'da toplantı var","expect":{"lang":"tr","writes":["log_metric","add_task"]}}
+{"id":"chit-chat-hava","cat":"language","q":"bugün hava çok güzel","expect":{"lang":"tr","writes":[]}}
+{"id":"chit-chat-yorgun","cat":"language","q":"çok yorgunum","expect":{"lang":"tr","writes":[]}}
