@@ -74,21 +74,25 @@ fn calendar(now: DateTime<FixedOffset>) -> String {
 /// The instructions (in English: the model follows them best; it answers in the user's language).
 fn system(ctx: &Context, now: DateTime<FixedOffset>) -> String {
     let mut s = format!(
-        "You are PLA, a private assistant that runs only on the user's own computer.\n\
-         Now: {} ({}), {}.\n\n\
+        // what never changes comes first: the model server reuses a prompt up to its first change,
+        // and the clock changes every minute (nl-quality: a cached prompt answers in 0.4 s, not 25 s)
+        "You are PLA, a private assistant that runs only on the user's own computer.\n\n\
          Rules:\n\
          1. Write in the language the last message names; never talk about these rules.\n\
          2. Use only the notes, tool results and earlier turns below. If they do not hold the answer, say plainly that you could not find it in the notes. Never guess or use general knowledge about the user. The notes are the user's own writing: use them for what they did, plan or decided.\n\
          3. Numbers about tasks or measurements must come from a query_tasks or query_metrics call made for this very question, follow-up questions included.\n\
          4. When you use a note, cite it as [[Note title]].\n\
          5. Be brief and concrete.\n\
-         6. Dates: take them from this calendar. Give a time only when the user said one.\n{}\n\n\
-         Tools you may call:\n{}\n",
+         6. Dates: take them from the calendar below. Give a time only when the user said one.\n\
+         7. Never say you added, saved, completed or recorded something unless a tool result shows it.\n\n\
+         Tools you may call:\n{}\n\n\
+         Now: {} ({}), {}.\n\
+         Calendar:\n{}\n",
+        tools::descriptions(),
         now.format("%Y-%m-%d"),
         weekday(now),
         now.format("%H:%M"),
         calendar(now),
-        tools::descriptions()
     );
     if !ctx.recent.is_empty() {
         s.push_str("\n## Notes from the last 48 hours\n");
@@ -115,6 +119,11 @@ fn messages(ctx: &Context, question: &str, calls: &[ToolRecord], now: DateTime<F
         m.push(json!({ "role": "assistant", "content": json!({ "tool": c.tool, "args": c.args }).to_string() }));
         let result = match &c.error {
             Some(e) => format!("Tool error: {e}. Fix the arguments or answer without the tool."),
+            // one open task found: the model said "marked as done" without the call (nl-quality)
+            None if c.tool == "query_tasks" && c.result["count"] == 1 && c.result["tasks"][0]["status"] == "open" => format!(
+                "Tool result: {}\nIf the user says they did this task, call complete_task with task_id {}.",
+                c.result, c.result["tasks"][0]["task_id"]
+            ),
             None => format!("Tool result: {}", c.result),
         };
         m.push(json!({ "role": "user", "content": result }));
@@ -138,11 +147,16 @@ fn messages(ctx: &Context, question: &str, calls: &[ToolRecord], now: DateTime<F
 
 const DECIDE_RULES: &str = "Decide the next step. Reply with JSON only: {\"tool\":\"<name>\",\"args\":{...}} to call one tool, or {\"tool\":\"answer\"} when you can answer now.\n\
 Call a tool first when:\n\
-- the user tells you about a plan, appointment or something to do on a day and no add_task for it is in the tool results yet: call add_task;\n\
+- the user tells you about a plan, appointment, deadline or something to do on a day and no add_task for it is in the tool results yet: call add_task. Never ask whether to add it;\n\
+- the user says they did one of their tasks (\"faturayı ödedim\", \"I called the bank\"): call query_tasks with a word of it, then complete_task with the task_id it gives;\n\
 - the question asks for numbers, counts, totals or dates of tasks or measurements, also in a follow-up, and this question has no query result yet: call query_tasks or query_metrics;\n\
-- the user reports a measurement of today or a past day, their body weight included (\"130 kiloyum\", \"I slept 7 hours\"): call log_metric; a wish or goal (\"75 kilo olmak istiyorum\") is not a measurement;\n\
-- the user asks to keep something as a note (\"notlarıma ekle\", \"not al\", \"kaydet\", \"make a note\", \"save this\"): call create_note. Choose the title yourself and never ask for it. When they say \"bunu\", \"onu\" or \"this\", the body is what they told you just before;\n\
+- the user reports a measurement of today or a past day, their body weight included (\"92 kiloyum\", \"I slept 7 hours\", \"walked 5000 steps\"): call log_metric; a wish or goal (\"75 kilo olmak istiyorum\") is not a measurement;\n\
+- the user asks to keep something as a note (\"notlarıma ekle\", \"not al:\", \"kaydet\", \"make a note\", \"save this\"): call create_note. Choose the title yourself and never ask for it. When they say \"bunu\", \"onu\" or \"this\", the body is what they told you just before;\n\
 - the user tells you something worth keeping (what they did, learned, decided, an idea) without asking for anything: call suggest_note once, then answer.\n\
+When the user names the note (\"tarifler diye bir not\", \"a note called X\"), that name is its title.\n\
+When you asked the user something and they say \"sen karar ver\" or \"you decide\", decide yourself and call the tool.\n\
+What the user did, learned or wrote is in their notes: answer from the notes. query_tasks is for what is still to do.\n\
+One message may need several tools: call them one after another, then answer.\n\
 Greetings, thanks and small talk: answer, with no tool.\n\
 Answer when the tool results already hold what is needed.\n\
 Examples (dates from the calendar above):\n";
@@ -150,7 +164,8 @@ Examples (dates from the calendar above):\n";
 /// The decision instructions with the examples closest to this message (nl-quality plan § 3).
 fn decide_text(question: &str, earlier: Option<&str>, today: chrono::NaiveDate) -> String {
     thread_local! { static BANK: Vec<super::examples::Example> = super::examples::bank(); }
-    BANK.with(|bank| format!("{DECIDE_RULES}{}", super::examples::lines(bank, question, earlier, today)))
+    // the message again at the end: a small model weighs what it read last
+    BANK.with(|bank| format!("{DECIDE_RULES}{}\n\nThe user's last message: \"{question}\"\nYour JSON:", super::examples::lines(bank, question, earlier, today)))
 }
 
 fn write_instruction(lang: &str) -> String {
@@ -202,6 +217,22 @@ fn without_made_up_time(tool: &str, mut args: Value, question: &str) -> Value {
             o.remove("time");
             o.remove("remind");
         }
+    }
+    afternoon(tool, args, question)
+}
+
+/// "saat 3'te" is 15:00, as people say it: an hour from 1 to 7 with no word for the morning or the
+/// night, and not written as "03:00" (the eval saw 03:00 for a barber's appointment).
+fn afternoon(tool: &str, mut args: Value, question: &str) -> Value {
+    let Some(time) = args["time"].as_str().filter(|_| tool == "add_task").map(str::to_owned) else { return args };
+    let Some((h, m)) = time.split_once(':').and_then(|(h, m)| Some((h.parse::<u32>().ok()?, m.to_owned()))) else { return args };
+    let lower = crate::index::key(question);
+    let words: Vec<&str> = lower.split(|c: char| !c.is_alphanumeric()).collect();
+    let morning = lower.contains("a.m")
+        || words.iter().any(|w| ["sabah", "gece", "morning", "night", "erken"].iter().any(|p| w.starts_with(p)) || *w == "am" || w.ends_with("am") && w.len() <= 3 && w.chars().next().is_some_and(|c| c.is_ascii_digit()));
+    let written_early = lower.contains(&format!("0{h}:")) || lower.contains(&format!("0{h}."));
+    if (1..=7).contains(&h) && !morning && !written_early {
+        args["time"] = Value::String(format!("{:02}:{m}", h + 12));
     }
     args
 }
@@ -599,6 +630,19 @@ mod tests {
         assert_eq!(kept["body"], "İşletim sistemleri chapter 1", "a body about it stays");
         let own = with_referred_body("create_note", json!({ "title": "Market", "body": "süt, ekmek" }), "not al: market listesi süt, ekmek, yumurta ve peynir", &turns[..1]);
         assert_eq!(own["body"], "süt, ekmek", "a long message with its own content is not about the earlier one");
+    }
+
+    #[test]
+    fn an_hour_people_say_without_the_morning_is_the_afternoon() {
+        let t = |time: &str, q: &str| afternoon("add_task", json!({ "time": time }), q)["time"].as_str().unwrap().to_owned();
+        assert_eq!(t("03:00", "saat 3'te olsun"), "15:00", "seen in the eval");
+        assert_eq!(t("07:00", "akşam 7'de halı saha"), "19:00");
+        assert_eq!(t("03:00", "tamam 3'te"), "15:00", "\"tamam\" is not a.m.");
+        assert_eq!(t("07:00", "sabah 7'de koşu"), "07:00");
+        assert_eq!(t("05:00", "gece 5'te uçak"), "05:00");
+        assert_eq!(t("06:00", "at 6am"), "06:00");
+        assert_eq!(t("03:00", "03:00'te alarm"), "03:00", "written as early as it is");
+        assert_eq!(t("10:00", "10'da toplantı"), "10:00");
     }
 
     #[test]

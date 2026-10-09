@@ -44,15 +44,19 @@ fn date_token(s: &str) -> String {
 }
 
 /// The answer's language, judged apart from the app's own detection.
-fn answer_language(text: &str) -> &'static str {
-    let lower = text.to_lowercase();
+fn answer_language(text: &str) -> Option<&'static str> {
+    let lower = pla_core::index::key(text); // "İyi" → "iyi" (Rust's own lower case adds a dot)
     let words: Vec<&str> = lower.split(|c: char| !c.is_alphanumeric()).filter(|w| !w.is_empty()).collect();
     let tr_letters = lower.chars().filter(|c| "çğıöşü".contains(*c)).count();
     const TR: [&str; 20] = ["ve", "bir", "bu", "için", "ile", "de", "da", "ne", "var", "yok", "olarak", "sana", "size", "senin", "notlarında", "notlar", "bugün", "yarın", "evet", "tamam"];
     const EN: [&str; 20] = ["the", "and", "you", "your", "is", "are", "to", "of", "in", "i", "it", "that", "for", "have", "with", "notes", "today", "this", "can", "not"];
     let tr = words.iter().filter(|w| TR.contains(w)).count() + tr_letters.min(5);
     let en = words.iter().filter(|w| EN.contains(w)).count();
-    if tr >= en { "tr" } else { "en" }
+    match (tr, en) {
+        (0, 0) => None, // "Hi." tells nothing either way
+        (tr, en) if tr >= en => Some("tr"),
+        _ => Some("en"),
+    }
 }
 
 /// Whether `got` satisfies `want`: numbers equal, text contains (case-insensitively), dates by token.
@@ -60,7 +64,7 @@ fn arg_matches(key: &str, want: &Value, got: &Value) -> bool {
     match want {
         Value::Number(n) => got.as_f64().is_some_and(|g| (g - n.as_f64().unwrap()).abs() < 1e-6),
         Value::String(s) if key == "date" => got.as_str() == Some(date_token(s).as_str()),
-        Value::String(s) => got.as_str().is_some_and(|g| g.to_lowercase().contains(&s.to_lowercase())),
+        Value::String(s) => got.as_str().is_some_and(|g| pla_core::index::key(g).contains(&pla_core::index::key(s))),
         other => got == other,
     }
 }
@@ -116,8 +120,7 @@ fn assistant_case(model: &mut ModelHost, case: &Value) -> Result<(Vec<String>, V
     let mut fails = Vec::new();
     let called: Vec<&str> = answer.tools.iter().filter(|t| t.ok).map(|t| t.tool.as_str()).collect();
     if let Some(l) = want["lang"].as_str() {
-        let got = answer_language(&answer.text);
-        if got != l {
+        if let Some(got) = answer_language(&answer.text).filter(|got| *got != l) {
             fails.push(format!("answer in {got}, wanted {l}"));
         }
     }
@@ -209,6 +212,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut cfg = ServerConfig::new(PathBuf::from(std::env::var("PLA_LLAMA_SERVER")?), PathBuf::from(std::env::var("PLA_MODEL")?));
     cfg.startup_timeout = Duration::from_secs(120);
     let mut model = ModelHost::new(cfg, Duration::from_secs(600));
+
+    // the bank must not hold the cases themselves: the model would be shown the answer
+    let bank: Vec<String> = pla_core::qa::examples::bank().into_iter().map(|e| e.q.to_lowercase()).collect();
+    let cases = std::fs::read_to_string(format!("{CASES}/assistant.jsonl"))?;
+    for line in cases.lines().filter(|l| l.starts_with('{')) {
+        let case: Value = serde_json::from_str(line)?;
+        let q = case["q"].as_str().unwrap_or_default().to_lowercase();
+        if bank.contains(&q) {
+            return Err(format!("case {} is in assets/qa_examples.jsonl", case["id"]).into());
+        }
+    }
 
     let mut results = Vec::new();
     let mut score: BTreeMap<String, (usize, usize)> = BTreeMap::new();

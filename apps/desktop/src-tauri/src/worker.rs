@@ -526,6 +526,7 @@ impl Worker {
                     vector = v.pop().map(|v| (v, embedder.model_id().to_owned()));
                 }
             }
+            embedder.release(); // the chat model answers next; both together are the RAM peak
         }
         let memory_arg = vector.as_ref().map(|(v, m)| (v.as_slice(), m.as_str()));
         let now = (self.clock)();
@@ -656,6 +657,10 @@ mod tests {
     }
 
     fn ask(handle: &WorkerHandle, data: &std::path::Path, question: &str) -> std::sync::mpsc::Receiver<QaEvent> {
+        ask_with(handle, data, question, Arc::new(Mutex::new(None)))
+    }
+
+    fn ask_with(handle: &WorkerHandle, data: &std::path::Path, question: &str, memory: crate::memory_cmds::Embeds) -> std::sync::mpsc::Receiver<QaEvent> {
         let (tx, rx) = std::sync::mpsc::channel();
         let tx = Mutex::new(tx);
         handle.ask(AskJob {
@@ -663,7 +668,7 @@ mod tests {
             question: question.into(),
             new_topic: false,
             cache_path: data.join("cache.db"),
-            memory: Arc::new(Mutex::new(None)),
+            memory,
             cancel: Arc::new(AtomicBool::new(false)),
             on: Box::new(move |e| {
                 let _ = tx.lock().unwrap().send(e);
@@ -682,6 +687,32 @@ mod tests {
                 return events;
             }
         }
+    }
+
+    /// Counts how often it was told to let its server go.
+    struct Releases(Arc<std::sync::atomic::AtomicUsize>);
+    impl pla_core::memory::Embedder for Releases {
+        fn model_id(&self) -> &str {
+            "e"
+        }
+        fn embed(&mut self, texts: &[String], _: &AtomicBool) -> Result<Vec<Vec<f32>>, LlmError> {
+            Ok(texts.iter().map(|_| vec![1.0; 768]).collect())
+        }
+        fn release(&mut self) {
+            self.0.fetch_add(1, Ordering::SeqCst);
+        }
+    }
+
+    #[test]
+    fn the_embedding_server_goes_before_the_model_answers() {
+        // nl-quality: the two models are not in memory together
+        let (_tmp, handle, statuses, data) = setup(Some(Box::new(Chatty { extract_delay: Duration::ZERO })));
+        wait_for(&statuses, |s| !s.busy && s.queued == 0);
+        let released = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let memory: crate::memory_cmds::Embeds = Arc::new(Mutex::new(Some(Box::new(Releases(Arc::clone(&released))))));
+        let events = until_end(&ask_with(&handle, &data, "Yarın 10'da doktor randevum var", memory));
+        assert!(matches!(events.last(), Some(QaEvent::Done { .. })), "{events:?}");
+        assert_eq!(released.load(Ordering::SeqCst), 1);
     }
 
     #[test]

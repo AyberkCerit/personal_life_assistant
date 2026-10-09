@@ -30,4 +30,7 @@ serde_json = "1.0.151"
 
 [target."cfg(windows)".dependencies]
 tauri-winrt-notification = "0.8"
+# the same versions wry uses, for the WebView's memory target (webview_memory.rs)
+webview2-com = "0.39.1"
+windows-core = "0.62.2"
 windows-sys = { version = "0.61.2", features = ["Win32_UI_Input_KeyboardAndMouse", "Win32_System_SystemInformation", "Win32_System_Power", "Win32_Globalization", "Win32_UI_Shell", "Win32_System_Com", "Win32_System_Registry"] }

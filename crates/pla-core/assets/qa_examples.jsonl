@@ -1,4 +1,4 @@
-{"q":"Yarın saat 10'da doktor randevum var","d":{"tool":"add_task","args":{"title":"Doktor randevusu","date":"{tomorrow}","time":"10:00"}}}
+{"q":"yarın öğlen 12'de göz doktoruna gideceğim","d":{"tool":"add_task","args":{"title":"Göz doktoru","date":"{tomorrow}","time":"12:00"}}}
 {"q":"Cumartesi markete gitmem gerekiyor","d":{"tool":"add_task","args":{"title":"Markete git","date":"{sat}"}}}
 {"q":"I need to pay the rent on Friday","d":{"tool":"add_task","args":{"title":"Pay the rent","date":"{fri}"}}}
 {"q":"perşembe akşam 7'de halı sahaya gideceğim","d":{"tool":"add_task","args":{"title":"Halı saha","date":"{thu}","time":"19:00"}}}
@@ -23,7 +23,7 @@
 {"q":"I walked 6000 steps","d":{"tool":"log_metric","args":{"kind":"steps","date":"{today}","value":6000,"unit":"count"}}}
 {"q":"squat 4x5 100 kilo yaptım","d":{"tool":"log_metric","args":{"kind":"workout","date":"{today}","value":100,"unit":"kg","exercise":"squat"}}}
 {"q":"70 kilo olmak istiyorum","d":{"tool":"answer"}}
-{"q":"Bu hafta kaç saat uyudum?","d":{"tool":"query_metrics","args":{"kind":"sleep","days":7}}}
+{"q":"bu ay kaç saat uyudum?","d":{"tool":"query_metrics","args":{"kind":"sleep","days":30}}}
 {"q":"son bir ayda kilom nasıl değişti?","d":{"tool":"query_metrics","args":{"kind":"weight","days":30}}}
 {"q":"şu an kaç kiloyum?","d":{"tool":"query_metrics","args":{"kind":"weight","days":30}}}
 {"q":"bugün ne kadar su içtim","d":{"tool":"query_metrics","args":{"kind":"water","days":1}}}
@@ -36,8 +36,8 @@
 {"q":"dişçi randevum ne zamandı?","d":{"tool":"query_tasks","args":{"list":"all","text":"dişçi"}}}
 {"q":"kargoyu teslim aldım","d":{"tool":"query_tasks","args":{"list":"all","text":"kargo"}}}
 {"q":"I called the bank, that one is done","d":{"tool":"query_tasks","args":{"list":"all","text":"bank"}}}
-{"q":"notlarıma ekle bunu","prev":"bugün spor salonunda yeni bir program başladım","d":{"tool":"create_note","args":{"title":"Yeni spor programı","body":"Bugün spor salonunda yeni bir program başladım."}}}
-{"q":"bunu not al","prev":"ev sahibi kirayı ocakta 15 bin yapacağını söyledi","d":{"tool":"create_note","args":{"title":"Kira artışı","body":"Ev sahibi kirayı ocakta 15 bin yapacağını söyledi."}}}
+{"q":"notlara ekle şunu","prev":"bugün spor salonunda yeni bir program başladım","d":{"tool":"create_note","args":{"title":"Yeni spor programı","body":"Bugün spor salonunda yeni bir program başladım."}}}
+{"q":"şunu bir kenara not et","prev":"ev sahibi kirayı ocakta 15 bin yapacağını söyledi","d":{"tool":"create_note","args":{"title":"Kira artışı","body":"Ev sahibi kirayı ocakta 15 bin yapacağını söyledi."}}}
 {"q":"yeni bir not oluştur ve buna yaz","prev":"bisikletin arka lastiği değişecek, 750 TL","d":{"tool":"create_note","args":{"title":"Bisiklet lastiği","body":"Bisikletin arka lastiği değişecek, 750 TL."}}}
 {"q":"not al: market listesi süt, ekmek, yumurta","d":{"tool":"create_note","args":{"title":"Market listesi","body":"Süt, ekmek, yumurta"}}}
 {"q":"filmler diye bir not aç: Interstellar, Arrival, Her","d":{"tool":"create_note","args":{"title":"Filmler","body":"Interstellar, Arrival, Her"}}}
@@ -51,10 +51,9 @@
 {"q":"aklıma bir uygulama fikri geldi: bitki sulama hatırlatıcısı","d":{"tool":"suggest_note","args":{"title":"Uygulama fikri: bitki sulama","body":"Bitki sulama hatırlatıcısı."}}}
 {"q":"today I learned how binary search works","d":{"tool":"suggest_note","args":{"title":"Binary search","body":"Today I learned how binary search works."}}}
 {"q":"we agreed to move the launch to March","d":{"tool":"suggest_note","args":{"title":"Launch moved to March","body":"We agreed to move the launch to March."}}}
-{"q":"Bugün ne yaptım?","d":{"tool":"answer"}}
+{"q":"dün neler yaptım","d":{"tool":"answer"}}
 {"q":"What did I decide about the project?","d":{"tool":"answer"}}
 {"q":"geçen hafta toplantıda neler konuştuk","d":{"tool":"answer"}}
-{"q":"selam","d":{"tool":"answer"}}
 {"q":"merhaba nasılsın","d":{"tool":"answer"}}
 {"q":"slm","d":{"tool":"answer"}}
 {"q":"teşekkür ederim","d":{"tool":"answer"}}
@@ -67,3 +66,20 @@
 {"q":"elektrik faturası ne kadar gelmişti","d":{"tool":"search_notes","args":{"query":"elektrik faturası"}}}
 {"q":"Ali'nin telefon numarası neydi","d":{"tool":"search_notes","args":{"query":"Ali telefon"}}}
 {"q":"where did I write the wifi password?","d":{"tool":"search_notes","args":{"query":"wifi password"}}}
+{"q":"elektrik faturasını yatırdım","d":{"tool":"query_tasks","args":{"list":"all","text":"fatura"}}}
+{"q":"diş fırçasını aldım, o işi kapat","d":{"tool":"query_tasks","args":{"list":"all","text":"diş fırçası"}}}
+{"q":"I picked up the parcel, mark it done","d":{"tool":"query_tasks","args":{"list":"all","text":"parcel"}}}
+{"q":"kirayı ödemeyi unutma, son gün ayın 25'i","d":{"tool":"add_task","args":{"title":"Kirayı öde","date":"{day25}"}}}
+{"q":"dün 6 saat uyudum, cumartesi de annemlere gideceğim","d":{"tool":"log_metric","args":{"kind":"sleep","date":"{yesterday}","value":6,"unit":"h"}}}
+{"q":"not al: doktorun önerdiği vitaminler D3 ve B12","d":{"tool":"create_note","args":{"title":"Doktorun önerdiği vitaminler","body":"D3 ve B12"}}}
+{"q":"note: the garage code is 4512","d":{"tool":"create_note","args":{"title":"Garage code","body":"The garage code is 4512."}}}
+{"q":"bugün patronla konuştum, zam kasımda gelecek","d":{"tool":"suggest_note","args":{"title":"Zam kasımda","body":"Bugün patronla konuştum, zam kasımda gelecek."}}}
+{"q":"sunumda müşteri yeni tasarımı çok beğendi","d":{"tool":"suggest_note","args":{"title":"Müşteri yeni tasarımı beğendi","body":"Sunumda müşteri yeni tasarımı çok beğendi."}}}
+{"q":"yeni bir proje fikri: komşularla eşya paylaşım uygulaması","d":{"tool":"suggest_note","args":{"title":"Proje fikri: eşya paylaşımı","body":"Komşularla eşya paylaşım uygulaması."}}}
+{"q":"I found out the gym closes at 10 pm on weekdays","d":{"tool":"suggest_note","args":{"title":"Gym hours","body":"The gym closes at 10 pm on weekdays."}}}
+{"q":"I walked 7500 steps today","d":{"tool":"log_metric","args":{"kind":"steps","date":"{today}","value":7500,"unit":"count"}}}
+{"q":"bu sabah neler yaptım","d":{"tool":"answer"}}
+{"q":"geçen hafta sonu ne yapmıştım","d":{"tool":"answer"}}
+{"q":"alışveriş diye bir not oluştur: domates, biber, peynir","d":{"tool":"create_note","args":{"title":"Alışveriş","body":"Domates, biber, peynir"}}}
+{"q":"make a note called Packing list: charger, passport, socks","d":{"tool":"create_note","args":{"title":"Packing list","body":"Charger, passport, socks"}}}
+{"q":"kardeşimi aradım, o işi bitir","d":{"tool":"query_tasks","args":{"list":"all","text":"kardeşimi ara"}}}

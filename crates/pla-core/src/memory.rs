@@ -38,6 +38,9 @@ pub trait Embedder {
     fn embed(&mut self, texts: &[String], stop: &AtomicBool) -> Result<Vec<Vec<f32>>, LlmError>;
     /// Called while nothing else happens: lets the host stop an idle server (FR-MDL-013).
     fn tick(&mut self) {}
+    /// The question's vector is made and the chat model answers next: the embedding server goes
+    /// now, so the two models never hold memory together (nl-quality RAM plan § 2).
+    fn release(&mut self) {}
 }
 
 /// EmbeddingGemma's prompts: a question, and a document with its title.

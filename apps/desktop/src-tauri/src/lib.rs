@@ -14,6 +14,7 @@ pub mod model_paths;
 pub mod wizard;
 mod notify;
 mod tray;
+mod webview_memory;
 pub mod scheduler;
 pub mod settings_screen;
 pub mod system;

@@ -31,6 +31,7 @@ fn tray_icon() -> tauri::image::Image<'static> {
 
 pub fn show_main(app: &AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
+        crate::webview_memory::set_low(&window, false);
         let _ = window.show();
         let _ = window.unminimize();
         let _ = window.set_focus();

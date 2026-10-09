@@ -645,6 +645,7 @@ pub fn set_paused(app: AppHandle, paused: bool) -> Result<(), String> {
 #[tauri::command]
 pub fn hide_to_tray(window: tauri::WebviewWindow, state: State<AppState>) -> Result<(), String> {
     window.hide().map_err(|e| e.to_string())?;
+    crate::webview_memory::set_low(&window, true);
     let mut first_time = false;
     update_settings(&app_root()?, &state.settings_lock, |s| {
         first_time = !s.tray_hint_shown;

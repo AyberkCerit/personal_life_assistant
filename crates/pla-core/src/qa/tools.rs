@@ -121,6 +121,20 @@ pub fn write_note(vault: &Vault, title: &str, body: &str) -> Result<String, Stri
     Ok(rel)
 }
 
+/// Whether a task title fits the words the model searched with. Turkish endings vary ("faturayı
+/// ödedim" for the task "Fatura öde"), so a word matches by its first four letters.
+fn title_matches(title: &str, text: &str) -> bool {
+    let words = |s: &str| crate::index::key(s).split(|c: char| !c.is_alphanumeric()).filter(|w| !w.is_empty()).map(str::to_owned).collect::<Vec<_>>();
+    let title_words = words(title);
+    if crate::index::key(title).contains(&crate::index::key(text)) {
+        return true;
+    }
+    words(text).iter().filter(|w| w.chars().count() >= 4).any(|w| {
+        let stem: String = w.chars().take(4).collect();
+        title_words.iter().any(|t| t.starts_with(&stem))
+    })
+}
+
 /// A file name from the model's title: characters Windows refuses become spaces; an empty one comes
 /// from the first words of the body, or the date.
 pub fn note_title(title: &str, body: &str, today: NaiveDate) -> String {
@@ -183,11 +197,11 @@ pub fn run(env: &ToolEnv<'_>, tool: &str, args: &Value) -> Result<ToolRecord, St
                 "all" => &[TaskList::Today, TaskList::Upcoming],
                 other => return Err(format!("list {other:?} must be today, upcoming, completed or all")),
             };
-            let filter = text(args, "text", 100)?.map(|t| crate::index::key(&t));
+            let filter = text(args, "text", 100)?;
             let mut found = Vec::new();
             for l in lists {
                 for t in tasks::list_tasks(env.pla, *l, today).map_err(|e| e.to_string())? {
-                    if filter.as_ref().is_none_or(|f| crate::index::key(&t.title).contains(f.as_str())) {
+                    if filter.as_ref().is_none_or(|f| title_matches(&t.title, f)) {
                         found.push(json!({ "task_id": t.task_id, "title": t.title, "date": t.date, "time": t.time, "status": t.status, "reminder": t.notify_at.is_some() }));
                     }
                 }
@@ -373,6 +387,13 @@ mod tests {
         run(&env, "add_task", &json!({ "title": "Annemi ara", "date": "2026-10-08" })).unwrap();
         let q = run(&env, "query_tasks", &json!({ "list": "all", "text": "FATURA" })).unwrap();
         assert_eq!(q.result["count"], json!(1));
+        // nl-quality: the model searched with the user's own words and found nothing
+        let said = run(&env, "query_tasks", &json!({ "list": "all", "text": "faturayı ödedim" })).unwrap();
+        assert_eq!(said.result["count"], json!(1));
+        let said = run(&env, "query_tasks", &json!({ "list": "all", "text": "annemi aradım" })).unwrap();
+        assert_eq!(said.result["tasks"][0]["title"], "Annemi ara");
+        let said = run(&env, "query_tasks", &json!({ "list": "all", "text": "su iç" })).unwrap();
+        assert_eq!(said.result["count"], json!(0), "short words alone match nothing");
         let id = q.result["tasks"][0]["task_id"].as_str().unwrap().to_owned();
         let done = run(&env, "complete_task", &json!({ "task_id": id })).unwrap();
         assert!(run(&env, "complete_task", &json!({ "task_id": id })).unwrap_err().contains("not open"));
