@@ -256,6 +256,9 @@ fn with_referred_body(tool: &str, mut args: Value, question: &str, turns: &[Turn
     if tool != "create_note" {
         return args;
     }
+    if let Some(name) = named_title(question) {
+        args["title"] = Value::String(name);
+    }
     let Some(earlier) = referred(turns) else { return args };
     let body = args["body"].as_str().unwrap_or_default().to_owned();
     let stems = |t: &str| t.to_lowercase().split(|c: char| !c.is_alphanumeric()).filter(|w| w.chars().count() >= 4).map(|w| w.chars().take(5).collect::<String>()).collect::<Vec<_>>();
@@ -267,10 +270,76 @@ fn with_referred_body(tool: &str, mut args: Value, question: &str, turns: &[Turn
     args
 }
 
+/// "tarifler diye bir not oluştur", "a note called Packing list: …": the title the user gave.
+fn named_title(question: &str) -> Option<String> {
+    let lower = crate::index::key(question);
+    let words: Vec<&str> = question.split_whitespace().collect();
+    let keys: Vec<String> = lower.split_whitespace().map(str::to_owned).collect();
+    if let Some(i) = keys.iter().position(|w| w == "diye") {
+        let next = keys.get(i + 1).map(String::as_str);
+        let not_after = matches!(next, Some("not" | "notu" | "notum")) || (next == Some("bir") && keys.get(i + 2).is_some_and(|w| w.starts_with("not")));
+        if not_after && i > 0 {
+            let name = words[i.saturating_sub(3)..i].join(" ");
+            let name = name.rsplit([',', ':', '.']).next().unwrap_or(&name).trim().to_owned();
+            return (!name.is_empty()).then_some(name);
+        }
+    }
+    // ASCII lower case keeps every byte where it was, so positions carry over to the question
+    let ascii = question.to_ascii_lowercase();
+    let (at, len) = ascii.find("note called ").map(|i| (i, 12)).or_else(|| ascii.find("note named ").map(|i| (i, 11)))?;
+    let name = question[at + len..].split([':', ',', '.']).next().unwrap_or_default().trim().to_owned();
+    (!name.is_empty()).then_some(name)
+}
+
 /// A suggestion is for something the user told, not asked or greeted (the owner's decision a).
 fn worth_suggesting(question: &str, done: &[ToolRecord]) -> bool {
     let words = question.split_whitespace().count();
     !question.trim_end().ends_with('?') && words >= 4 && !done.iter().any(|r| r.ok && r.tool != "search_notes")
+}
+
+/// A task id the user's words led to: found by query_tasks for this very question. The eval saw the
+/// model add a task and then complete it in the same breath.
+fn found_by_query(done: &[ToolRecord], id: &str) -> bool {
+    done.iter().any(|r| r.ok && r.tool == "query_tasks" && r.result["tasks"].as_array().is_some_and(|ts| ts.iter().any(|t| t["task_id"] == id)))
+}
+
+/// "faturayı ödedim", "I called the bank, mark it done": the user reports doing something.
+fn reports_done(question: &str) -> bool {
+    if question.trim_end().ends_with('?') {
+        return false;
+    }
+    crate::index::key(question).split(|c: char| !c.is_alphanumeric()).any(|w| {
+        (w.chars().count() >= 4 && ["dim", "dım", "dum", "düm", "tim", "tım", "tum", "tüm"].iter().any(|e| w.ends_with(e)))
+            || ["tamamla", "tamamlandı", "bitti", "done", "finished", "paid", "called", "completed"].contains(&w)
+    })
+}
+
+/// "sen karar ver", "you decide": the user leaves the choice to PLA.
+fn delegates(question: &str) -> bool {
+    let k = crate::index::key(question);
+    ["karar ver", "sen seç", "sen sec", "sen bil", "fark etmez", "farketmez", "you decide", "up to you", "your call"].iter().any(|p| k.contains(p))
+}
+
+/// What the code does when the model only answers but the user's words leave no doubt (the eval's
+/// remaining misses, narrowly): a task the model found and the user says is done gets completed
+/// (with its Undo); "sen karar ver" after asking for a note writes the note.
+fn fallback(question: &str, turns: &[Turn], done: &[ToolRecord]) -> Option<(String, Value)> {
+    if reports_done(question) && !done.iter().any(|r| r.tool == "complete_task") {
+        let found = done.iter().rev().find(|r| r.ok && r.tool == "query_tasks")?;
+        let tasks = found.result["tasks"].as_array()?;
+        if tasks.len() == 1 && tasks[0]["status"] == "open" {
+            return Some(("complete_task".into(), json!({ "task_id": tasks[0]["task_id"] })));
+        }
+        return None;
+    }
+    let note_asked = turns.last().is_some_and(|t| {
+        let k = crate::index::key(&t.question);
+        ["not", "kaydet", "ekle", "note", "save"].iter().any(|w| k.contains(w))
+    });
+    if delegates(question) && note_asked && !done.iter().any(|r| r.tool == "create_note") {
+        return Some(("create_note".into(), json!({ "title": "", "body": referred(turns)? })));
+    }
+    None
 }
 
 /// Whether this call was made already for this question: the same call, or a task with the same
@@ -325,11 +394,11 @@ pub fn answer(
             Err(error) => return Err(QaError::Model { error, tools: shown }),
             Ok(raw) => raw,
         };
-        let (tool, args) = match tools::parse_decision(&raw) {
-            Ok(Decision::Answer) => break,
-            Ok(Decision::Call { tool, args }) => (tool, args),
-            Err(_) => break, // the grammar makes this rare; answer without tools
+        let decided = match tools::parse_decision(&raw) {
+            Ok(Decision::Call { tool, args }) => Some((tool, args)),
+            Ok(Decision::Answer) | Err(_) => None, // the grammar makes Err rare
         };
+        let Some((tool, args)) = decided.or_else(|| fallback(question, turns, &shown)) else { break };
         let args = with_referred_body(&tool, without_made_up_time(&tool, args, question), question, turns);
         if tool == "suggest_note" && !worth_suggesting(question, &shown) {
             break; // a greeting or a question: answer without offering a note
@@ -341,7 +410,12 @@ pub fn answer(
             break; // done already (the real window saw one task added three times): answer now
         }
         on(Progress::Working(Some(tool.clone())));
-        match tools::run(env, &tool, &args) {
+        let ran = if tool == "complete_task" && !found_by_query(&shown, args["task_id"].as_str().unwrap_or_default()) {
+            Err("take the task_id from a query_tasks call for what the user said they did".to_owned())
+        } else {
+            tools::run(env, &tool, &args)
+        };
+        match ran {
             Ok(rec) => {
                 calls.push(trimmed(&rec, &mut tool_left));
                 on(Progress::Tool(Box::new(rec.clone())));
@@ -643,6 +717,55 @@ mod tests {
         assert_eq!(t("06:00", "at 6am"), "06:00");
         assert_eq!(t("03:00", "03:00'te alarm"), "03:00", "written as early as it is");
         assert_eq!(t("10:00", "10'da toplantı"), "10:00");
+    }
+
+    #[test]
+    fn a_note_named_by_the_user_keeps_its_name() {
+        assert_eq!(named_title("tarifler diye bir not oluştur, mercimek çorbası: 1 su bardağı").as_deref(), Some("tarifler"));
+        assert_eq!(named_title("İşletim Sistemleri diye not aç").as_deref(), Some("İşletim Sistemleri"));
+        assert_eq!(named_title("make a note called Packing list: charger, socks").as_deref(), Some("Packing list"));
+        assert_eq!(named_title("not al: süt, ekmek"), None);
+    }
+
+    #[test]
+    fn only_a_task_found_for_this_question_is_completed() {
+        // the eval: the model added "Kargoyu al", then completed it
+        let e = env();
+        let tool_env = ToolEnv { vault: &e.vault, pla: &e.pla, cache: &e.cache, now: now(), validation: ValidationSettings::default() };
+        let mut model = scripted(&["{\"tool\":\"add_task\",\"args\":{\"title\":\"Kargoyu al\",\"date\":\"2026-10-09\"}}", "{\"tool\":\"complete_task\",\"args\":{\"task_id\":\"x\"}}"], "Tamam.");
+        answer(&mut model, &tool_env, "cuma kargoyu al", &[], None, "tr", &AtomicBool::new(false), &mut |_| {}).unwrap();
+        let open: i64 = e.pla.query_row("SELECT count(*) FROM task WHERE status = 'open'", [], |r| r.get(0)).unwrap();
+        assert_eq!(open, 1);
+    }
+
+    #[test]
+    fn a_task_the_user_did_is_completed_when_the_model_only_searched() {
+        // the eval: "faturayı ödedim" found "Fatura öde", then the model just answered
+        let e = env();
+        crate::tasks::add_task_as(&e.pla, &crate::tasks::TaskInput { title: "Fatura öde".into(), details: None, date: Some("2026-10-06".into()), time: None, remind: Some(false) }, "manual", now()).unwrap();
+        let tool_env = ToolEnv { vault: &e.vault, pla: &e.pla, cache: &e.cache, now: now(), validation: ValidationSettings::default() };
+        let mut model = scripted(&["{\"tool\":\"query_tasks\",\"args\":{\"list\":\"all\",\"text\":\"faturayı ödedim\"}}"], "Tamam.");
+        let a = answer(&mut model, &tool_env, "faturayı ödedim", &[], None, "tr", &AtomicBool::new(false), &mut |_| {}).unwrap();
+        assert!(a.tools.iter().any(|t| t.tool == "complete_task" && t.ok && t.undo.is_some()), "{:?}", a.tools);
+        let mut model = scripted(&["{\"tool\":\"query_tasks\",\"args\":{\"list\":\"all\",\"text\":\"fatura\"}}"], "Evet.");
+        let asked = answer(&mut model, &tool_env, "faturayı ödedim mi?", &[], None, "tr", &AtomicBool::new(false), &mut |_| {}).unwrap();
+        assert!(!asked.tools.iter().any(|t| t.tool == "complete_task"), "a question completes nothing");
+    }
+
+    #[test]
+    fn you_decide_writes_the_note_that_was_asked_for() {
+        // the owner's screenshot: "sen karar ver" after "notlarıma ekle bunu"
+        let e = env();
+        let tool_env = ToolEnv { vault: &e.vault, pla: &e.pla, cache: &e.cache, now: now(), validation: ValidationSettings::default() };
+        let said = "bu gün derste işletim sistemleri öğrendik chapter 1 olarak";
+        let turns = [turn(said), turn("notlarıma ekle bunu")];
+        let mut model = scripted(&[], "Kaydettim.");
+        let a = answer(&mut model, &tool_env, "sen karar ver", &turns, None, "tr", &AtomicBool::new(false), &mut |_| {}).unwrap();
+        let note = a.tools.iter().find(|t| t.tool == "create_note").expect("a note");
+        assert!(std::fs::read_to_string(e.vault.root.join(note.result["note"].as_str().unwrap())).unwrap().contains("işletim sistemleri"));
+        let mut model = scripted(&[], "Tamam.");
+        let chat = answer(&mut model, &tool_env, "sen karar ver", &[turn("akşam ne yesek bilemedim")], None, "tr", &AtomicBool::new(false), &mut |_| {}).unwrap();
+        assert!(chat.tools.is_empty(), "no note was asked for");
     }
 
     #[test]
