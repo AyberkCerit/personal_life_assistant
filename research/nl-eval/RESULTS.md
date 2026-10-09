@@ -36,7 +36,7 @@ düşürüyordu; v2'den sonrası düzeltilmiş düzenekle.
 ## Ne değişti
 
 - **Dil:** Türkçe kelime ve ekler ("kiloyum", "uyudum"), sonra önceki mesaj, sonra PLA'nın dili. Kural cevaba sızmıyor.
-- **Dinamik örnekler:** karar adımı sabit 5 örnek yerine 86 örneklik bankadan en yakın 6'sını görür; mesaj istemin sonunda tekrarlanır.
+- **Dinamik örnekler:** karar adımı sabit 5 örnek yerine 85 örneklik bankadan en yakın 6'sını görür; mesaj istemin sonunda tekrarlanır.
 - **Not:** `create_note` `notes/`a yazar, başlığı kendisi koyar, "bunu"yu önceki mesajdan alır; "X diye bir not" başlığı X olur; `suggest_note` yalnız Kaydet düğmesi önerir.
 - **Görev tamamlama:** görevler kelime köküyle bulunur; yalnız bu soruda bulunan görev tamamlanabilir.
 - **Kod yedeği (dar):** model yalnız cevap verdiğinde ama sözler açıksa (bulunan tek görev + "ödedim"; not isteğinden sonra "sen karar ver") araç kodla çağrılır.
