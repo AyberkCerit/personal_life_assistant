@@ -526,7 +526,11 @@ impl Worker {
                     vector = v.pop().map(|v| (v, embedder.model_id().to_owned()));
                 }
             }
-            embedder.release(); // the chat model answers next; both together are the RAM peak
+            // the chat model answers next; both together are the RAM peak, worth a cold start next
+            // time only when memory is short (tests always release, to see it happen)
+            if cfg!(test) || crate::system::should_release(crate::system::available_ram_mb()) {
+                embedder.release();
+            }
         }
         let memory_arg = vector.as_ref().map(|(v, m)| (v.as_slice(), m.as_str()));
         let now = (self.clock)();

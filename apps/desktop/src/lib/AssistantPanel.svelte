@@ -92,8 +92,14 @@
     }
   }
 
+  /** Saves in flight, by "turn:index": a second click must not send a second save (final review M4). */
+  let saving = $state<string[]>([]);
+
   /** The owner's decision a: a suggested note is written only now. */
   async function save(turn: ShownTurn, index: number) {
+    const key = `${turn.turn_id}:${index}`;
+    if (saving.includes(key)) return;
+    saving = [...saving, key];
     try {
       const note = await api.qaSaveSuggestion(turn.turn_id, index);
       turns = turns.map((x) =>
@@ -101,6 +107,8 @@
       );
     } catch (e) {
       notice = tf("qa.error.save", { reason: String(e).split("|").pop() || String(e) });
+    } finally {
+      saving = saving.filter((k) => k !== key);
     }
   }
 
@@ -169,13 +177,13 @@
           {#each turn.tools as record, i (i)}
             {@const line = toolLine(record)}
             <div class="tool" class:failed={!record.ok} class:offer={record.tool === "suggest_note" && !record.result?.saved}>
-              {#if record.result?.saved}
+              {#if record.result?.saved && !record.result?.undone}
                 <button class="link" onclick={() => onOpenNote(String(record.result?.saved))}>{tf(line.key, line.values)}</button>
               {:else}
                 <span>{tf(line.key, line.values)}</span>
               {/if}
               {#if record.tool === "suggest_note" && !record.result?.saved && !record.result?.undone && turn.status !== "running"}
-                <Button variant="primary" icon={FileText} onclick={() => void save(turn, i)}>{t("qa.save")}</Button>
+                <Button variant="primary" icon={FileText} disabled={saving.includes(`${turn.turn_id}:${i}`)} onclick={() => void save(turn, i)}>{t("qa.save")}</Button>
               {:else if record.result?.undone}
                 <span class="undone">{t("qa.undone")}</span>
               {:else if record.undo && turn.status !== "running"}

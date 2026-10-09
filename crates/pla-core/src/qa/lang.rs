@@ -17,8 +17,9 @@ const TR_ENDINGS: &[&str] = &[
 ];
 
 const EN_WORDS: &[&str] = &[
-    "the", "a", "an", "and", "i", "i'm", "you", "my", "me", "is", "are", "was", "were", "to", "of", "in", "on", "at", "it", "this", "that", "what", "how", "when",
-    "did", "do", "does", "have", "has", "will", "can", "please", "hi", "hello", "hey", "thanks", "thank", "yes", "today", "tomorrow", "yesterday", "weigh",
+    // not "a", "on", "at", "can": Turkish too ("mail at", "Can'a yaz", final review M2)
+    "the", "an", "and", "i", "i'm", "you", "my", "me", "is", "are", "was", "were", "to", "of", "in", "it", "this", "that", "what", "how", "when",
+    "did", "do", "does", "have", "has", "will", "please", "hi", "hello", "hey", "thanks", "thank", "yes", "today", "tomorrow", "yesterday", "weigh",
     "slept", "walked", "drank", "remind", "note", "save", "need", "last", "night", "week", "hours", "steps", "much", "many", "with", "for", "about",
 ];
 
@@ -27,6 +28,14 @@ fn score(text: &str) -> (usize, usize) {
     let mut tr = 3 * usize::from(lower.chars().any(|c| "çğıöşü".contains(c)));
     let mut en = 0;
     for w in lower.split(|c: char| !(c.is_alphanumeric() || c == '\'')).filter(|w| !w.is_empty()) {
+        // a case ending after an apostrophe is Turkish ("Ali'ye", "Can'a", "10'da"); "'s", "'m" English
+        if let Some((_, ending)) = w.split_once('\'') {
+            if ["a", "e", "ya", "ye", "da", "de", "ta", "te", "dan", "den", "tan", "ten", "ın", "in", "un", "ün", "nın", "nin", "la", "le", "yla", "yle", "ı", "i", "yı", "yi"].contains(&ending) {
+                tr += 1;
+            } else if ["s", "m", "re", "ll", "ve", "t", "d"].contains(&ending) {
+                en += 1;
+            }
+        }
         let w = w.split('\'').next().unwrap_or(w); // "10'da" → "10", "i'm" stays a word below
         if TR_WORDS.contains(&w) || (w.chars().count() >= 4 && TR_ENDINGS.iter().any(|e| w.ends_with(e))) {
             tr += 1;
@@ -77,6 +86,8 @@ mod tests {
         assert_eq!(answer_language("notlarıma ekle bunu", None, "en"), "tr");
         assert_eq!(answer_language("sen karar ver", None, "en"), "tr");
         assert_eq!(answer_language("hi", None, "tr"), "en");
+        assert_eq!(answer_language("Ali'ye mail at", None, "en"), "tr", "final review M2");
+        assert_eq!(answer_language("Can'a mesaj at yarın", None, "en"), "tr");
     }
 
     #[test]

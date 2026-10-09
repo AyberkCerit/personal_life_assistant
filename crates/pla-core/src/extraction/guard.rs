@@ -3,44 +3,45 @@
 
 use super::{ItemType, MetricKind, RawExtraction};
 
-/// "4x4-6", "3-4x5", "3x8-10": a range of sets or repetitions belongs to a program, not to a
-/// workout someone did (they did one number).
+/// "4x4-6", "3-4x5", "3x8–10": a range of sets or repetitions belongs to a program, not to a
+/// workout someone did (they did one number). The dash sits right between the numbers: "3x10 - 60
+/// kg" is a log with a weight (final review I4).
 fn has_rep_range(text: &str) -> bool {
     let chars: Vec<char> = text.to_lowercase().chars().collect();
-    let num_end = |mut i: usize| {
+    let digits_end = |mut i: usize| {
         while i < chars.len() && chars[i].is_ascii_digit() {
             i += 1;
         }
         i
     };
-    let skip_space = |mut i: usize| {
+    let spaces_end = |mut i: usize| {
         while i < chars.len() && chars[i] == ' ' {
             i += 1;
         }
         i
     };
+    let is_dash = |i: usize| i < chars.len() && (chars[i] == '-' || chars[i] == '–');
+    let is_times = |i: usize| i < chars.len() && "x×*".contains(chars[i]);
     let mut i = 0;
     while i < chars.len() {
         if !chars[i].is_ascii_digit() || (i > 0 && chars[i - 1].is_ascii_digit()) {
             i += 1;
             continue;
         }
-        // number, then [x×*] number, then [-–] number; or number [-–] number [x×] number
-        let a = num_end(i);
-        let b = skip_space(a);
-        if b < chars.len() && "x×*".contains(chars[b]) {
-            let c = skip_space(b + 1);
-            let d = num_end(c);
-            let e = skip_space(d);
-            if d > c && e < chars.len() && "-–".contains(chars[e]) && num_end(skip_space(e + 1)) > skip_space(e + 1) {
+        let a = digits_end(i);
+        // N x N-N
+        let b = spaces_end(a);
+        if is_times(b) {
+            let c = spaces_end(b + 1);
+            let d = digits_end(c);
+            if d > c && is_dash(d) && digits_end(d + 1) > d + 1 {
                 return true;
             }
         }
-        if b < chars.len() && "-–".contains(chars[b]) {
-            let c = skip_space(b + 1);
-            let d = num_end(c);
-            let e = skip_space(d);
-            if d > c && e < chars.len() && "x×".contains(chars[e]) && num_end(skip_space(e + 1)) > skip_space(e + 1) {
+        // N-N x N
+        if is_dash(a) && digits_end(a + 1) > a + 1 {
+            let e = spaces_end(digits_end(a + 1));
+            if is_times(e) && digits_end(spaces_end(e + 1)) > spaces_end(e + 1) {
                 return true;
             }
         }
@@ -65,65 +66,112 @@ fn words(text: &str) -> Vec<String> {
     plain.split(|c: char| !c.is_alphanumeric()).filter(|w| !w.is_empty()).map(str::to_owned).collect()
 }
 
-/// A plan or program rather than a log: "program", "plan", "split", or a workout still to come.
-fn is_plan(text: &str) -> bool {
-    words(text).iter().any(|w| {
-        ["program", "plan", "split", "routine", "rutin"].iter().any(|p| w.starts_with(p))
-            || w.ends_with("acagim")
-            || w.ends_with("ecegim")
-            || w.ends_with("acak")
-            || w.ends_with("ecek")
-            || w == "will"
-            || w == "haftaya"
-    })
+/// A plan or program, word for word: not "plank", "planlama", "programming" or "Bulgarian split
+/// squat" (final review I4).
+fn names_a_plan(text: &str) -> bool {
+    const PLAN: [&str; 14] = ["program", "programi", "programim", "programimiz", "programs", "plan", "plani", "planim", "planimiz", "plans", "routine", "rutin", "rutinim", "split"];
+    let w = words(text);
+    w.iter().enumerate().any(|(i, x)| PLAN.contains(&x.as_str()) && !(x == "split" && w.get(i + 1).is_some_and(|n| n == "squat")))
+}
+
+/// A workout still to come: a future verb or "haftaya" in the block, and no past verb ("yaptım", "did")
+/// that would make it a log written beside a plan for later.
+fn is_future(text: &str) -> bool {
+    let w = words(text);
+    let past = w.iter().any(|x| x.len() > 4 && ["dim", "dum", "tim", "tum"].iter().any(|e| x.ends_with(e)) || ["did", "done", "finished"].contains(&x.as_str()));
+    !past && w.iter().any(|w| ["acagim", "ecegim", "acagiz", "ecegiz", "acak", "ecek"].iter().any(|e| w.ends_with(e) && w.len() > e.len() + 1) || w == "will" || w == "haftaya")
 }
 
 /// Whether the note gives a weight unit at all; without one a workout's number is not kilograms.
 fn names_a_weight(text: &str) -> bool {
     words(text).iter().any(|w| {
-        w.starts_with("kg") || w.starts_with("kilo") || w == "lb" || w == "lbs" || w.starts_with("pound") || w.starts_with("libre")
+        (w.starts_with("kg") || (w.starts_with("kilo") && !w.starts_with("kilomet")) || w == "lb" || w == "lbs" || w.starts_with("pound") || w.starts_with("libre"))
             || (w.ends_with("kg") && w.trim_end_matches("kg").chars().all(|c| c.is_ascii_digit() || c == '.' || c == ','))
     })
 }
 
-/// A goal or a wish: "75 kiloya inmek istiyorum", "my goal is 70 kg".
-fn is_goal(text: &str) -> bool {
-    words(text).iter().any(|w| w.starts_with("hedef") || w.starts_with("istiyor") || w == "goal" || w == "target" || w == "want" || w.starts_with("olmak"))
-}
+const GOAL: [&str; 6] = ["hedef", "istiyor", "olmak", "goal", "target", "want"];
 
-/// The part of `note` a block belongs to: the lines between blank lines around it. A list item is a
-/// block of its own, so "- Squat: 4x5" alone does not show that "- Deadlift: 3-4x5" next to it
-/// makes the whole list a program (seen in the real window).
-pub fn section_of<'a>(note: &'a str, block: &'a str) -> &'a str {
-    let block = block.trim();
-    // CRLF notes too: a blank line is any line with nothing but spaces
-    let mut sections: Vec<String> = vec![String::new()];
-    for line in note.lines() {
-        if line.trim().is_empty() {
-            sections.push(String::new());
+/// The numbers written in `text`, "82,5" and "82.5" as one.
+fn numbers(text: &str) -> Vec<f64> {
+    let chars: Vec<char> = text.chars().collect();
+    let mut out = Vec::new();
+    let mut i = 0;
+    while i < chars.len() {
+        if chars[i].is_ascii_digit() {
+            let mut j = i;
+            while j < chars.len() && (chars[j].is_ascii_digit() || ((chars[j] == ',' || chars[j] == '.') && chars.get(j + 1).is_some_and(char::is_ascii_digit))) {
+                j += 1;
+            }
+            let n: String = chars[i..j].iter().map(|c| if *c == ',' { '.' } else { *c }).collect();
+            out.extend(n.parse::<f64>().ok());
+            i = j;
         } else {
-            let s = sections.last_mut().expect("one section at least");
-            s.push_str(line);
-            s.push('\n');
+            i += 1;
         }
     }
-    let found = sections.iter().position(|s| !block.is_empty() && s.contains(block));
-    match found {
-        // a slice of `note` is not at hand once lines are joined; find the same text in it
-        Some(i) => note.find(sections[i].lines().next().unwrap_or_default()).map_or(block, |start| {
-            let end = sections[i].lines().last().and_then(|l| note[start..].find(l).map(|e| start + e + l.len())).unwrap_or(note.len());
-            &note[start..end]
-        }),
-        None => block,
+    out
+}
+
+/// The body weight `value` is the one wished for: it sits in the clause with the goal word ("75 kilo
+/// olmak istiyorum", "hedefim 75 kiloya inmek"); "bugün 82 kiloyum, 75 olmak istiyorum" keeps 82
+/// (final review I4).
+fn is_goal_value(text: &str, value: Option<f64>) -> bool {
+    let lower = text.to_lowercase();
+    let mut clauses: Vec<&str> = vec![lower.as_str()];
+    for sep in [", ", "; ", " ama ", " but ", " ve ", " and "] {
+        clauses = clauses.iter().flat_map(|c| c.split(sep)).collect();
+    }
+    let goals: Vec<&&str> = clauses.iter().filter(|c| GOAL.iter().any(|g| c.contains(g))).collect();
+    match value {
+        None => !goals.is_empty(),
+        Some(v) => goals.iter().any(|c| numbers(c).iter().any(|n| (n - v).abs() < 1e-9)),
     }
 }
 
-/// The items of `extraction` that `block` (in `section`, see `section_of`) supports: no workout from a
-/// program or plan, no workout weight the block does not state, no body weight from a goal.
+/// The part of `note` a block belongs to: the lines between blank lines around it, as a slice of
+/// the note (byte positions kept while splitting, final review M5). A list item is a block of its
+/// own, so "- Squat: 4x5" alone does not show that "- Deadlift: 3-4x5" next to it makes the whole
+/// list a program (seen in the real window).
+pub fn section_of<'a>(note: &'a str, block: &'a str) -> &'a str {
+    let wanted = block.trim().replace('\r', "");
+    if wanted.is_empty() {
+        return block;
+    }
+    let mut start: Option<usize> = None;
+    let mut offset = 0;
+    let mut sections: Vec<(usize, usize)> = Vec::new();
+    for line in note.split_inclusive('\n') {
+        let blank = line.trim().is_empty();
+        match (blank, start) {
+            (false, None) => start = Some(offset),
+            (true, Some(s)) => {
+                sections.push((s, offset));
+                start = None;
+            }
+            _ => {}
+        }
+        offset += line.len();
+    }
+    if let Some(s) = start {
+        sections.push((s, note.len()));
+    }
+    sections.iter().map(|(s, e)| &note[*s..*e]).find(|s| s.replace('\r', "").contains(&wanted)).unwrap_or(block)
+}
+
+fn is_list_item(block: &str) -> bool {
+    let t = block.trim_start();
+    t.starts_with(['-', '*', '+', '•']) || t.split_once('.').is_some_and(|(n, _)| !n.is_empty() && n.chars().all(|c| c.is_ascii_digit()))
+}
+
+/// The items of `extraction` that `block` (in `section`, see `section_of`) supports: no workout from
+/// a program or plan, no workout weight the block does not state, no body weight that is a goal. A
+/// list item is judged with its list; any other block on its own ("Sabah squat 5x5 100 kg yaptım"
+/// beside "akşam sinemaya gideceğim" in one paragraph stays, final review I4).
 pub fn guard(block: &str, section: &str, mut extraction: RawExtraction) -> RawExtraction {
-    let program = has_rep_range(section) || is_plan(section) || has_rep_range(block) || is_plan(block);
+    let context = if is_list_item(block) { section } else { block };
+    let program = has_rep_range(context) || names_a_plan(context) || is_future(block);
     let weight_named = names_a_weight(block);
-    let goal = is_goal(block);
     extraction.items.retain_mut(|item| {
         let Some(m) = item.metric.as_mut().filter(|_| item.kind == ItemType::Metric) else { return true };
         match m.kind {
@@ -135,7 +183,7 @@ pub fn guard(block: &str, section: &str, mut extraction: RawExtraction) -> RawEx
                 }
                 true
             }
-            Some(MetricKind::Weight) => !goal,
+            Some(MetricKind::Weight) => !is_goal_value(block, m.value),
             _ => true,
         }
     });
@@ -202,6 +250,47 @@ Bugün bench press 4x6 60 kg yaptım.";
         assert!(guard_one("Hedefim 75 kiloya inmek", parse_extraction(weight).unwrap()).items.is_empty());
         assert!(guard_one("75 kilo olmak istiyorum", parse_extraction(weight).unwrap()).items.is_empty());
         assert_eq!(guard_one("Bugün 75 kiloyum", parse_extraction(weight).unwrap()).items.len(), 1);
+    }
+
+    #[test]
+    fn the_review_cases_keep_real_workouts() {
+        // final review I4: an exercise named like a plan, a log written with a dash, a future plan
+        // elsewhere in the same paragraph
+        let kept = |text: &str, value: &str| guard_one(text, parse_extraction(&workout(value)).unwrap()).items.len();
+        assert_eq!(kept("plank 3x60 saniye yaptım", r#""value":0"#), 1);
+        assert_eq!(kept("Bulgarian split squat 3x10 20 kg", r#""value":20,"unit":"kg""#), 1);
+        assert_eq!(kept("Bench 3x10 - 60 kg", r#""value":60,"unit":"kg""#), 1);
+        let day = "Sabah squat 5x5 100 kg yaptım.
+Akşam sinemaya gideceğim.";
+        let block = "Sabah squat 5x5 100 kg yaptım.
+Akşam sinemaya gideceğim.";
+        assert_eq!(guard(block, section_of(day, block), parse_extraction(&workout(r#""value":100,"unit":"kg""#)).unwrap()).items.len(), 1, "done today, whatever is planned for tonight");
+        let log = "Sabah squat 5x5 100 kg yaptım.";
+        assert_eq!(guard(log, section_of("Sabah squat 5x5 100 kg yaptım.
+
+Akşam sinemaya gideceğim.", log), parse_extraction(&workout(r#""value":100,"unit":"kg""#)).unwrap()).items.len(), 1);
+        let km = guard_one("5 kilometre koştum, bench 3x10", parse_extraction(&workout(r#""value":40,"unit":"kg""#)).unwrap());
+        assert_eq!(km.items[0].metric.as_ref().unwrap().value, None, "kilometres are not kilograms (M6)");
+    }
+
+    #[test]
+    fn a_weight_beside_a_goal_stays() {
+        let weight = |v: &str| format!(r#"{{"items":[{{"type":"metric","metric":{{"kind":"weight","value":{v},"unit":"kg"}}}}]}}"#);
+        assert_eq!(guard_one("bugün 82 kiloyum, 75 olmak istiyorum", parse_extraction(&weight("82")).unwrap()).items.len(), 1);
+        assert!(guard_one("bugün 82 kiloyum, 75 olmak istiyorum", parse_extraction(&weight("75")).unwrap()).items.is_empty());
+        assert_eq!(guard_one("82,5 kiloyum", parse_extraction(&weight("82.5")).unwrap()).items.len(), 1);
+    }
+
+    #[test]
+    fn a_section_is_found_in_a_note_with_windows_line_ends() {
+        // final review M5
+        let note = "Güç 2
+- Squat: 4x5
+- Deadlift: 3-4x5
+
+Başka
+";
+        assert!(section_of(note, "- Squat: 4x5").contains("3-4x5"));
     }
 
     #[test]

@@ -119,11 +119,15 @@ fn messages(ctx: &Context, question: &str, calls: &[ToolRecord], now: DateTime<F
         m.push(json!({ "role": "assistant", "content": json!({ "tool": c.tool, "args": c.args }).to_string() }));
         let result = match &c.error {
             Some(e) => format!("Tool error: {e}. Fix the arguments or answer without the tool."),
-            // one open task found: the model said "marked as done" without the call (nl-quality)
-            None if c.tool == "query_tasks" && c.result["count"] == 1 && c.result["tasks"][0]["status"] == "open" => format!(
-                "Tool result: {}\nIf the user says they did this task, call complete_task with task_id {}.",
-                c.result, c.result["tasks"][0]["task_id"]
-            ),
+            // one open task found and the user says they did it: the model said "marked as done"
+            // without the call (nl-quality); never a nudge for a question (final review C1)
+            None if c.tool == "query_tasks"
+                && c.result["count"] == 1
+                && c.result["tasks"][0]["status"] == "open"
+                && says_done(question, c.result["tasks"][0]["title"].as_str().unwrap_or_default()) =>
+            {
+                format!("Tool result: {}\nThe user says they did this task: call complete_task with task_id {}.", c.result, c.result["tasks"][0]["task_id"])
+            }
             None => format!("Tool result: {}", c.result),
         };
         m.push(json!({ "role": "user", "content": result }));
@@ -221,37 +225,62 @@ fn without_made_up_time(tool: &str, mut args: Value, question: &str) -> Value {
     afternoon(tool, args, question)
 }
 
-/// "saat 3'te" is 15:00, as people say it: an hour from 1 to 7 with no word for the morning or the
-/// night, and not written as "03:00" (the eval saw 03:00 for a barber's appointment).
+/// Words of `text`, folded as the index folds them, without punctuation.
+fn words(text: &str) -> Vec<String> {
+    crate::index::key(text).split(|c: char| !c.is_alphanumeric()).filter(|w| !w.is_empty()).map(str::to_owned).collect()
+}
+
+/// "saat 3'te" is 15:00, as people say it (the eval saw 03:00 for a barber's appointment). Only a
+/// bare hour moves: "7:30", "6'da kalk", "sabah 7", "5:30am" and "gece 3" stay as they are; "akşam 7"
+/// and "at 7 pm" are the evening either way (final review I1).
 fn afternoon(tool: &str, mut args: Value, question: &str) -> Value {
     let Some(time) = args["time"].as_str().filter(|_| tool == "add_task").map(str::to_owned) else { return args };
     let Some((h, m)) = time.split_once(':').and_then(|(h, m)| Some((h.parse::<u32>().ok()?, m.to_owned()))) else { return args };
+    if !(1..=7).contains(&h) {
+        return args;
+    }
     let lower = crate::index::key(question);
-    let words: Vec<&str> = lower.split(|c: char| !c.is_alphanumeric()).collect();
-    let morning = lower.contains("a.m")
-        || words.iter().any(|w| ["sabah", "gece", "morning", "night", "erken"].iter().any(|p| w.starts_with(p)) || *w == "am" || w.ends_with("am") && w.len() <= 3 && w.chars().next().is_some_and(|c| c.is_ascii_digit()));
-    let written_early = lower.contains(&format!("0{h}:")) || lower.contains(&format!("0{h}."));
-    if (1..=7).contains(&h) && !morning && !written_early {
+    let w = words(question);
+    // minutes written by the user ("7:30", "6.45") mean the time as written
+    let with_minutes = lower.as_bytes().windows(3).any(|b| b[0].is_ascii_digit() && (b[1] == b':' || b[1] == b'.') && b[2].is_ascii_digit());
+    let says = |list: &[&str]| w.iter().any(|x| list.iter().any(|p| x == p || x.starts_with(p) && p.len() >= 5));
+    let am = lower.contains("a.m") || w.iter().any(|x| x == "am" || (x.ends_with("am") && x.trim_end_matches("am").chars().all(|c| c.is_ascii_digit() || c == ':') && x.len() > 2));
+    let pm = lower.contains("p.m") || w.iter().any(|x| x == "pm" || (x.ends_with("pm") && x.trim_end_matches("pm").chars().all(|c| c.is_ascii_digit() || c == ':') && x.len() > 2));
+    let evening = pm || says(&["akşam", "aksam", "evening", "night", "tonight", "öğleden", "ogleden", "afternoon"]);
+    let early = am || says(&["sabah", "morning", "erken", "gece", "kalk", "uyan", "alarm", "wake"]);
+    if evening || (!early && !with_minutes) {
         args["time"] = Value::String(format!("{:02}:{m}", h + 12));
     }
     args
 }
 
-/// Words that point back at the earlier message ("notlarıma ekle bunu").
-const POINTERS: [&str; 10] = ["bunu", "onu", "şunu", "bunları", "onları", "buna", "ona", "this", "that", "it"];
+/// Words that point back at the earlier message ("notlarıma ekle bunu", "save this"). Not "that" or
+/// "it": "make a note that …" brings its own content (final review C3).
+const POINTERS: [&str; 8] = ["bunu", "onu", "şunu", "bunları", "onları", "buna", "ona", "this"];
 
 fn points_back(text: &str) -> bool {
-    text.to_lowercase().split(|c: char| !c.is_alphanumeric()).any(|w| POINTERS.contains(&w))
+    words(text).iter().any(|w| POINTERS.contains(&w.as_str()))
+}
+
+/// The words of a note request itself; what is left is the user's own content.
+const COMMAND_WORDS: [&str; 30] = [
+    "notlarıma", "notlarima", "notlara", "notuma", "notlarım", "not", "al", "et", "ekle", "kaydet", "yaz", "oluştur", "olustur", "yeni", "bir", "ve",
+    "bunu", "onu", "şunu", "buna", "ona", "save", "note", "notes", "make", "this", "to", "my", "a", "of",
+];
+
+/// Whether `text` asks for a note without content of its own ("notlarıma ekle bunu", "save this").
+fn command_only(text: &str) -> bool {
+    !text.contains(':') && words(text).iter().all(|w| COMMAND_WORDS.contains(&w.as_str()))
 }
 
 /// What "bunu" means: the latest earlier message that is not itself a request about notes.
 fn referred(turns: &[Turn]) -> Option<&str> {
-    turns.iter().rev().map(|t| t.question.as_str()).find(|q| !points_back(q) && q.split_whitespace().count() > 3)
+    turns.iter().rev().map(|t| t.question.as_str()).find(|q| !points_back(q) && !command_only(q) && q.split_whitespace().count() > 3)
 }
 
-/// A small model writes the command ("notlarıma ekle bunu") or nothing as the note's body. When the
-/// user points back, or the body shares no word with what they said before, the earlier message is
-/// the body (the owner's screenshot: it asked for a title three times instead).
+/// A small model writes the command ("notlarıma ekle bunu") or nothing as the note's body: then, and
+/// only then, the earlier message is the body (the owner's screenshot asked for a title three times).
+/// A request with content of its own keeps it ("not al: süt ekmek", final review C3).
 fn with_referred_body(tool: &str, mut args: Value, question: &str, turns: &[Turn]) -> Value {
     if tool != "create_note" {
         return args;
@@ -259,27 +288,27 @@ fn with_referred_body(tool: &str, mut args: Value, question: &str, turns: &[Turn
     if let Some(name) = named_title(question) {
         args["title"] = Value::String(name);
     }
-    let Some(earlier) = referred(turns) else { return args };
-    let body = args["body"].as_str().unwrap_or_default().to_owned();
-    let stems = |t: &str| t.to_lowercase().split(|c: char| !c.is_alphanumeric()).filter(|w| w.chars().count() >= 4).map(|w| w.chars().take(5).collect::<String>()).collect::<Vec<_>>();
-    let shares = stems(&body).iter().any(|w| stems(earlier).contains(w));
-    let asked_to_keep = points_back(question) || question.split_whitespace().count() <= 4;
-    if asked_to_keep && !shares {
-        args["body"] = Value::String(earlier.to_owned());
+    let body = args["body"].as_str().unwrap_or_default().trim().to_owned();
+    let empty = body.is_empty() || command_only(&body) || crate::index::key(&body) == crate::index::key(question);
+    let refers = points_back(question) || delegates(question);
+    if empty && (refers || command_only(question)) {
+        if let Some(earlier) = referred(turns) {
+            args["body"] = Value::String(earlier.to_owned());
+        }
     }
     args
 }
 
-/// "tarifler diye bir not oluştur", "a note called Packing list: …": the title the user gave.
+/// "tarifler diye bir not oluştur", "a note called Packing list: …": the title the user gave. "X
+/// diye not al" means "note that X" and names nothing (final review M3).
 fn named_title(question: &str) -> Option<String> {
-    let lower = crate::index::key(question);
-    let words: Vec<&str> = question.split_whitespace().collect();
-    let keys: Vec<String> = lower.split_whitespace().map(str::to_owned).collect();
+    let original: Vec<&str> = question.split_whitespace().collect();
+    let keys: Vec<String> = original.iter().map(|w| crate::index::key(w).trim_matches(|c: char| !c.is_alphanumeric()).to_owned()).collect();
     if let Some(i) = keys.iter().position(|w| w == "diye") {
-        let next = keys.get(i + 1).map(String::as_str);
-        let not_after = matches!(next, Some("not" | "notu" | "notum")) || (next == Some("bir") && keys.get(i + 2).is_some_and(|w| w.starts_with("not")));
-        if not_after && i > 0 {
-            let name = words[i.saturating_sub(3)..i].join(" ");
+        let rest: Vec<&str> = keys[i + 1..].iter().map(String::as_str).filter(|w| *w != "bir").collect();
+        let creates = rest.first().is_some_and(|w| w.starts_with("not")) && rest.get(1).is_some_and(|w| ["oluştur", "olustur", "aç", "ac", "aç,", "yarat"].iter().any(|v| w.starts_with(v)));
+        if creates && i > 0 {
+            let name = original[i.saturating_sub(3)..i].join(" ");
             let name = name.rsplit([',', ':', '.']).next().unwrap_or(&name).trim().to_owned();
             return (!name.is_empty()).then_some(name);
         }
@@ -297,65 +326,97 @@ fn worth_suggesting(question: &str, done: &[ToolRecord]) -> bool {
     !question.trim_end().ends_with('?') && words >= 4 && !done.iter().any(|r| r.ok && r.tool != "search_notes")
 }
 
-/// Where the message "bunu" points at was kept already: a note offered and saved, or written. The
-/// real window wrote it twice after Save.
+/// Where the message "bunu" points at was kept already: a note offered and saved, or written, and not
+/// taken back since. The real window wrote it twice after Save; an undone one may be written again
+/// (final review I3).
 fn already_kept(question: &str, turns: &[Turn]) -> Option<String> {
-    if !points_back(question) && question.split_whitespace().count() > 4 {
+    if !(delegates(question) || points_back(question) && command_only(question)) {
         return None;
     }
     let earlier = referred(turns)?;
     let turn = turns.iter().rev().find(|t| t.question == earlier)?;
-    turn.tools.iter().find_map(|r| match r.tool.as_str() {
+    turn.tools.iter().filter(|r| r.result["undone"] != true).find_map(|r| match r.tool.as_str() {
         "suggest_note" => r.result["saved"].as_str().map(str::to_owned),
         "create_note" if r.ok => r.result["note"].as_str().map(str::to_owned),
         _ => None,
     })
 }
 
-/// A task id the user's words led to: found by query_tasks for this very question. The eval saw the
-/// model add a task and then complete it in the same breath.
-fn found_by_query(done: &[ToolRecord], id: &str) -> bool {
-    done.iter().any(|r| r.ok && r.tool == "query_tasks" && r.result["tasks"].as_array().is_some_and(|ts| ts.iter().any(|t| t["task_id"] == id)))
+/// The task a query of this question found, by id: the only tasks the assistant may complete. The
+/// eval saw the model add a task and then complete it in the same breath.
+fn found_task<'a>(done: &'a [ToolRecord], id: &str) -> Option<&'a Value> {
+    done.iter()
+        .filter(|r| r.ok && r.tool == "query_tasks")
+        .flat_map(|r| r.result["tasks"].as_array().into_iter().flatten())
+        .find(|t| t["task_id"] == id)
 }
 
-/// "faturayı ödedim", "I called the bank, mark it done": the user reports doing something.
-fn reports_done(question: &str) -> bool {
-    if question.trim_end().ends_with('?') {
+/// Question words: a message with one asks, it does not report (final review C1).
+const ASKING: [&str; 16] = ["ne", "neler", "kaç", "kac", "hangi", "nasıl", "nasil", "mi", "mı", "mu", "mü", "what", "which", "how", "when", "did"];
+
+/// Common English past forms whose task is written in the present ("paid" → "Pay the rent").
+const IRREGULAR: [(&str, &str); 8] = [("paid", "pay"), ("bought", "buy"), ("sent", "send"), ("went", "go"), ("did", "do"), ("made", "make"), ("took", "take"), ("got", "get")];
+
+/// Whether the user says they did `title`: an explicit "tamamla / bitti / done", or a verb in the past
+/// whose stem is the task's verb ("ödedim" ~ "Fatura öde", "aradım" ~ "Annemi ara", "called" ~ "Call
+/// the bank"). "unuttum" or "aldım" next to an unrelated task does not count (final review C1, I2).
+fn says_done(question: &str, title: &str) -> bool {
+    let q = words(question);
+    if question.trim_end().ends_with('?') || q.iter().any(|w| ASKING.contains(&w.as_str())) {
         return false;
     }
-    crate::index::key(question).split(|c: char| !c.is_alphanumeric()).any(|w| {
-        (w.chars().count() >= 4 && ["dim", "dım", "dum", "düm", "tim", "tım", "tum", "tüm"].iter().any(|e| w.ends_with(e)))
-            || ["tamamla", "tamamlandı", "bitti", "done", "finished", "paid", "called", "completed"].contains(&w)
+    if q.iter().any(|w| ["tamamla", "tamamlandı", "tamamlandi", "bitti", "bitirdim", "hallettim", "hallettim", "done", "finished", "completed"].contains(&w.as_str())) {
+        return true;
+    }
+    let title_words = words(title);
+    let verb = |base: &str| title_words.iter().any(|t| t == base || (t.chars().count() >= 3 && base.chars().count() >= 3 && (base.starts_with(t.as_str()) || t.starts_with(base))));
+    q.iter().any(|w| {
+        if let Some((_, base)) = IRREGULAR.iter().find(|(past, _)| past == w) {
+            return verb(base);
+        }
+        ["dım", "dim", "dum", "düm", "tım", "tim", "tum", "tüm", "ed"].iter().find_map(|e| w.strip_suffix(e)).is_some_and(|stem| stem.chars().count() >= 2 && verb(stem))
     })
 }
 
-/// "sen karar ver", "you decide": the user leaves the choice to PLA.
+/// "sen karar ver", "you decide": the user leaves the choice to PLA. "karar verdim" is not it.
 fn delegates(question: &str) -> bool {
-    let k = crate::index::key(question);
-    ["karar ver", "sen seç", "sen sec", "sen bil", "fark etmez", "farketmez", "you decide", "up to you", "your call"].iter().any(|p| k.contains(p))
+    let w = words(question);
+    let pair = |a: &str, b: &str| w.windows(2).any(|p| p[0] == a && p[1] == b);
+    pair("karar", "ver") || pair("sen", "seç") || pair("sen", "sec") || pair("sen", "bil") || pair("fark", "etmez") || w.iter().any(|x| x == "farketmez")
+        || pair("you", "decide") || pair("up", "to") && w.iter().any(|x| x == "you") || pair("your", "call")
+}
+
+/// The earlier message asked for a note in so many words ("notlarıma ekle", "not al", "save this").
+fn asked_for_note(text: &str) -> bool {
+    let w = words(text);
+    w.iter().any(|x| ["notlarıma", "notlarima", "notlara", "notuma", "kaydet", "note", "save"].contains(&x.as_str()))
+        || w.windows(2).any(|p| p[0] == "not" && ["al", "et", "ekle", "oluştur", "olustur", "aç", "ac", "yaz"].contains(&p[1].as_str()))
 }
 
 /// What the code does when the model only answers but the user's words leave no doubt (the eval's
-/// remaining misses, narrowly): a task the model found and the user says is done gets completed
-/// (with its Undo); "sen karar ver" after asking for a note writes the note.
+/// remaining misses, narrowly): a task the model found alone and the user says they did gets completed
+/// (with its Undo); "sen karar ver" right after asking for a note writes that note. Never after
+/// another write in this question (final review C2).
 fn fallback(question: &str, turns: &[Turn], done: &[ToolRecord]) -> Option<(String, Value)> {
-    if reports_done(question) && !done.iter().any(|r| r.tool == "complete_task") {
-        let found = done.iter().rev().find(|r| r.ok && r.tool == "query_tasks")?;
+    if done.iter().any(|r| r.ok && WRITES.contains(&r.tool.as_str())) {
+        return None;
+    }
+    if let Some(found) = done.iter().rev().find(|r| r.ok && r.tool == "query_tasks") {
         let tasks = found.result["tasks"].as_array()?;
-        if tasks.len() == 1 && tasks[0]["status"] == "open" {
-            return Some(("complete_task".into(), json!({ "task_id": tasks[0]["task_id"] })));
+        let open: Vec<&Value> = tasks.iter().filter(|t| t["status"] == "open").collect();
+        if open.len() == 1 && says_done(question, open[0]["title"].as_str().unwrap_or_default()) {
+            return Some(("complete_task".into(), json!({ "task_id": open[0]["task_id"] })));
         }
         return None;
     }
-    let note_asked = turns.last().is_some_and(|t| {
-        let k = crate::index::key(&t.question);
-        ["not", "kaydet", "ekle", "note", "save"].iter().any(|w| k.contains(w))
-    });
-    if delegates(question) && note_asked && !done.iter().any(|r| r.tool == "create_note") {
+    if delegates(question) && turns.last().is_some_and(|t| asked_for_note(&t.question)) {
         return Some(("create_note".into(), json!({ "title": "", "body": referred(turns)? })));
     }
     None
 }
+
+/// The assistant's writes (what the fallback must not add to).
+const WRITES: [&str; 4] = ["add_task", "complete_task", "log_metric", "create_note"];
 
 /// Whether this call was made already for this question: the same call, or a task with the same
 /// title and date (a write must not happen twice because a small model asked twice).
@@ -425,8 +486,10 @@ pub fn answer(
         }
         on(Progress::Working(Some(tool.clone())));
         let kept = (tool == "create_note").then(|| already_kept(question, turns)).flatten();
-        let ran = if tool == "complete_task" && !found_by_query(&shown, args["task_id"].as_str().unwrap_or_default()) {
-            Err("take the task_id from a query_tasks call for what the user said they did".to_owned())
+        let target = found_task(&shown, args["task_id"].as_str().unwrap_or_default());
+        let done_by_user = target.is_some_and(|t| says_done(question, t["title"].as_str().unwrap_or_default()));
+        let ran = if tool == "complete_task" && !done_by_user {
+            Err("complete a task only when the user says they did it; take its task_id from query_tasks".to_owned())
         } else if let Some(path) = kept {
             Err(format!("that is saved already as the note {path}; tell the user, write nothing"))
         } else {
@@ -734,6 +797,78 @@ mod tests {
         assert_eq!(t("06:00", "at 6am"), "06:00");
         assert_eq!(t("03:00", "03:00'te alarm"), "03:00", "written as early as it is");
         assert_eq!(t("10:00", "10'da toplantı"), "10:00");
+        // final review I1: what the user wrote or meant early stays
+        assert_eq!(t("07:30", "7:30'da kahvaltı"), "07:30");
+        assert_eq!(t("05:30", "5:30am flight"), "05:30");
+        assert_eq!(t("06:00", "yarın 6'da kalk"), "06:00");
+        assert_eq!(t("07:00", "Friday night at 7"), "19:00");
+        assert_eq!(t("07:30", "akşam 7:30'da sinema"), "19:30");
+    }
+
+    #[test]
+    fn a_task_is_done_only_when_the_user_says_so() {
+        // final review C1, I2: "unuttum" or an unrelated "aldım" next to one found task
+        assert!(says_done("faturayı ödedim", "Fatura öde"));
+        assert!(says_done("annemi aradım, o görevi tamamla", "Annemi ara"));
+        assert!(says_done("I paid the rent, mark it done", "Pay the rent"));
+        assert!(says_done("I called the bank", "Call the bank"));
+        assert!(!says_done("yarın ne işim var, unuttum", "Annemi ara"));
+        assert!(!says_done("annemin doğum günü hediyesini aldım", "Annemi ara"));
+        assert!(!says_done("faturayı ödedim mi", "Fatura öde"), "a question");
+        assert!(!says_done("geçen hafta ne yaptım", "Rapor yap"));
+    }
+
+    #[test]
+    fn a_question_with_one_found_task_completes_nothing() {
+        let e = env();
+        crate::tasks::add_task_as(&e.pla, &crate::tasks::TaskInput { title: "Annemi ara".into(), details: None, date: Some("2026-10-07".into()), time: None, remind: Some(false) }, "manual", now()).unwrap();
+        let tool_env = ToolEnv { vault: &e.vault, pla: &e.pla, cache: &e.cache, now: now(), validation: ValidationSettings::default() };
+        let query = "{\"tool\":\"query_tasks\",\"args\":{\"list\":\"upcoming\"}}";
+        let mut model = scripted(&[query], "Yarın annemi arayacaksın.");
+        let a = answer(&mut model, &tool_env, "yarın ne işim var, unuttum", &[], None, "tr", &AtomicBool::new(false), &mut |_| {}).unwrap();
+        assert!(!a.tools.iter().any(|t| t.tool == "complete_task"), "{:?}", a.tools);
+        let decide = model.bodies[1]["messages"].as_array().unwrap();
+        assert!(!decide.iter().any(|m| m["content"].as_str().unwrap_or_default().contains("call complete_task with task_id")), "no nudge either");
+    }
+
+    #[test]
+    fn you_decide_after_a_task_writes_no_note() {
+        // final review C2: "toplantı ekle" → a question → "sen karar ver" → add_task, and no note
+        let e = env();
+        let tool_env = ToolEnv { vault: &e.vault, pla: &e.pla, cache: &e.cache, now: now(), validation: ValidationSettings::default() };
+        let add = "{\"tool\":\"add_task\",\"args\":{\"title\":\"Toplantı\",\"date\":\"2026-10-07\",\"time\":\"14:00\"}}";
+        let mut model = scripted(&[add], "Ekledim.");
+        let a = answer(&mut model, &tool_env, "sen karar ver", &[turn("yarın öğleden sonra toplantı ekle")], None, "tr", &AtomicBool::new(false), &mut |_| {}).unwrap();
+        assert_eq!(a.tools.iter().map(|t| t.tool.as_str()).collect::<Vec<_>>(), ["add_task"]);
+        assert!(!delegates("karar verdim, yarın başlıyorum"));
+    }
+
+    #[test]
+    fn a_note_request_with_its_own_content_keeps_it() {
+        // final review C3
+        let turns = [turn("how many steps did I walk this week?")];
+        let own = with_referred_body("create_note", json!({ "title": "Dentist", "body": "" }), "make a note that the dentist moved to Monday", &turns);
+        assert_eq!(own["body"], "", "\"that\" does not point back; the engine keeps what the model wrote");
+        let milk = with_referred_body("create_note", json!({ "title": "Market", "body": "süt ekmek" }), "not al: süt ekmek", &[turn("bugün derste işletim sistemleri öğrendik")]);
+        assert_eq!(milk["body"], "süt ekmek");
+    }
+
+    #[test]
+    fn an_undone_note_may_be_written_again() {
+        // final review I3
+        let mut told = turn("bu gün derste işletim sistemleri öğrendik chapter 1 olarak");
+        told.tools = vec![ToolRecord {
+            tool: "suggest_note".into(),
+            args: json!({}),
+            ok: true,
+            result: json!({ "title": "Ders", "body": "x", "saved": "notes/Ders.md", "undone": true }),
+            error: None,
+            undo: None,
+        }];
+        assert_eq!(already_kept("notlarıma ekle bunu", &[told.clone()]), None);
+        told.tools[0].result.as_object_mut().unwrap().remove("undone");
+        assert_eq!(already_kept("notlarıma ekle bunu", &[told.clone()]).as_deref(), Some("notes/Ders.md"));
+        assert_eq!(already_kept("not al: wifi 1234", &[told]), None, "its own content");
     }
 
     #[test]

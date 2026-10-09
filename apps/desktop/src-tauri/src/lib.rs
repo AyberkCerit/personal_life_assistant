@@ -36,6 +36,8 @@ pub fn run() {
             // FR-SET-016: started by Windows sign-in → stay in the tray.
             if !std::env::args().any(|a| a == "--hidden") {
                 tray::show_main(app.handle());
+            } else if let Some(window) = tauri::Manager::get_webview_window(app, "main") {
+                webview_memory::set_low(&window, true); // in the tray from the start (final review M7)
             }
             Ok(())
         })

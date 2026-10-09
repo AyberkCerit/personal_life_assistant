@@ -88,7 +88,9 @@ fn upcoming(today: NaiveDate, weekday: u32) -> NaiveDate {
 /// The example's decision as JSON text, its date tokens made real for `today`.
 pub fn render(e: &Example, today: NaiveDate) -> String {
     let mut text = e.d.to_string();
-    let day25 = if today.day() <= 25 { today.with_day(25) } else { (today + Duration::days(31)).with_day(25) };
+    // after the 25th, next month's: from its first day, so Oct 31 is not Dec 25 (final review M1)
+    let next_month = (today.with_day(1).unwrap_or(today) + Duration::days(32)).with_day(1);
+    let day25 = if today.day() <= 25 { today.with_day(25) } else { next_month.and_then(|d| d.with_day(25)) };
     let mut tokens: Vec<(String, NaiveDate)> = vec![
         ("{today}".into(), today),
         ("{tomorrow}".into(), today + Duration::days(1)),
@@ -159,5 +161,9 @@ mod tests {
         assert!(render(e, d("2026-10-09")).contains("2026-10-10"), "Friday → the next Saturday");
         let e = bank.iter().find(|e| e.q.starts_with("I need to pay the rent on Friday")).unwrap();
         assert!(render(e, d("2026-10-09")).contains("2026-10-16"), "on a Friday, \"Friday\" is next week's");
+        let e = bank.iter().find(|e| e.d.to_string().contains("{day25}")).unwrap();
+        for (today, want) in [("2026-10-31", "2026-11-25"), ("2026-01-30", "2026-02-25"), ("2026-12-28", "2027-01-25"), ("2026-10-25", "2026-10-25")] {
+            assert!(render(e, d(today)).contains(want), "{today}");
+        }
     }
 }

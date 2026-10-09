@@ -43,6 +43,23 @@ fn date_token(s: &str) -> String {
     }
 }
 
+/// How close two messages are: shared word stems (five letters, digits as one sign), Jaccard.
+fn closeness(a: &str, b: &str) -> f64 {
+    let stems = |s: &str| -> std::collections::BTreeSet<String> {
+        pla_core::index::key(s)
+            .split(|c: char| !c.is_alphanumeric())
+            .filter(|w| !w.is_empty())
+            .map(|w| if w.chars().all(|c| c.is_ascii_digit()) { "#".to_owned() } else { w.chars().take(5).collect() })
+            .collect()
+    };
+    let (x, y) = (stems(a), stems(b));
+    let union = x.union(&y).count();
+    if union == 0 { 0.0 } else { x.intersection(&y).count() as f64 / union as f64 }
+}
+
+/// A held-out case shares less than this with every example in the bank.
+const HELD_OUT_MAX: f64 = 0.5;
+
 /// The answer's language, judged apart from the app's own detection.
 fn answer_language(text: &str) -> Option<&'static str> {
     let lower = pla_core::index::key(text); // "İyi" → "iyi" (Rust's own lower case adds a dot)
@@ -220,14 +237,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     cfg.startup_timeout = Duration::from_secs(120);
     let mut model = ModelHost::new(cfg, Duration::from_secs(600));
 
-    // the bank must not hold the cases themselves: the model would be shown the answer
-    let bank: Vec<String> = pla_core::qa::examples::bank().into_iter().map(|e| e.q.to_lowercase()).collect();
+    // the bank must not hold the cases themselves: the model would be shown the answer; held-out
+    // cases must not even be close to an example (final review I5)
+    let bank_q: Vec<String> = pla_core::qa::examples::bank().into_iter().map(|e| e.q).collect();
     let cases = std::fs::read_to_string(format!("{CASES}/assistant.jsonl"))?;
     for line in cases.lines().filter(|l| l.starts_with('{')) {
         let case: Value = serde_json::from_str(line)?;
-        let q = case["q"].as_str().unwrap_or_default().to_lowercase();
-        if bank.contains(&q) {
+        let q = case["q"].as_str().unwrap_or_default();
+        let closest = bank_q.iter().map(|b| (closeness(q, b), b)).max_by(|a, b| a.0.total_cmp(&b.0));
+        if bank_q.iter().any(|b| b.to_lowercase() == q.to_lowercase()) {
             return Err(format!("case {} is in assets/qa_examples.jsonl", case["id"]).into());
+        }
+        if let (Some((score, near)), true) = (closest, case["cat"] == "heldout") {
+            if score >= HELD_OUT_MAX {
+                return Err(format!("held-out case {} is {score:.2} close to the example {near:?}", case["id"]).into());
+            }
         }
     }
 

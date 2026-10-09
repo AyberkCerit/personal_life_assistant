@@ -70,3 +70,25 @@
 {"id":"mixed-task-metric","cat":"task","q":"dün 7 saat uyudum, yarın da 9'da toplantı var","expect":{"lang":"tr","writes":["log_metric","add_task"]}}
 {"id":"chit-chat-hava","cat":"language","q":"bugün hava çok güzel","expect":{"lang":"tr","writes":[]}}
 {"id":"chit-chat-yorgun","cat":"language","q":"çok yorgunum","expect":{"lang":"tr","writes":[]}}
+// Negative cases from the final review: nothing may be written or completed here, or only what was asked.
+{"id":"neg-unuttum","cat":"negative","q":"yarın ne işim var, unuttum","tasks":[{"title":"Annemi ara","date":"tomorrow"}],"expect":{"lang":"tr","writes":[]}}
+{"id":"neg-hediye","cat":"negative","q":"annemin doğum günü hediyesini aldım","tasks":[{"title":"Annemi ara","date":"today"}],"expect":{"lang":"tr","writes":[]}}
+{"id":"neg-odedim-mi","cat":"negative","q":"faturayı ödedim mi?","tasks":[{"title":"Fatura öde","date":"today"}],"expect":{"lang":"tr","writes":[]}}
+{"id":"neg-karar-gorev","cat":"negative","q":"sen karar ver","turns":[["yarın öğleden sonra toplantı ekle","Saat kaçta olsun?"]],"expect":{"lang":"tr","writes":["add_task"]}}
+{"id":"neg-note-that","cat":"negative","q":"make a note that the dentist moved to Monday","turns":[["how many steps did I walk this week?","You walked 0 steps this week."]],"expect":{"lang":"en","writes":["create_note"],"args":{"create_note":{"body":"dentist"}}}}
+// Held-out cases: written apart from the example bank (the harness refuses ones too close to it).
+{"id":"heldout-terazi","cat":"heldout","q":"terazi 91 gösterdi bu sabah","expect":{"lang":"tr","writes":["log_metric"],"args":{"log_metric":{"kind":"weight","value":91}}}}
+{"id":"heldout-scale-en","cat":"heldout","q":"my scale said 77.3 this morning","expect":{"lang":"en","writes":["log_metric"],"args":{"log_metric":{"kind":"weight","value":77.3}}}}
+{"id":"heldout-su-bitirdim","cat":"heldout","q":"öğle yemeğinden sonra 1 litre suyu bitirdim","expect":{"lang":"tr","writes":["log_metric"],"args":{"log_metric":{"kind":"water","value":1}}}}
+{"id":"heldout-pedometre","cat":"heldout","q":"pedometre 6400 diyor","expect":{"lang":"tr","writes":["log_metric"],"args":{"log_metric":{"kind":"steps","value":6400}}}}
+{"id":"heldout-veteriner","cat":"heldout","q":"perşembe öğleden sonra veteriner randevusu","expect":{"lang":"tr","writes":["add_task"],"args":{"add_task":{"date":"2026-10-15"}}}}
+{"id":"heldout-muayene","cat":"heldout","q":"hafta sonu arabayı muayeneye götürmem gerekiyor","expect":{"lang":"tr","writes":["add_task"]}}
+{"id":"heldout-elektrikci","cat":"heldout","q":"elektrikçiyi aradım","tasks":[{"title":"Elektrikçiyi ara","date":"today"}],"expect":{"lang":"tr","writes":["complete_task"]}}
+{"id":"heldout-sakla","cat":"heldout","q":"şu tarifi sakla: menemen için 3 domates, 2 biber, 3 yumurta","expect":{"lang":"tr","writes":["create_note"],"args":{"create_note":{"body":"domates"}},"no_question":true}}
+{"id":"heldout-ozet","cat":"heldout","q":"kitap kulübü için okuduğum bölümün özetini kaydet: kahraman köyden ayrılıyor","expect":{"lang":"tr","writes":["create_note"],"args":{"create_note":{"body":"kahraman"}},"no_question":true}}
+{"id":"heldout-jot","cat":"heldout","q":"jot down: buy stamps, call grandma","expect":{"lang":"en","writes":["create_note"],"args":{"create_note":{"body":"stamps"}},"no_question":true}}
+{"id":"heldout-su-kaydi","cat":"heldout","q":"bu ay ortalama ne kadar su içmişim","expect":{"lang":"tr","writes":[],"reads":["query_metrics"],"args":{"query_metrics":{"kind":"water"}}}}
+{"id":"heldout-sleep-avg","cat":"heldout","q":"how did I sleep on average this month?","expect":{"lang":"en","writes":[],"reads":["query_metrics"],"args":{"query_metrics":{"kind":"sleep"}}}}
+{"id":"heldout-kutuphane","cat":"heldout","q":"bugün kütüphanede veri tabanları çalıştım, normalizasyonu bitirdim","expect":{"lang":"tr","writes":[],"suggest":true}}
+{"id":"heldout-gym-closed","cat":"heldout","q":"spor salonu bayramda kapalıymış, öğrendim","expect":{"lang":"tr","writes":[],"suggest":true}}
+{"id":"heldout-selam-hal","cat":"heldout","q":"hey, ne var ne yok","expect":{"lang":"tr","writes":[],"suggest":false}}

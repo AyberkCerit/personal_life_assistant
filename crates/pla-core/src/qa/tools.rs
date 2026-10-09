@@ -129,10 +129,16 @@ fn title_matches(title: &str, text: &str) -> bool {
     if crate::index::key(title).contains(&crate::index::key(text)) {
         return true;
     }
-    words(text).iter().filter(|w| w.chars().count() >= 4).any(|w| {
-        let stem: String = w.chars().take(4).collect();
-        title_words.iter().any(|t| t.starts_with(&stem))
-    })
+    // most of the words must fit: "annemin hediyesi" is not "Annemi ara" (final review I2)
+    let asked: Vec<String> = words(text).into_iter().filter(|w| w.chars().count() >= 3).collect();
+    let fits = asked
+        .iter()
+        .filter(|w| {
+            let stem: String = w.chars().take(4).collect();
+            title_words.iter().any(|t| (w.chars().count() >= 4 && t.starts_with(&stem)) || (t.chars().count() >= 3 && w.starts_with(t.as_str())))
+        })
+        .count();
+    !asked.is_empty() && fits * 2 > asked.len()
 }
 
 /// A file name from the model's title: characters Windows refuses become spaces; an empty one comes
@@ -394,6 +400,8 @@ mod tests {
         assert_eq!(said.result["tasks"][0]["title"], "Annemi ara");
         let said = run(&env, "query_tasks", &json!({ "list": "all", "text": "su iç" })).unwrap();
         assert_eq!(said.result["count"], json!(0), "short words alone match nothing");
+        let said = run(&env, "query_tasks", &json!({ "list": "all", "text": "annemin hediyesi" })).unwrap();
+        assert_eq!(said.result["count"], json!(0), "one word of two is not the task");
         let id = q.result["tasks"][0]["task_id"].as_str().unwrap().to_owned();
         let done = run(&env, "complete_task", &json!({ "task_id": id })).unwrap();
         assert!(run(&env, "complete_task", &json!({ "task_id": id })).unwrap_err().contains("not open"));
