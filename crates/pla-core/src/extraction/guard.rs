@@ -91,12 +91,39 @@ fn is_goal(text: &str) -> bool {
     words(text).iter().any(|w| w.starts_with("hedef") || w.starts_with("istiyor") || w == "goal" || w == "target" || w == "want" || w.starts_with("olmak"))
 }
 
-/// The items of `extraction` that `text` supports: no workout from a program or plan, no workout
-/// weight the note does not state, no body weight from a goal.
-pub fn guard(text: &str, mut extraction: RawExtraction) -> RawExtraction {
-    let program = has_rep_range(text) || is_plan(text);
-    let weight_named = names_a_weight(text);
-    let goal = is_goal(text);
+/// The part of `note` a block belongs to: the lines between blank lines around it. A list item is a
+/// block of its own, so "- Squat: 4x5" alone does not show that "- Deadlift: 3-4x5" next to it
+/// makes the whole list a program (seen in the real window).
+pub fn section_of<'a>(note: &'a str, block: &'a str) -> &'a str {
+    let block = block.trim();
+    // CRLF notes too: a blank line is any line with nothing but spaces
+    let mut sections: Vec<String> = vec![String::new()];
+    for line in note.lines() {
+        if line.trim().is_empty() {
+            sections.push(String::new());
+        } else {
+            let s = sections.last_mut().expect("one section at least");
+            s.push_str(line);
+            s.push('\n');
+        }
+    }
+    let found = sections.iter().position(|s| !block.is_empty() && s.contains(block));
+    match found {
+        // a slice of `note` is not at hand once lines are joined; find the same text in it
+        Some(i) => note.find(sections[i].lines().next().unwrap_or_default()).map_or(block, |start| {
+            let end = sections[i].lines().last().and_then(|l| note[start..].find(l).map(|e| start + e + l.len())).unwrap_or(note.len());
+            &note[start..end]
+        }),
+        None => block,
+    }
+}
+
+/// The items of `extraction` that `block` (in `section`, see `section_of`) supports: no workout from a
+/// program or plan, no workout weight the block does not state, no body weight from a goal.
+pub fn guard(block: &str, section: &str, mut extraction: RawExtraction) -> RawExtraction {
+    let program = has_rep_range(section) || is_plan(section) || has_rep_range(block) || is_plan(block);
+    let weight_named = names_a_weight(block);
+    let goal = is_goal(block);
     extraction.items.retain_mut(|item| {
         let Some(m) = item.metric.as_mut().filter(|_| item.kind == ItemType::Metric) else { return true };
         match m.kind {
@@ -124,24 +151,47 @@ mod tests {
         format!(r#"{{"items":[{{"type":"metric","metric":{{"kind":"workout","exercise":"bench press","sets":4,"reps":4,{value}}}}}]}}"#)
     }
 
+    fn guard_one(text: &str, e: RawExtraction) -> RawExtraction {
+        guard(text, text, e)
+    }
+
+    #[test]
+    fn a_list_item_is_judged_with_its_list() {
+        // the real window: "- Squat: 4x5" became a workout because its neighbour held the range
+        let note = "Güç 1 (Pazar)
+- Bench press: 4x4-6
+
+Güç 2 (Pazartesi)
+- Squat: 4x5
+- Deadlift: 3-4x5 (RPE 8)
+- Leg press: 4x5
+
+Bugün bench press 4x6 60 kg yaptım.";
+        let section = section_of(note, "- Squat: 4x5");
+        assert!(section.starts_with("Güç 2") && section.contains("3-4x5"), "{section}");
+        assert!(guard("- Squat: 4x5", section, parse_extraction(&workout(r#""value":0"#)).unwrap()).items.is_empty());
+        let done = "Bugün bench press 4x6 60 kg yaptım.";
+        assert_eq!(guard(done, section_of(note, done), parse_extraction(&workout(r#""value":60,"unit":"kg""#)).unwrap()).items.len(), 1, "a log beside a program stays");
+    }
+
     #[test]
     fn a_program_gives_no_workouts() {
         // the owner's pasted program
         let text = "Güç 1 (Pazar)\n- Bench press: 4x4-6\n- Barbell row: 4x4-6";
-        assert!(guard(text, parse_extraction(&workout(r#""value":6"#)).unwrap()).items.is_empty());
+        assert!(guard(text, text, parse_extraction(&workout(r#""value":6"#)).unwrap()).items.is_empty());
         for t in ["Deadlift: 3-4x5 (RPE 8)", "Leg curl: 3 x 8-10", "Antrenman planı:\nSquat 5x5", "Yarın bench press 4x6 80 kg deneyeceğim.", "Haftaya programım: pazartesi göğüs"] {
-            assert!(guard(t, parse_extraction(&workout(r#""value":80,"unit":"kg""#)).unwrap()).items.is_empty(), "{t}");
+            assert!(guard(t, t, parse_extraction(&workout(r#""value":80,"unit":"kg""#)).unwrap()).items.is_empty(), "{t}");
         }
     }
 
     #[test]
     fn a_workout_keeps_only_the_weight_the_note_states() {
-        let kept = guard("Bugün bench press 4x4 60 kg yaptım", parse_extraction(&workout(r#""value":60,"unit":"kg""#)).unwrap());
+        let kept = guard_one("Bugün bench press 4x4 60 kg yaptım", parse_extraction(&workout(r#""value":60,"unit":"kg""#)).unwrap());
         assert_eq!(kept.items[0].metric.as_ref().unwrap().value, Some(60.0));
         for t in ["bench press 4x4 60kg", "bench 4x4 60 kilo", "bench 4x4 at 135 lb"] {
-            assert!(guard(t, parse_extraction(&workout(r#""value":60"#)).unwrap()).items[0].metric.as_ref().unwrap().value.is_some(), "{t}");
+            assert!(guard(t, t, parse_extraction(&workout(r#""value":60"#)).unwrap()).items[0].metric.as_ref().unwrap().value.is_some(), "{t}");
         }
-        let dropped = guard("Bugün bench press 4x6 yaptım", parse_extraction(&workout(r#""value":6,"unit":"kg""#)).unwrap());
+        let dropped = guard_one("Bugün bench press 4x6 yaptım", parse_extraction(&workout(r#""value":6,"unit":"kg""#)).unwrap());
         let m = dropped.items[0].metric.as_ref().unwrap();
         assert_eq!((m.value, m.sets, m.reps), (None, Some(4), Some(4)), "sets and reps stay, the made-up weight goes");
     }
@@ -149,14 +199,14 @@ mod tests {
     #[test]
     fn a_goal_is_not_a_body_weight() {
         let weight = r#"{"items":[{"type":"metric","metric":{"kind":"weight","value":75,"unit":"kg"}}]}"#;
-        assert!(guard("Hedefim 75 kiloya inmek", parse_extraction(weight).unwrap()).items.is_empty());
-        assert!(guard("75 kilo olmak istiyorum", parse_extraction(weight).unwrap()).items.is_empty());
-        assert_eq!(guard("Bugün 75 kiloyum", parse_extraction(weight).unwrap()).items.len(), 1);
+        assert!(guard_one("Hedefim 75 kiloya inmek", parse_extraction(weight).unwrap()).items.is_empty());
+        assert!(guard_one("75 kilo olmak istiyorum", parse_extraction(weight).unwrap()).items.is_empty());
+        assert_eq!(guard_one("Bugün 75 kiloyum", parse_extraction(weight).unwrap()).items.len(), 1);
     }
 
     #[test]
     fn tasks_and_other_measurements_pass() {
         let mixed = r#"{"items":[{"type":"task","title":"Dişçi"},{"type":"metric","metric":{"kind":"sleep","value":7,"unit":"h"}}]}"#;
-        assert_eq!(guard("Yarın dişçi. Programım yoğun, 7 saat uyudum.", parse_extraction(mixed).unwrap()).items.len(), 2);
+        assert_eq!(guard_one("Yarın dişçi. Programım yoğun, 7 saat uyudum.", parse_extraction(mixed).unwrap()).items.len(), 2);
     }
 }

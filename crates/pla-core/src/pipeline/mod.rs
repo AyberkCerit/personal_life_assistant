@@ -206,7 +206,7 @@ pub fn process_queue_with(
                             &tx,
                             &block.block_id,
                             block.reference_date,
-                            &crate::extraction::guard(&block.text, extraction), // nl-quality: programs, unstated weights, goals
+                            &crate::extraction::guard(&block.text, crate::extraction::section_of(&text, &block.text), extraction), // nl-quality: programs, unstated weights, goals
                             &settings.validation,
                             block.first_sight.then(|| now.date_naive()),
                             now,
@@ -307,6 +307,28 @@ mod tests {
 
     const DENTIST: &str = "Yarın 9'da dişçi.";
     const DENTIST_JSON: &str = r#"{"items": [{"type": "task", "title": "Dişçi", "when": {"day_offset": 1, "time": "09:00"}}]}"#;
+
+    #[test]
+    fn a_pasted_program_gives_no_workouts_item_by_item() {
+        // the real window: each list item is a block, and "- Squat: 4x5" alone looked done today
+        let tmp = tempfile::tempdir().unwrap();
+        let vault = open_vault(tmp.path()).unwrap();
+        let mut conn = open_databases(&tmp.path().join(".data")).unwrap().pla;
+        write(&vault, "inbox/Program.md", "Güç 2 (Pazartesi)\n- Squat: 4x5\n- Deadlift: 3-4x5 (RPE 8)\n\nBugün bench press 4x6 60 kg yaptım.\n".as_bytes());
+        let squat = r#"{"items":[{"type":"metric","metric":{"kind":"workout","exercise":"squat","sets":4,"reps":5}}]}"#;
+        let bench = r#"{"items":[{"type":"metric","metric":{"kind":"workout","exercise":"bench press","sets":4,"reps":6,"value":60,"unit":"kg"}}]}"#;
+        let mut x = Scripted::new(&[("- Squat: 4x5", squat), ("Bugün bench press 4x6 60 kg yaptım.", bench)]);
+        enqueue_all(&vault, &conn, at(T1)).unwrap();
+        process_queue(&vault, &mut conn, &mut x, &PipelineSettings::default(), at(T1)).unwrap();
+        let exercises: Vec<String> = conn
+            .prepare("SELECT json_extract(value_json, '$.exercise') FROM metric_record")
+            .unwrap()
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .map(Result::unwrap)
+            .collect();
+        assert_eq!(exercises, ["bench press"], "the log stays, the program's items go");
+    }
 
     #[test]
     fn a_daily_note_becomes_a_task_once() {

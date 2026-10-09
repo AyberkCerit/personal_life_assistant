@@ -171,10 +171,17 @@ fn assistant_case(model: &mut ModelHost, case: &Value) -> Result<(Vec<String>, V
 fn extraction_case(model: &mut ModelHost, case: &Value) -> Result<(Vec<String>, Value), Box<dyn std::error::Error>> {
     let reference = case["ref"].as_str().map(|d| NaiveDate::parse_from_str(d, "%Y-%m-%d")).transpose()?.unwrap_or(now().date_naive());
     let text = case["text"].as_str().unwrap();
-    let raw = model.extract_raw(reference, text)?;
-    let extraction = pla_core::extraction::guard(text, parse_extraction(&raw)?);
+    // as the pipeline does: block by block (a list item is a block), each guarded with its section
     let settings = ValidationSettings::default();
-    let items: Vec<ValidItem> = extraction.items.iter().filter_map(|i| validate(i, reference, &settings).ok()).collect();
+    let mut raw = Vec::new();
+    let mut items: Vec<ValidItem> = Vec::new();
+    for block in pla_core::notes::split_blocks(text) {
+        let answer = model.extract_raw(reference, &block.text)?;
+        let section = pla_core::extraction::section_of(text, &block.text);
+        let extraction = pla_core::extraction::guard(&block.text, section, parse_extraction(&answer)?);
+        items.extend(extraction.items.iter().filter_map(|i| validate(i, reference, &settings).ok()));
+        raw.push(answer);
+    }
     let shown: Vec<Value> = items
         .iter()
         .map(|i| match i {
@@ -231,7 +238,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         for line in std::fs::read_to_string(format!("{CASES}/{file}"))?.lines().filter(|l| !l.trim().is_empty() && !l.starts_with("//")) {
             let case: Value = serde_json::from_str(line).map_err(|e| format!("{file}: {e}: {line}"))?;
             let id = case["id"].as_str().unwrap();
-            if !id.starts_with(&only) {
+            // `assistant` or `extraction` runs one file; anything else is an id prefix
+            let wanted = if only == "assistant" || only == "extraction" { only == kind } else { id.starts_with(&only) };
+            if !wanted {
                 continue;
             }
             let t = Instant::now();
