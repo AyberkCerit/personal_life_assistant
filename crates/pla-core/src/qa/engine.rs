@@ -395,14 +395,13 @@ pub fn answer(
             Ok(raw) => raw,
         };
         let decided = match tools::parse_decision(&raw) {
+            // a note offered for a greeting or a question counts as answering (the owner's decision a)
+            Ok(Decision::Call { tool, .. }) if tool == "suggest_note" && !worth_suggesting(question, &shown) => None,
             Ok(Decision::Call { tool, args }) => Some((tool, args)),
             Ok(Decision::Answer) | Err(_) => None, // the grammar makes Err rare
         };
         let Some((tool, args)) = decided.or_else(|| fallback(question, turns, &shown)) else { break };
         let args = with_referred_body(&tool, without_made_up_time(&tool, args, question), question, turns);
-        if tool == "suggest_note" && !worth_suggesting(question, &shown) {
-            break; // a greeting or a question: answer without offering a note
-        }
         if cancel.load(std::sync::atomic::Ordering::SeqCst) {
             return Err(stopped(&shown, String::new())); // no write after Stop
         }
@@ -759,7 +758,8 @@ mod tests {
         let tool_env = ToolEnv { vault: &e.vault, pla: &e.pla, cache: &e.cache, now: now(), validation: ValidationSettings::default() };
         let said = "bu gün derste işletim sistemleri öğrendik chapter 1 olarak";
         let turns = [turn(said), turn("notlarıma ekle bunu")];
-        let mut model = scripted(&[], "Kaydettim.");
+        // the real model offered a note instead, which a short reply is not worth (eval v4)
+        let mut model = scripted(&["{\"tool\":\"suggest_note\",\"args\":{\"title\":\"x\",\"body\":\"y\"}}"], "Kaydettim.");
         let a = answer(&mut model, &tool_env, "sen karar ver", &turns, None, "tr", &AtomicBool::new(false), &mut |_| {}).unwrap();
         let note = a.tools.iter().find(|t| t.tool == "create_note").expect("a note");
         assert!(std::fs::read_to_string(e.vault.root.join(note.result["note"].as_str().unwrap())).unwrap().contains("işletim sistemleri"));
