@@ -171,9 +171,15 @@ fn is_list_item(block: &str) -> bool {
 pub fn guard(block: &str, section: &str, mut extraction: RawExtraction) -> RawExtraction {
     let context = if is_list_item(block) { section } else { block };
     let program = has_rep_range(context) || names_a_plan(context) || is_future(block);
+    // a pasted program's lines and its heading ("Güç 2 (Pazartesi)") are no tasks either: the real
+    // window made a task "Güç" for Monday
+    let program_section = section.lines().any(is_list_item) && (has_rep_range(section) || names_a_plan(section));
     let weight_named = names_a_weight(block);
     extraction.items.retain_mut(|item| {
-        let Some(m) = item.metric.as_mut().filter(|_| item.kind == ItemType::Metric) else { return true };
+        if item.kind != ItemType::Metric {
+            return !program_section;
+        }
+        let Some(m) = item.metric.as_mut() else { return true };
         match m.kind {
             Some(MetricKind::Workout) if program => false,
             Some(MetricKind::Workout) => {
@@ -291,6 +297,24 @@ Akşam sinemaya gideceğim.", log), parse_extraction(&workout(r#""value":100,"un
 Başka
 ";
         assert!(section_of(note, "- Squat: 4x5").contains("3-4x5"));
+    }
+
+    #[test]
+    fn a_program_heading_is_no_task() {
+        let note = "Güç 2 (Pazartesi)
+- Squat: 4x5
+- Deadlift: 3-4x5
+
+Pazartesi dişçi var.";
+        let task = r#"{"items":[{"type":"task","title":"Güç","when":{"weekday":"mon","which":"this"}}]}"#;
+        assert!(guard("Güç 2 (Pazartesi)", section_of(note, "Güç 2 (Pazartesi)"), parse_extraction(task).unwrap()).items.is_empty());
+        let dentist = r#"{"items":[{"type":"task","title":"Dişçi","when":{"weekday":"mon","which":"this"}}]}"#;
+        assert_eq!(guard("Pazartesi dişçi var.", section_of(note, "Pazartesi dişçi var."), parse_extraction(dentist).unwrap()).items.len(), 1, "a task beside it stays");
+        let todo = "Yapılacaklar
+- Faturayı öde
+- Annemi ara";
+        let pay = r#"{"items":[{"type":"task","title":"Faturayı öde"}]}"#;
+        assert_eq!(guard("- Faturayı öde", section_of(todo, "- Faturayı öde"), parse_extraction(pay).unwrap()).items.len(), 1, "a to-do list is no program");
     }
 
     #[test]

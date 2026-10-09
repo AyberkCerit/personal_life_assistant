@@ -135,10 +135,23 @@ fn title_matches(title: &str, text: &str) -> bool {
         .iter()
         .filter(|w| {
             let stem: String = w.chars().take(4).collect();
-            title_words.iter().any(|t| (w.chars().count() >= 4 && t.starts_with(&stem)) || (t.chars().count() >= 3 && w.starts_with(t.as_str())))
+            // either way round, and by verb stem: "aradım" finds "Annemi aramak", "ödedim" finds
+            // "Fatura öde" (real window)
+            let root = verb_root(w);
+            title_words.iter().any(|t| {
+                (w.chars().count() >= 4 && t.starts_with(&stem))
+                    || (t.chars().count() >= 3 && w.starts_with(t.as_str()))
+                    || (w.chars().count() >= 3 && t.starts_with(w.as_str()))
+                    || (root.chars().count() >= 3 && verb_root(t) == root)
+            })
         })
         .count();
     !asked.is_empty() && fits * 2 > asked.len()
+}
+
+/// A Turkish verb without its past or infinitive ending: "aradım", "aramak" → "ara"; "ödedim" → "öde".
+fn verb_root(word: &str) -> &str {
+    ["mak", "mek", "dım", "dim", "dum", "düm", "tım", "tim", "tum", "tüm"].iter().find_map(|e| word.strip_suffix(e)).unwrap_or(word)
 }
 
 /// A file name from the model's title: characters Windows refuses become spaces; an empty one comes
@@ -298,7 +311,8 @@ pub fn run(env: &ToolEnv<'_>, tool: &str, args: &Value) -> Result<ToolRecord, St
             unknown_keys(args, &["title", "body"])?;
             let body = required(args, "body", 600)?;
             let title = note_title(&text(args, "title", 120)?.unwrap_or_default(), &body, today);
-            Ok(done(json!({ "suggested": true, "title": title, "body": body }), None))
+            // the model said "the note was created" before Save (real window)
+            Ok(done(json!({ "suggested": true, "title": title, "body": body, "saved": null, "note_for_you": "nothing is saved yet: tell the user they can press Save" }), None))
         }
         other => Err(format!("unknown tool {other:?}")),
     }
@@ -400,6 +414,11 @@ mod tests {
         assert_eq!(said.result["tasks"][0]["title"], "Annemi ara");
         let said = run(&env, "query_tasks", &json!({ "list": "all", "text": "su iç" })).unwrap();
         assert_eq!(said.result["count"], json!(0), "short words alone match nothing");
+        run(&env, "add_task", &json!({ "title": "Annemi aramak", "date": "2026-10-09" })).unwrap();
+        let said = run(&env, "query_tasks", &json!({ "list": "all", "text": "annemi ara" })).unwrap();
+        assert!(said.result["tasks"].as_array().unwrap().iter().any(|t| t["title"] == "Annemi aramak"), "the model titled it \"aramak\" (real window)");
+        let said = run(&env, "query_tasks", &json!({ "list": "all", "text": "annemi aradım" })).unwrap();
+        assert!(said.result["tasks"].as_array().unwrap().iter().any(|t| t["title"] == "Annemi aramak"), "searched with the past tense (real window)");
         let said = run(&env, "query_tasks", &json!({ "list": "all", "text": "annemin hediyesi" })).unwrap();
         assert_eq!(said.result["count"], json!(0), "one word of two is not the task");
         let id = q.result["tasks"][0]["task_id"].as_str().unwrap().to_owned();

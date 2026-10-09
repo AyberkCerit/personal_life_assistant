@@ -172,8 +172,16 @@ fn decide_text(question: &str, earlier: Option<&str>, today: chrono::NaiveDate) 
     BANK.with(|bank| format!("{DECIDE_RULES}{}\n\nThe user's last message: \"{question}\"\nYour JSON:", super::examples::lines(bank, question, earlier, today)))
 }
 
-fn write_instruction(lang: &str) -> String {
-    format!("Now write your answer to my last message. Write it in {}.", super::lang::name(lang))
+fn write_instruction(lang: &str, calls: &[ToolRecord]) -> String {
+    // the real window: "the note was created" while only the offer and its Save button were there
+    // the button's name as the panel shows it in that language
+    let button = if lang == "en" { "Save" } else { "Kaydet" };
+    let offered = if calls.iter().any(|c| c.tool == "suggest_note" && c.error.is_none()) {
+        format!(" You only offered to keep it as a note: nothing is saved until I press the \"{button}\" button, so do not say it was saved or created.")
+    } else {
+        String::new()
+    };
+    format!("Now write your answer to my last message.{offered} Write it in {}.", super::lang::name(lang))
 }
 
 fn decide_body(ctx: &Context, question: &str, calls: &[ToolRecord], now: DateTime<FixedOffset>) -> Value {
@@ -190,7 +198,7 @@ fn decide_body(ctx: &Context, question: &str, calls: &[ToolRecord], now: DateTim
 
 fn answer_body(ctx: &Context, question: &str, calls: &[ToolRecord], now: DateTime<FixedOffset>, lang: &str) -> Value {
     json!({
-        "messages": messages(ctx, question, calls, now, &write_instruction(lang)),
+        "messages": messages(ctx, question, calls, now, &write_instruction(lang, calls)),
         "temperature": 0.3,
         "max_tokens": ANSWER_TOKENS,
         "cache_prompt": true,
@@ -361,13 +369,22 @@ const IRREGULAR: [(&str, &str); 8] = [("paid", "pay"), ("bought", "buy"), ("sent
 /// whose stem is the task's verb ("ödedim" ~ "Fatura öde", "aradım" ~ "Annemi ara", "called" ~ "Call
 /// the bank"). "unuttum" or "aldım" next to an unrelated task does not count (final review C1, I2).
 fn says_done(question: &str, title: &str) -> bool {
+    !asks(question) && (says_finished(question) || did_its_verb(question, title))
+}
+
+/// A question, not a report: a question mark or a question word.
+fn asks(question: &str) -> bool {
+    question.trim_end().ends_with('?') || words(question).iter().any(|w| ASKING.contains(&w.as_str()))
+}
+
+/// "tamamla", "bitti", "done": finished, without saying which task.
+fn says_finished(question: &str) -> bool {
+    words(question).iter().any(|w| ["tamamla", "tamamlandı", "tamamlandi", "bitti", "bitirdim", "hallettim", "done", "finished", "completed"].contains(&w.as_str()))
+}
+
+/// A past verb in the message on the task's own verb: "ödedim" ~ "Fatura öde".
+fn did_its_verb(question: &str, title: &str) -> bool {
     let q = words(question);
-    if question.trim_end().ends_with('?') || q.iter().any(|w| ASKING.contains(&w.as_str())) {
-        return false;
-    }
-    if q.iter().any(|w| ["tamamla", "tamamlandı", "tamamlandi", "bitti", "bitirdim", "hallettim", "hallettim", "done", "finished", "completed"].contains(&w.as_str())) {
-        return true;
-    }
     let title_words = words(title);
     let verb = |base: &str| title_words.iter().any(|t| t == base || (t.chars().count() >= 3 && base.chars().count() >= 3 && (base.starts_with(t.as_str()) || t.starts_with(base))));
     q.iter().any(|w| {
@@ -403,9 +420,20 @@ fn fallback(question: &str, turns: &[Turn], done: &[ToolRecord]) -> Option<(Stri
     }
     if let Some(found) = done.iter().rev().find(|r| r.ok && r.tool == "query_tasks") {
         let tasks = found.result["tasks"].as_array()?;
+        // the one open task whose verb the user put in the past, even when the search found others
+        // (real window); a bare "tamamla" only when one task is open
+        if asks(question) {
+            return None;
+        }
         let open: Vec<&Value> = tasks.iter().filter(|t| t["status"] == "open").collect();
-        if open.len() == 1 && says_done(question, open[0]["title"].as_str().unwrap_or_default()) {
-            return Some(("complete_task".into(), json!({ "task_id": open[0]["task_id"] })));
+        let by_verb: Vec<&&Value> = open.iter().filter(|t| did_its_verb(question, t["title"].as_str().unwrap_or_default())).collect();
+        let pick = match (by_verb.as_slice(), open.as_slice()) {
+            ([one], _) => Some(**one),
+            ([], [only]) if says_finished(question) => Some(*only),
+            _ => None,
+        };
+        if let Some(task) = pick {
+            return Some(("complete_task".into(), json!({ "task_id": task["task_id"] })));
         }
         return None;
     }
@@ -486,11 +514,12 @@ pub fn answer(
         }
         on(Progress::Working(Some(tool.clone())));
         let kept = (tool == "create_note").then(|| already_kept(question, turns)).flatten();
+        let kept_path = kept.clone();
         let target = found_task(&shown, args["task_id"].as_str().unwrap_or_default());
         let done_by_user = target.is_some_and(|t| says_done(question, t["title"].as_str().unwrap_or_default()));
         let ran = if tool == "complete_task" && !done_by_user {
             Err("complete a task only when the user says they did it; take its task_id from query_tasks".to_owned())
-        } else if let Some(path) = kept {
+        } else if let Some(path) = kept.clone() {
             Err(format!("that is saved already as the note {path}; tell the user, write nothing"))
         } else {
             tools::run(env, &tool, &args)
@@ -500,6 +529,11 @@ pub fn answer(
                 calls.push(trimmed(&rec, &mut tool_left));
                 on(Progress::Tool(Box::new(rec.clone())));
                 shown.push(rec);
+            }
+            // saved already: the model hears where, the user sees no failed tool (real window)
+            Err(error) if kept_path.is_some() => {
+                calls.push(ToolRecord { tool, args, ok: false, result: Value::Null, error: Some(error), undo: None });
+                break;
             }
             Err(error) => {
                 // FR-QA-016: the model hears the error once; a second refusal goes to the user.
@@ -767,6 +801,10 @@ mod tests {
         answer(&mut model, &tool_env, "selam", &[], None, "en", &AtomicBool::new(false), &mut |_| {}).unwrap();
         let last = model.bodies[1]["messages"].as_array().unwrap().last().unwrap()["content"].as_str().unwrap().to_owned();
         assert!(last.ends_with("Write it in Turkish."), "{last}");
+        let offer = ToolRecord { tool: "suggest_note".into(), args: json!({}), ok: true, result: json!({}), error: None, undo: None };
+        assert!(write_instruction("tr", &[offer.clone()]).contains("press the \"Kaydet\" button"));
+        assert!(write_instruction("en", &[offer]).contains("press the \"Save\" button"));
+        assert!(!write_instruction("tr", &[]).contains("Save"));
     }
 
     fn turn(q: &str) -> Turn {
@@ -816,6 +854,20 @@ mod tests {
         assert!(!says_done("annemin doğum günü hediyesini aldım", "Annemi ara"));
         assert!(!says_done("faturayı ödedim mi", "Fatura öde"), "a question");
         assert!(!says_done("geçen hafta ne yaptım", "Rapor yap"));
+    }
+
+    #[test]
+    fn the_task_the_user_did_is_completed_among_others() {
+        // the real window: "Annemi aramak" and a second open task; nothing was completed
+        let e = env();
+        for title in ["Annemi aramak", "Güç"] {
+            crate::tasks::add_task_as(&e.pla, &crate::tasks::TaskInput { title: title.into(), details: None, date: Some("2026-10-07".into()), time: None, remind: Some(false) }, "manual", now()).unwrap();
+        }
+        let tool_env = ToolEnv { vault: &e.vault, pla: &e.pla, cache: &e.cache, now: now(), validation: ValidationSettings::default() };
+        let mut model = scripted(&["{\"tool\":\"query_tasks\",\"args\":{\"list\":\"all\"}}"], "Tamam.");
+        let a = answer(&mut model, &tool_env, "annemi aradım, o görevi tamamla", &[], None, "tr", &AtomicBool::new(false), &mut |_| {}).unwrap();
+        let done = a.tools.iter().find(|t| t.tool == "complete_task" && t.ok).expect("completed");
+        assert_eq!(done.result["title"], "Annemi aramak");
     }
 
     #[test]
