@@ -96,6 +96,7 @@ pub fn run() {
             qa_cmds::qa_history,
             qa_cmds::qa_clear,
             qa_cmds::qa_undo,
+            qa_cmds::qa_save_suggestion,
             memory_cmds::memory_status,
             memory_cmds::memory_download_start,
             memory_cmds::memory_download_pause,

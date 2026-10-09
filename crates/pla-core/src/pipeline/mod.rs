@@ -206,7 +206,7 @@ pub fn process_queue_with(
                             &tx,
                             &block.block_id,
                             block.reference_date,
-                            &extraction,
+                            &crate::extraction::guard(&block.text, extraction), // nl-quality: programs, unstated weights, goals
                             &settings.validation,
                             block.first_sight.then(|| now.date_naive()),
                             now,

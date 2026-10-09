@@ -118,6 +118,11 @@ pub fn strings() -> &'static Strings {
     pick(UI_LANG.load(Ordering::SeqCst), os_turkish())
 }
 
+/// The language PLA speaks, `tr` or `en`, as `strings` picks it (the assistant's fallback).
+pub fn ui_lang() -> &'static str {
+    if std::ptr::eq(strings(), &TR) { "tr" } else { "en" }
+}
+
 /// `tauri.conf.json > identifier`, which the installer writes on the Start menu shortcut as its
 /// AppUserModelID: Windows shows a release build's notifications under that name (build.rs).
 pub(crate) const IDENTIFIER: &str = env!("PLA_IDENTIFIER");

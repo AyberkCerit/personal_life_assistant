@@ -181,7 +181,12 @@ pub fn daily_values(conn: &Connection, kind: MetricKind, from: NaiveDate, to: Na
             MetricKind::Water => Some(DayValue { date, value: day.iter().filter_map(|r| r.value).sum(), sets: None, conflict: false }),
             MetricKind::Workout => {
                 let sets = day.iter().filter_map(|r| r.sets).fold(None, |acc: Option<i64>, s| Some(acc.unwrap_or(0) + s));
-                Some(DayValue { date, value: day.len() as f64, sets, conflict: false })
+                // a session is a note (all its exercises), and what was entered in PLA that day is one more
+                let mut notes: Vec<&str> = day.iter().filter_map(|r| r.note_path.as_deref()).collect();
+                notes.sort_unstable();
+                notes.dedup();
+                let entered = usize::from(day.iter().any(|r| r.note_path.is_none()));
+                Some(DayValue { date, value: (notes.len() + entered) as f64, sets, conflict: false })
             }
             _ => {
                 let users: Vec<f64> = day.iter().filter(|r| is_users(r)).filter_map(|r| r.value).collect();
@@ -466,10 +471,13 @@ mod tests {
         put(&conn, "w2", "water", "2026-10-05", r#"{"value":500}"#, "manual", "2026-10-05T12:00:00+03:00", false);
         put(&conn, "x1", "workout", "2026-10-05", r#"{"exercise":"şınav","sets":3,"reps":10}"#, "extracted", "2026-10-05T08:00:00+03:00", false);
         put(&conn, "x2", "workout", "2026-10-05", r#"{"exercise":"squat","sets":4,"reps":8,"value":60}"#, "manual", "2026-10-05T18:00:00+03:00", false);
+        // nl-quality: four exercises in one note were "4 sessions" in the owner's window; one note is one session
+        put(&conn, "x3", "workout", "2026-10-05", r#"{"exercise":"row","sets":2,"reps":8}"#, "extracted", "2026-10-05T08:00:00+03:00", false);
+        put(&conn, "x4", "workout", "2026-10-05", r#"{"exercise":"curl","sets":3,"reps":8}"#, "manual", "2026-10-05T18:05:00+03:00", false);
         let water = daily_values(&conn, MetricKind::Water, d("2026-10-01"), d("2026-10-06")).unwrap();
         assert_eq!(water, vec![DayValue { date: "2026-10-05".into(), value: 1250.0, sets: None, conflict: false }]);
         let workout = daily_values(&conn, MetricKind::Workout, d("2026-10-01"), d("2026-10-06")).unwrap();
-        assert_eq!(workout, vec![DayValue { date: "2026-10-05".into(), value: 2.0, sets: Some(7), conflict: false }]);
+        assert_eq!(workout, vec![DayValue { date: "2026-10-05".into(), value: 2.0, sets: Some(12), conflict: false }]);
     }
 
     #[test]

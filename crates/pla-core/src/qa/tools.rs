@@ -11,7 +11,7 @@ use crate::metrics::{self, MetricInput};
 use crate::tasks::{self, TaskInput, TaskList};
 use crate::vault::Vault;
 
-pub const TOOLS: [&str; 7] = ["search_notes", "query_tasks", "query_metrics", "add_task", "complete_task", "log_metric", "create_note"];
+pub const TOOLS: [&str; 8] = ["search_notes", "query_tasks", "query_metrics", "add_task", "complete_task", "log_metric", "create_note", "suggest_note"];
 const KINDS: [&str; 5] = ["sleep", "water", "steps", "weight", "workout"];
 const UNITS: [&str; 8] = ["h", "min", "ml", "l", "glass", "kg", "lb", "count"];
 
@@ -23,7 +23,8 @@ pub fn descriptions() -> &'static str {
      - add_task {title, date?: YYYY-MM-DD, time?: HH:MM, remind?: true|false}: add one task; with a time it is a reminder unless remind is false.\n\
      - complete_task {task_id}: mark one open task done (take the task_id from query_tasks).\n\
      - log_metric {kind, date: YYYY-MM-DD, value, unit?: h|min|ml|l|glass|kg|lb|count, exercise?}: record one measurement.\n\
-     - create_note {title, body (at most 600 characters)}: write one new note to the inbox."
+     - create_note {title, body (at most 600 characters)}: write one new note to the user's notes. Choose a short title yourself; never ask for one.
+     - suggest_note {title, body}: offer to keep what the user just told you as a note; nothing is written unless they press Save."
 }
 
 fn obj(tool: &str, props: Value, required: &[&str]) -> Value {
@@ -50,6 +51,7 @@ pub fn decision_schema() -> Value {
         obj("complete_task", json!({ "task_id": { "type": "string", "minLength": 1, "maxLength": 64 } }), &["task_id"]),
         obj("log_metric", json!({ "kind": { "enum": KINDS }, "date": date, "value": { "type": "number" }, "unit": { "enum": UNITS }, "exercise": { "type": "string", "maxLength": 100 } }), &["kind", "date", "value"]),
         obj("create_note", json!({ "title": { "type": "string", "minLength": 1, "maxLength": 120 }, "body": { "type": "string", "maxLength": 600 } }), &["title", "body"]),
+        obj("suggest_note", json!({ "title": { "type": "string", "minLength": 1, "maxLength": 120 }, "body": { "type": "string", "maxLength": 600 } }), &["title", "body"]),
     ]})
 }
 
@@ -104,6 +106,38 @@ fn date(args: &Value, key: &str) -> Result<Option<String>, String> {
     let Some(d) = text(args, key, 10)? else { return Ok(None) };
     NaiveDate::parse_from_str(&d, "%Y-%m-%d").map_err(|_| format!("{key} {d:?} is not a date (YYYY-MM-DD)"))?;
     Ok(Some(d))
+}
+
+/// Writes a new note into the user's notes (the owner's decision: what they ask to keep goes there,
+/// titled by the model). FR-QA-009: marked as written by PLA, so it is never mined for tasks.
+pub fn write_note(vault: &Vault, title: &str, body: &str) -> Result<String, String> {
+    let rel = crate::files::create_note(vault, &vault.config.folders.notes, title).map_err(|e| e.to_string())?;
+    let path = crate::files::resolve(vault, &rel).map_err(|e| e.to_string())?;
+    let content = format!("---\npla_generated: true\n---\n# {title}\n\n{body}\n");
+    if let Err(e) = crate::fs_atomic::write_atomic(&path, content.as_bytes()) {
+        let _ = std::fs::remove_file(&path); // not an empty note left behind
+        return Err(e.to_string());
+    }
+    Ok(rel)
+}
+
+/// A file name from the model's title: characters Windows refuses become spaces; an empty one comes
+/// from the first words of the body, or the date.
+pub fn note_title(title: &str, body: &str, today: NaiveDate) -> String {
+    let clean = |s: &str| {
+        let s: String = s.chars().map(|c| if c.is_control() || "<>:\"/\\|?*#^[]".contains(c) { ' ' } else { c }).collect();
+        let words: Vec<&str> = s.split_whitespace().collect();
+        words.join(" ").trim_matches(|c: char| c == '.' || c == ' ').chars().take(80).collect::<String>().trim().to_owned()
+    };
+    let t = clean(title);
+    if !t.is_empty() && crate::fileops::check_name(&t).is_ok() {
+        return t;
+    }
+    let from_body = clean(&body.split_whitespace().take(6).collect::<Vec<_>>().join(" "));
+    if !from_body.is_empty() && crate::fileops::check_name(&from_body).is_ok() {
+        return from_body;
+    }
+    format!("Not {today}")
 }
 
 fn kind(args: &Value) -> Result<MetricKind, String> {
@@ -234,18 +268,17 @@ pub fn run(env: &ToolEnv<'_>, tool: &str, args: &Value) -> Result<ToolRecord, St
         }
         "create_note" => {
             unknown_keys(args, &["title", "body"])?;
-            let title = required(args, "title", 120)?;
             let body = text(args, "body", 600)?.unwrap_or_default();
-            crate::fileops::check_name(&title).map_err(|e| e.to_string())?;
-            let rel = crate::files::create_note(env.vault, &env.vault.config.folders.inbox, &title).map_err(|e| e.to_string())?;
-            // FR-QA-009: marked as written by PLA, so it is never mined for tasks
-            let path = crate::files::resolve(env.vault, &rel).map_err(|e| e.to_string())?;
-            let content = format!("---\npla_generated: true\n---\n# {title}\n\n{body}\n");
-            if let Err(e) = crate::fs_atomic::write_atomic(&path, content.as_bytes()) {
-                let _ = std::fs::remove_file(&path); // not an empty note left behind
-                return Err(e.to_string());
-            }
+            let title = note_title(&text(args, "title", 120)?.unwrap_or_default(), &body, today);
+            let rel = write_note(env.vault, &title, &body)?;
             Ok(done(json!({ "note": rel, "title": title }), Some(Undo { kind: "note".into(), id: rel })))
+        }
+        "suggest_note" => {
+            // nothing is written: the panel offers a Save button (the owner's decision a)
+            unknown_keys(args, &["title", "body"])?;
+            let body = required(args, "body", 600)?;
+            let title = note_title(&text(args, "title", 120)?.unwrap_or_default(), &body, today);
+            Ok(done(json!({ "suggested": true, "title": title, "body": body }), None))
         }
         other => Err(format!("unknown tool {other:?}")),
     }
@@ -279,7 +312,7 @@ mod tests {
         assert!(parse_decision("{\"tool\":\"delete_task\",\"args\":{}}").is_err(), "no deleting tool (FR-QA-006)");
         assert!(parse_decision("evet").is_err());
         let schema = decision_schema();
-        assert_eq!(schema["anyOf"].as_array().unwrap().len(), 8);
+        assert_eq!(schema["anyOf"].as_array().unwrap().len(), 9);
     }
 
     #[test]
@@ -355,9 +388,27 @@ mod tests {
         let env = ToolEnv { vault: &vault, pla: &pla, cache: &cache, now: now(), validation: ValidationSettings::default() };
         let rec = run(&env, "create_note", &json!({ "title": "Toplantı özeti", "body": "Karar: cuma teslim." })).unwrap();
         let rel = rec.result["note"].as_str().unwrap();
-        assert!(rel.starts_with("inbox/"));
+        assert!(rel.starts_with("notes/"), "the owner's decision: into the notes");
         let text = std::fs::read_to_string(vault.root.join(rel)).unwrap();
         assert!(text.starts_with("---\npla_generated: true\n---\n# Toplantı özeti"));
         assert_eq!(rec.undo.unwrap().kind, "note");
+    }
+
+    #[test]
+    fn a_note_gets_a_usable_title_without_asking() {
+        let today = NaiveDate::from_ymd_opt(2026, 10, 9).unwrap();
+        assert_eq!(note_title("İşletim Sistemleri: Chapter 1", "", today), "İşletim Sistemleri Chapter 1");
+        assert_eq!(note_title("  ", "bugün derste işletim sistemleri chapter 1 öğrendik ve çok sevdik", today), "bugün derste işletim sistemleri chapter 1");
+        assert_eq!(note_title("CON", "", today), "Not 2026-10-09", "a reserved name");
+        assert_eq!(note_title("a/b?.", "", today), "a b");
+    }
+
+    #[test]
+    fn a_suggestion_writes_nothing() {
+        let (_t, vault, pla, cache) = env_parts();
+        let env = ToolEnv { vault: &vault, pla: &pla, cache: &cache, now: now(), validation: ValidationSettings::default() };
+        let rec = run(&env, "suggest_note", &json!({ "title": "Ders", "body": "Chapter 1" })).unwrap();
+        assert_eq!((rec.result["suggested"].clone(), rec.undo.is_none()), (json!(true), true));
+        assert!(!vault.root.join("notes").exists() || std::fs::read_dir(vault.root.join("notes")).unwrap().next().is_none());
     }
 }

@@ -93,6 +93,8 @@ export function toolLine(r: ToolRecord): { key: Key; values: Record<string, stri
       return { key: "qa.tool.metric", values: { kind: kindName(s(res.kind)), value: s(res.value), unit: s(res.unit), date: s(res.date) } };
     case "create_note":
       return { key: "qa.tool.note", values: { title: s(res.title) } };
+    case "suggest_note":
+      return { key: res.saved ? "qa.tool.suggestSaved" : "qa.tool.suggest", values: { title: s(res.title) } };
     case "search_notes":
       return { key: "qa.tool.searched", values: { query: s(r.args.query), n: s((res.notes as unknown[] | undefined)?.length ?? 0) } };
     case "query_tasks":
