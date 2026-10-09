@@ -32,6 +32,8 @@
   import Sparkles from "@lucide/svelte/icons/sparkles";
   import { fold } from "./lib/media";
   import SearchPanel from "./lib/SearchPanel.svelte";
+  import Splitter from "./lib/ui/Splitter.svelte";
+  import { DEFAULT_WIDTHS, LIMITS, clampWidth, loadWidths, saveWidths } from "./lib/panes";
   import type { MetricKind } from "./lib/metrics";
   import type { MetricRecord } from "./lib/api";
   import type { Section } from "./lib/settings";
@@ -69,6 +71,29 @@
   let quickOpen = $state(false);
   let treeDialog = $state(false); // a tree dialog (move, delete, template…) is open
   let memory = $state<{ pending: number; total: number } | null>(null); // FR-MEM-003 progress
+  // The side panels are as wide as the user dragged them; the assistant tab keeps its own width.
+  let widths = $state(loadWidths());
+  let windowWidth = $state(window.innerWidth);
+  let resizing = $state(false);
+  const rightKey = $derived(sideTab === "assistant" ? "rightWide" : "right");
+  // Shown widths: what was chosen, narrowed when the window is too small for it.
+  const leftW = $derived(clampWidth("left", widths.left, widths[rightKey], windowWidth));
+  const rightW = $derived(clampWidth("right", widths[rightKey], leftW, windowWidth));
+
+  function resizeLeft(w: number) {
+    resizing = true;
+    widths.left = clampWidth("left", w, rightW, windowWidth);
+  }
+
+  function resizeRight(w: number) {
+    resizing = true;
+    widths[rightKey] = clampWidth("right", w, leftW, windowWidth);
+  }
+
+  function resized() {
+    resizing = false;
+    saveWidths(widths);
+  }
 
   let searchPanel: ReturnType<typeof SearchPanel> | undefined = $state();
   let settingsSection = $state<Section>("general"); // kept here: a language switch re-mounts the window
@@ -429,6 +454,7 @@
   });
 </script>
 
+<svelte:window bind:innerWidth={windowWidth} />
 {#key uiLang}
 {#if !loaded}
   <!-- startup: nothing to flash before we know whether the wizard is due -->
@@ -444,7 +470,9 @@
     <Button variant="primary" icon={FolderOpen} onclick={chooseVault}>{t("welcome.open")}</Button>
   </main>
 {:else}
-  <div class="layout" class:wide={sideTab === "assistant"}>
+  <div class="layout" class:resizing style:--left-w="{leftW}px" style:--right-w="{rightW}px">
+    <Splitter side="left" width={leftW} min={LIMITS.left[0]} max={LIMITS.left[1]} label={t("pane.resizeLeft")} onResize={resizeLeft} onDone={resized} onReset={() => (widths.left = DEFAULT_WIDTHS.left)} />
+    <Splitter side="right" width={rightW} min={LIMITS.right[0]} max={LIMITS.right[1]} label={t("pane.resizeRight")} onResize={resizeRight} onDone={resized} onReset={() => (widths[rightKey] = DEFAULT_WIDTHS[rightKey])} />
     <aside class="sidebar">
       <nav class="shortcuts" aria-label={t("metrics.title")}>
         <button class:on={center === "metrics"} aria-current={center === "metrics" ? "page" : undefined} onclick={showMetrics}>

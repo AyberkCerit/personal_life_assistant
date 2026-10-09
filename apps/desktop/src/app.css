@@ -28,13 +28,15 @@ svg.lucide { flex: none; }
 
 .layout {
   display: grid;
-  grid-template-columns: 15rem minmax(0, 1fr) 20rem;
+  position: relative; /* the panel splitters sit on its borders */
+  grid-template-columns: var(--left-w, 15rem) minmax(0, 1fr) var(--right-w, 20rem);
   grid-template-rows: minmax(0, 1fr) 1.75rem;
   height: 100%;
   /* the right panel widens for the assistant tab and narrows back (owner decision 2026-10-07) */
   transition: grid-template-columns var(--duration-base) var(--ease-standard); /* 0 with reduced motion */
 }
-.layout.wide { grid-template-columns: 15rem minmax(0, 1fr) 32.5rem; }
+/* while a splitter is dragged the panel follows the pointer at once, and nothing gets selected */
+.layout.resizing { transition: none; cursor: col-resize; user-select: none; }
 .sidebar, .side-panel { background: var(--color-surface-panel); overflow: auto; }
 .sidebar { border-right: 1px solid var(--color-border); }
 .side-panel { border-left: 1px solid var(--color-border); padding: var(--space-3); }
