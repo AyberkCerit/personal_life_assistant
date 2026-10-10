@@ -501,6 +501,9 @@ pub fn answer(
         let decided = match tools::parse_decision(&raw) {
             // a note offered for a greeting or a question counts as answering (the owner's decision a)
             Ok(Decision::Call { tool, .. }) if tool == "suggest_note" && !worth_suggesting(question, &shown) => None,
+            // asked again what is done already (one task added three times, a search made twice):
+            // as good as answering, so the fallback still gets its turn (eval: "elektrikçiyi aradım")
+            Ok(Decision::Call { tool, args }) if repeats(&shown, &tool, &args) => None,
             Ok(Decision::Call { tool, args }) => Some((tool, args)),
             Ok(Decision::Answer) | Err(_) => None, // the grammar makes Err rare
         };
@@ -510,7 +513,7 @@ pub fn answer(
             return Err(stopped(&shown, String::new())); // no write after Stop
         }
         if repeats(&shown, &tool, &args) {
-            break; // done already (the real window saw one task added three times): answer now
+            break; // what the fallback chose was done already
         }
         on(Progress::Working(Some(tool.clone())));
         let kept = (tool == "create_note").then(|| already_kept(question, turns)).flatten();
@@ -868,6 +871,18 @@ mod tests {
         let a = answer(&mut model, &tool_env, "annemi aradım, o görevi tamamla", &[], None, "tr", &AtomicBool::new(false), &mut |_| {}).unwrap();
         let done = a.tools.iter().find(|t| t.tool == "complete_task" && t.ok).expect("completed");
         assert_eq!(done.result["title"], "Annemi aramak");
+    }
+
+    #[test]
+    fn a_search_asked_twice_still_completes_the_task() {
+        // eval final3: the model repeated query_tasks instead of answering, and nothing was completed
+        let e = env();
+        crate::tasks::add_task_as(&e.pla, &crate::tasks::TaskInput { title: "Elektrikçiyi ara".into(), details: None, date: Some("2026-10-06".into()), time: None, remind: Some(false) }, "manual", now()).unwrap();
+        let tool_env = ToolEnv { vault: &e.vault, pla: &e.pla, cache: &e.cache, now: now(), validation: ValidationSettings::default() };
+        let query = "{\"tool\":\"query_tasks\",\"args\":{\"list\":\"all\",\"text\":\"elektrikçiyi aradım\"}}";
+        let mut model = scripted(&[query, query], "Tamamlandı.");
+        let a = answer(&mut model, &tool_env, "elektrikçiyi aradım", &[], None, "tr", &AtomicBool::new(false), &mut |_| {}).unwrap();
+        assert!(a.tools.iter().any(|t| t.tool == "complete_task" && t.ok), "{:?}", a.tools);
     }
 
     #[test]
