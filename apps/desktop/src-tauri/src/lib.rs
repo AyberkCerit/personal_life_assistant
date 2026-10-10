@@ -14,6 +14,7 @@ pub mod model_paths;
 pub mod wizard;
 mod notify;
 mod tray;
+mod webview_memory;
 pub mod scheduler;
 pub mod settings_screen;
 pub mod system;
@@ -35,6 +36,8 @@ pub fn run() {
             // FR-SET-016: started by Windows sign-in → stay in the tray.
             if !std::env::args().any(|a| a == "--hidden") {
                 tray::show_main(app.handle());
+            } else if let Some(window) = tauri::Manager::get_webview_window(app, "main") {
+                webview_memory::set_low(&window, true); // in the tray from the start (final review M7)
             }
             Ok(())
         })
@@ -96,6 +99,7 @@ pub fn run() {
             qa_cmds::qa_history,
             qa_cmds::qa_clear,
             qa_cmds::qa_undo,
+            qa_cmds::qa_save_suggestion,
             memory_cmds::memory_status,
             memory_cmds::memory_download_start,
             memory_cmds::memory_download_pause,

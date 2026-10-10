@@ -125,6 +125,17 @@ pub fn qa_clear(state: State<AppState>) -> Result<(), String> {
     cleared
 }
 
+/// The owner's decision a: the user pressed Save on a suggested note. Returns the note's path.
+#[tauri::command]
+pub fn qa_save_suggestion(app: AppHandle, state: State<AppState>, turn_id: String, index: usize) -> Result<String, String> {
+    let guard = state.session.lock().expect("session lock");
+    let session = guard.as_ref().ok_or("no_vault||")?;
+    let db = session.db.lock().expect("db lock");
+    let rel = qa::save_suggestion(&db, &session.vault, &turn_id, index).map_err(|e| format!("io||{e}"))?.ok_or("missing||")?;
+    let _ = app.emit("tree-changed", ());
+    Ok(rel)
+}
+
 /// FR-QA-008: takes back tool call `index` of turn `turn_id`. A note goes to the Recycle Bin.
 #[tauri::command]
 pub fn qa_undo(app: AppHandle, state: State<AppState>, turn_id: String, index: usize) -> Result<(), String> {

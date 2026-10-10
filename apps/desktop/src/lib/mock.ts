@@ -326,6 +326,8 @@ function mockQa(cmd: string, args: Record<string, unknown>): unknown {
       return undefined;
     case "qa_undo":
       return undefined;
+    case "qa_save_suggestion":
+      return "notes/Mock not.md";
   }
   return undefined;
 }
@@ -369,6 +371,7 @@ export async function mockBackend<T>(cmd: string, args: Record<string, unknown>)
     case "qa_history":
     case "qa_clear":
     case "qa_undo":
+    case "qa_save_suggestion":
       return mockQa(cmd, args) as T;
     case "note_meta": {
       const text = String(args.text);

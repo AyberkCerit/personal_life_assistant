@@ -149,6 +149,7 @@ export const api = {
   qaHistory: () => call<QaTurn[]>("qa_history"),
   qaClear: () => call<void>("qa_clear"),
   qaUndo: (turnId: string, index: number) => call<void>("qa_undo", { turnId, index }),
+  qaSaveSuggestion: (turnId: string, index: number) => call<string>("qa_save_suggestion", { turnId, index }),
   onQaEvent: (cb: (e: QaEvent) => void) => on<QaEvent>("qa-event", cb),
   daySummary: (path: string) => call<DayInfo | null>("day_summary", { path }),
   summaryRegenerate: (path: string) => call<void>("summary_regenerate", { path }),

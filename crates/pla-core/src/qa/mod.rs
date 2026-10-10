@@ -3,6 +3,8 @@
 
 pub mod context;
 pub mod engine;
+pub mod examples;
+pub mod lang;
 pub mod tools;
 
 use std::sync::atomic::AtomicBool;
@@ -135,6 +137,22 @@ pub fn restore_undo(conn: &Connection, turn_id: &str, index: usize, undo: Undo) 
     Ok(())
 }
 
+/// The owner's decision a: a suggested note is written only when the user presses Save. Writes it
+/// into the notes once and keeps that in the stored turn, with its Undo. `Ok(None)`: no such
+/// suggestion, or saved already.
+pub fn save_suggestion(conn: &Connection, vault: &crate::vault::Vault, turn_id: &str, index: usize) -> Result<Option<String>, String> {
+    let db = |e: rusqlite::Error| e.to_string();
+    let Some(mut turn) = conn.query_row(&format!("{TURN} WHERE turn_id = ?1"), [turn_id], turn_from_row).optional().map_err(db)? else { return Ok(None) };
+    let Some(record) = turn.tools.get_mut(index).filter(|r| r.tool == "suggest_note" && r.result["saved"].is_null()) else { return Ok(None) };
+    let title = record.result["title"].as_str().unwrap_or_default().to_owned();
+    let body = record.result["body"].as_str().unwrap_or_default().to_owned();
+    let rel = tools::write_note(vault, &title, &body)?;
+    record.result["saved"] = Value::String(rel.clone());
+    record.undo = Some(Undo { kind: "note".into(), id: rel.clone() });
+    conn.execute("UPDATE qa_turn SET tool_calls_json = ?2 WHERE turn_id = ?1", params![turn_id, serde_json::to_string(&turn.tools).unwrap_or_default()]).map_err(db)?;
+    Ok(Some(rel))
+}
+
 /// FR-QA-015 (the UI asks first): every turn goes.
 pub fn clear_history(conn: &Connection) -> rusqlite::Result<usize> {
     conn.execute("DELETE FROM qa_turn", [])
@@ -212,5 +230,29 @@ mod tests {
         let seen: Vec<String> = follow_up(&conn, false).unwrap().into_iter().map(|t| t.turn_id).collect();
         assert_eq!(seen, ["2", "4", "5"], "from the new topic on, finished ones only, at most three");
         assert!(follow_up(&conn, true).unwrap().is_empty(), "a new topic starts empty");
+    }
+
+    #[test]
+    fn a_suggested_note_is_written_once_on_save() {
+        // the owner's decision a: nothing is written until Save
+        let (tmp, conn) = db();
+        std::fs::create_dir_all(tmp.path().join("kasa")).unwrap();
+        let vault = crate::vault::open_vault(&tmp.path().join("kasa")).unwrap();
+        let mut t = turn("1", "2026-10-09T10:00:00+03:00", "done", false);
+        t.tools = vec![ToolRecord {
+            tool: "suggest_note".into(),
+            args: serde_json::json!({}),
+            ok: true,
+            result: serde_json::json!({ "suggested": true, "title": "İşletim Sistemleri", "body": "Chapter 1" }),
+            error: None,
+            undo: None,
+        }];
+        save_turn(&conn, &t).unwrap();
+        let rel = save_suggestion(&conn, &vault, "1", 0).unwrap().unwrap();
+        assert_eq!(rel, "notes/İşletim Sistemleri.md");
+        assert!(std::fs::read_to_string(vault.root.join(&rel)).unwrap().contains("Chapter 1"));
+        assert_eq!(save_suggestion(&conn, &vault, "1", 0).unwrap(), None, "once");
+        let stored = &history(&conn, 5).unwrap()[0].tools[0];
+        assert_eq!((stored.result["saved"].as_str(), stored.undo.as_ref().map(|u| u.kind.as_str())), (Some(rel.as_str()), Some("note")));
     }
 }

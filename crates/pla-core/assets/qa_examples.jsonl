@@ -1,0 +1,85 @@
+{"q":"yarın öğlen 12'de göz doktoruna gideceğim","d":{"tool":"add_task","args":{"title":"Göz doktoru","date":"{tomorrow}","time":"12:00"}}}
+{"q":"Cumartesi markete gitmem gerekiyor","d":{"tool":"add_task","args":{"title":"Markete git","date":"{sat}"}}}
+{"q":"I need to pay the rent on Friday","d":{"tool":"add_task","args":{"title":"Pay the rent","date":"{fri}"}}}
+{"q":"perşembe akşam 7'de halı sahaya gideceğim","d":{"tool":"add_task","args":{"title":"Halı saha","date":"{thu}","time":"19:00"}}}
+{"q":"yarın kuru temizlemeciden ceketi almam lazım","d":{"tool":"add_task","args":{"title":"Ceketi kuru temizlemeciden al","date":"{tomorrow}"}}}
+{"q":"remind me to water the plants tomorrow at 8","d":{"tool":"add_task","args":{"title":"Water the plants","date":"{tomorrow}","time":"08:00","remind":true}}}
+{"q":"ayın 25'inde kira ödemesi var","d":{"tool":"add_task","args":{"title":"Kira ödemesi","date":"{day25}"}}}
+{"q":"salı günü proje teslimi","d":{"tool":"add_task","args":{"title":"Proje teslimi","date":"{tue}"}}}
+{"q":"bana yarın sabah 9'da ilacımı hatırlat","d":{"tool":"add_task","args":{"title":"İlacını al","date":"{tomorrow}","time":"09:00","remind":true}}}
+{"q":"79 kiloyum","d":{"tool":"log_metric","args":{"kind":"weight","date":"{today}","value":79,"unit":"kg"}}}
+{"q":"kilom 101,5","d":{"tool":"log_metric","args":{"kind":"weight","date":"{today}","value":101.5,"unit":"kg"}}}
+{"q":"tartıya çıktım 64 kilo","d":{"tool":"log_metric","args":{"kind":"weight","date":"{today}","value":64,"unit":"kg"}}}
+{"q":"I'm 70 kg now","d":{"tool":"log_metric","args":{"kind":"weight","date":"{today}","value":70,"unit":"kg"}}}
+{"q":"dün 88 kiloydum","d":{"tool":"log_metric","args":{"kind":"weight","date":"{yesterday}","value":88,"unit":"kg"}}}
+{"q":"Dün gece 7 saat uyudum","d":{"tool":"log_metric","args":{"kind":"sleep","date":"{yesterday}","value":7,"unit":"h"}}}
+{"q":"bu gece sadece 5 saat uyuyabildim","d":{"tool":"log_metric","args":{"kind":"sleep","date":"{today}","value":5,"unit":"h"}}}
+{"q":"I slept 8 hours","d":{"tool":"log_metric","args":{"kind":"sleep","date":"{today}","value":8,"unit":"h"}}}
+{"q":"2 litre su içtim","d":{"tool":"log_metric","args":{"kind":"water","date":"{today}","value":2,"unit":"l"}}}
+{"q":"6 bardak su ictim bugun","d":{"tool":"log_metric","args":{"kind":"water","date":"{today}","value":6,"unit":"glass"}}}
+{"q":"had 4 glasses of water","d":{"tool":"log_metric","args":{"kind":"water","date":"{today}","value":4,"unit":"glass"}}}
+{"q":"bugün 9500 adım yaptım","d":{"tool":"log_metric","args":{"kind":"steps","date":"{today}","value":9500,"unit":"count"}}}
+{"q":"15 bin adım attım","d":{"tool":"log_metric","args":{"kind":"steps","date":"{today}","value":15000,"unit":"count"}}}
+{"q":"I walked 6000 steps","d":{"tool":"log_metric","args":{"kind":"steps","date":"{today}","value":6000,"unit":"count"}}}
+{"q":"squat 4x5 100 kilo yaptım","d":{"tool":"log_metric","args":{"kind":"workout","date":"{today}","value":100,"unit":"kg","exercise":"squat"}}}
+{"q":"70 kilo olmak istiyorum","d":{"tool":"answer"}}
+{"q":"bu ay kaç saat uyudum?","d":{"tool":"query_metrics","args":{"kind":"sleep","days":30}}}
+{"q":"son bir ayda kilom nasıl değişti?","d":{"tool":"query_metrics","args":{"kind":"weight","days":30}}}
+{"q":"şu an kaç kiloyum?","d":{"tool":"query_metrics","args":{"kind":"weight","days":30}}}
+{"q":"bugün ne kadar su içtim","d":{"tool":"query_metrics","args":{"kind":"water","days":1}}}
+{"q":"how much water did I drink this week?","d":{"tool":"query_metrics","args":{"kind":"water","days":7}}}
+{"q":"peki son 3 günde?","prev":"bu hafta kaç adım attım?","d":{"tool":"query_metrics","args":{"kind":"steps","days":3}}}
+{"q":"and in the last 2 days?","prev":"how many hours did I sleep this week?","d":{"tool":"query_metrics","args":{"kind":"sleep","days":2}}}
+{"q":"bugün neler yapmam lazım?","d":{"tool":"query_tasks","args":{"list":"today"}}}
+{"q":"önümüzdeki günlerde ne işlerim var","d":{"tool":"query_tasks","args":{"list":"upcoming"}}}
+{"q":"what's on my list for tomorrow?","d":{"tool":"query_tasks","args":{"list":"upcoming"}}}
+{"q":"dişçi randevum ne zamandı?","d":{"tool":"query_tasks","args":{"list":"all","text":"dişçi"}}}
+{"q":"kargoyu teslim aldım","d":{"tool":"query_tasks","args":{"list":"all","text":"kargo"}}}
+{"q":"I called the bank, that one is done","d":{"tool":"query_tasks","args":{"list":"all","text":"bank"}}}
+{"q":"notlara ekle şunu","prev":"bugün spor salonunda yeni bir program başladım","d":{"tool":"create_note","args":{"title":"Yeni spor programı","body":"Bugün spor salonunda yeni bir program başladım."}}}
+{"q":"şunu bir kenara not et","prev":"ev sahibi kirayı ocakta 15 bin yapacağını söyledi","d":{"tool":"create_note","args":{"title":"Kira artışı","body":"Ev sahibi kirayı ocakta 15 bin yapacağını söyledi."}}}
+{"q":"yeni bir not oluştur ve buna yaz","prev":"bisikletin arka lastiği değişecek, 750 TL","d":{"tool":"create_note","args":{"title":"Bisiklet lastiği","body":"Bisikletin arka lastiği değişecek, 750 TL."}}}
+{"q":"not al: market listesi süt, ekmek, yumurta","d":{"tool":"create_note","args":{"title":"Market listesi","body":"Süt, ekmek, yumurta"}}}
+{"q":"filmler diye bir not aç: Interstellar, Arrival, Her","d":{"tool":"create_note","args":{"title":"Filmler","body":"Interstellar, Arrival, Her"}}}
+{"q":"günlüğüme yaz: bugün ilk kez 5 km koştum","d":{"tool":"create_note","args":{"title":"İlk 5 km koşu","body":"Bugün ilk kez 5 km koştum."}}}
+{"q":"kaydet bunu","prev":"kombinin bakımı her yıl ekimde yapılmalı","d":{"tool":"create_note","args":{"title":"Kombi bakımı","body":"Kombinin bakımı her yıl ekimde yapılmalı."}}}
+{"q":"save this as a note","prev":"the car's next service is at 60,000 km","d":{"tool":"create_note","args":{"title":"Car service","body":"The car's next service is at 60,000 km."}}}
+{"q":"note this down: book ideas - Project Hail Mary, Piranesi","d":{"tool":"create_note","args":{"title":"Book ideas","body":"Project Hail Mary, Piranesi"}}}
+{"q":"bugün derste veri yapılarında bağlı listeleri gördük","d":{"tool":"suggest_note","args":{"title":"Veri yapıları: bağlı listeler","body":"Bugün derste veri yapılarında bağlı listeleri gördük."}}}
+{"q":"toplantıda yeni logo kararı alındı, mavi olacak","d":{"tool":"suggest_note","args":{"title":"Logo kararı","body":"Toplantıda yeni logo kararı alındı, mavi olacak."}}}
+{"q":"bugün Sefiller'i okumayı bitirdim","d":{"tool":"suggest_note","args":{"title":"Sefiller bitti","body":"Bugün Sefiller'i okumayı bitirdim."}}}
+{"q":"aklıma bir uygulama fikri geldi: bitki sulama hatırlatıcısı","d":{"tool":"suggest_note","args":{"title":"Uygulama fikri: bitki sulama","body":"Bitki sulama hatırlatıcısı."}}}
+{"q":"today I learned how binary search works","d":{"tool":"suggest_note","args":{"title":"Binary search","body":"Today I learned how binary search works."}}}
+{"q":"we agreed to move the launch to March","d":{"tool":"suggest_note","args":{"title":"Launch moved to March","body":"We agreed to move the launch to March."}}}
+{"q":"dün neler yaptım","d":{"tool":"answer"}}
+{"q":"What did I decide about the project?","d":{"tool":"answer"}}
+{"q":"geçen hafta toplantıda neler konuştuk","d":{"tool":"answer"}}
+{"q":"merhaba nasılsın","d":{"tool":"answer"}}
+{"q":"slm","d":{"tool":"answer"}}
+{"q":"teşekkür ederim","d":{"tool":"answer"}}
+{"q":"tamamdır","d":{"tool":"answer"}}
+{"q":"hello","d":{"tool":"answer"}}
+{"q":"thank you","d":{"tool":"answer"}}
+{"q":"çok yoruldum bugün","d":{"tool":"answer"}}
+{"q":"hava çok soğuk","d":{"tool":"answer"}}
+{"q":"ne yapabiliyorsun?","d":{"tool":"answer"}}
+{"q":"elektrik faturası ne kadar gelmişti","d":{"tool":"search_notes","args":{"query":"elektrik faturası"}}}
+{"q":"Ali'nin telefon numarası neydi","d":{"tool":"search_notes","args":{"query":"Ali telefon"}}}
+{"q":"where did I write the wifi password?","d":{"tool":"search_notes","args":{"query":"wifi password"}}}
+{"q":"elektrik faturasını yatırdım","d":{"tool":"query_tasks","args":{"list":"all","text":"fatura"}}}
+{"q":"diş fırçasını aldım, o işi kapat","d":{"tool":"query_tasks","args":{"list":"all","text":"diş fırçası"}}}
+{"q":"I picked up the parcel, mark it done","d":{"tool":"query_tasks","args":{"list":"all","text":"parcel"}}}
+{"q":"kirayı ödemeyi unutma, son gün ayın 25'i","d":{"tool":"add_task","args":{"title":"Kirayı öde","date":"{day25}"}}}
+{"q":"dün 6 saat uyudum, cumartesi de annemlere gideceğim","d":{"tool":"log_metric","args":{"kind":"sleep","date":"{yesterday}","value":6,"unit":"h"}}}
+{"q":"not al: doktorun önerdiği vitaminler D3 ve B12","d":{"tool":"create_note","args":{"title":"Doktorun önerdiği vitaminler","body":"D3 ve B12"}}}
+{"q":"note: the garage code is 4512","d":{"tool":"create_note","args":{"title":"Garage code","body":"The garage code is 4512."}}}
+{"q":"bugün patronla konuştum, zam kasımda gelecek","d":{"tool":"suggest_note","args":{"title":"Zam kasımda","body":"Bugün patronla konuştum, zam kasımda gelecek."}}}
+{"q":"sunumda müşteri yeni tasarımı çok beğendi","d":{"tool":"suggest_note","args":{"title":"Müşteri yeni tasarımı beğendi","body":"Sunumda müşteri yeni tasarımı çok beğendi."}}}
+{"q":"yeni bir proje fikri: komşularla eşya paylaşım uygulaması","d":{"tool":"suggest_note","args":{"title":"Proje fikri: eşya paylaşımı","body":"Komşularla eşya paylaşım uygulaması."}}}
+{"q":"I found out the gym closes at 10 pm on weekdays","d":{"tool":"suggest_note","args":{"title":"Gym hours","body":"The gym closes at 10 pm on weekdays."}}}
+{"q":"I walked 7500 steps today","d":{"tool":"log_metric","args":{"kind":"steps","date":"{today}","value":7500,"unit":"count"}}}
+{"q":"bu sabah neler yaptım","d":{"tool":"answer"}}
+{"q":"geçen hafta sonu ne yapmıştım","d":{"tool":"answer"}}
+{"q":"alışveriş diye bir not oluştur: domates, biber, peynir","d":{"tool":"create_note","args":{"title":"Alışveriş","body":"Domates, biber, peynir"}}}
+{"q":"make a note called Packing list: charger, passport, socks","d":{"tool":"create_note","args":{"title":"Packing list","body":"Charger, passport, socks"}}}
+{"q":"kardeşimi aradım, o işi bitir","d":{"tool":"query_tasks","args":{"list":"all","text":"kardeşimi ara"}}}

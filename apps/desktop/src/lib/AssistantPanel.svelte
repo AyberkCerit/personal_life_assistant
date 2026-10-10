@@ -92,6 +92,26 @@
     }
   }
 
+  /** Saves in flight, by "turn:index": a second click must not send a second save (final review M4). */
+  let saving = $state<string[]>([]);
+
+  /** The owner's decision a: a suggested note is written only now. */
+  async function save(turn: ShownTurn, index: number) {
+    const key = `${turn.turn_id}:${index}`;
+    if (saving.includes(key)) return;
+    saving = [...saving, key];
+    try {
+      const note = await api.qaSaveSuggestion(turn.turn_id, index);
+      turns = turns.map((x) =>
+        x.turn_id !== turn.turn_id ? x : { ...x, tools: x.tools.map((r, i) => (i === index ? { ...r, undo: { kind: "note", id: note }, result: { ...r.result, saved: note } } : r)) },
+      );
+    } catch (e) {
+      notice = tf("qa.error.save", { reason: String(e).split("|").pop() || String(e) });
+    } finally {
+      saving = saving.filter((k) => k !== key);
+    }
+  }
+
   async function clear() {
     confirmClear = false;
     try {
@@ -156,9 +176,15 @@
           <p class="question">{turn.question}</p>
           {#each turn.tools as record, i (i)}
             {@const line = toolLine(record)}
-            <div class="tool" class:failed={!record.ok}>
-              <span>{tf(line.key, line.values)}</span>
-              {#if record.result?.undone}
+            <div class="tool" class:failed={!record.ok} class:offer={record.tool === "suggest_note" && !record.result?.saved}>
+              {#if record.result?.saved && !record.result?.undone}
+                <button class="link" onclick={() => onOpenNote(String(record.result?.saved))}>{tf(line.key, line.values)}</button>
+              {:else}
+                <span>{tf(line.key, line.values)}</span>
+              {/if}
+              {#if record.tool === "suggest_note" && !record.result?.saved && !record.result?.undone && turn.status !== "running"}
+                <Button variant="primary" icon={FileText} disabled={saving.includes(`${turn.turn_id}:${i}`)} onclick={() => void save(turn, i)}>{t("qa.save")}</Button>
+              {:else if record.result?.undone}
                 <span class="undone">{t("qa.undone")}</span>
               {:else if record.undo && turn.status !== "running"}
                 <Button variant="quiet" onclick={() => void undo(turn, i)}>{t("qa.undo")}</Button>
@@ -242,6 +268,7 @@
     border-left: 2px solid var(--color-accent); background: var(--color-surface-panel); border-radius: var(--radius-sm); font-size: var(--text-sm);
   }
   .tool.failed { border-left-color: var(--color-danger); }
+  .tool.offer { background: var(--color-accent-subtle); }
   .undone { color: var(--color-text-muted); }
   .working, .muted { margin: 0; color: var(--color-text-muted); font-size: var(--text-sm); }
   .working { animation: pulse 1.4s ease-in-out infinite; }

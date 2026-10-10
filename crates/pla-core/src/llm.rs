@@ -70,6 +70,9 @@ impl ServerConfig {
             ("-ctv", "q8_0".into()),
             ("-ub", "256".into()),
             ("-b", "512".into()),
+            // nl-quality: the prompt cache defaults to 8 GiB and grew by a gigabyte over a hundred
+            // questions; 512 MiB keeps the speed (a repeated prompt in 0.4 s, not 25 s) and a bound
+            ("--cache-ram", "512".into()),
         ] {
             args.push(flag.into());
             args.push(value);
@@ -557,6 +560,10 @@ impl crate::memory::Embedder for ModelHost {
     fn tick(&mut self) {
         self.stop_if_idle();
     }
+
+    fn release(&mut self) {
+        self.stop();
+    }
 }
 
 impl crate::qa::ChatModel for ModelHost {
@@ -685,7 +692,7 @@ mod tests {
     fn args_bind_localhost_with_low_memory_flags_and_no_key() {
         let cfg = ServerConfig::new("llama-server.exe".into(), "m.gguf".into());
         let args = cfg.args(5555).join(" ");
-        for expected in ["--host 127.0.0.1", "--port 5555", "-c 8192", "-t 4", "-ngl 0", "-fa on", "-ctk q8_0", "-ctv q8_0", "-ub 256", "-b 512", "--no-webui"] {
+        for expected in ["--host 127.0.0.1", "--port 5555", "-c 8192", "-t 4", "-ngl 0", "-fa on", "-ctk q8_0", "-ctv q8_0", "-ub 256", "-b 512", "--cache-ram 512", "--no-webui"] {
             assert!(args.contains(expected), "missing `{expected}` in `{args}`");
         }
         assert!(!args.contains("api-key"), "API key must not appear on the command line (NFR-SEC-002)");

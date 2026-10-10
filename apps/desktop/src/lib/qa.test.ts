@@ -42,6 +42,10 @@ describe("assistant panel helpers", () => {
   it("says what each tool did", () => {
     expect(toolLine(added)).toEqual({ key: "qa.tool.reminder", values: { title: "Doktor randevusu", when: "2026-10-07 10:00" } });
     expect(toolLine({ ...added, ok: false, error: "a time needs a date" }).key).toBe("qa.tool.failed");
+    // the owner's decision a: a note is offered, and written only on Save
+    const offer = { tool: "suggest_note", args: {}, ok: true, result: { suggested: true, title: "Ders notu", body: "x" }, error: null, undo: null };
+    expect(toolLine(offer)).toEqual({ key: "qa.tool.suggest", values: { title: "Ders notu" } });
+    expect(toolLine({ ...offer, result: { ...offer.result, saved: "notes/Ders notu.md" } }).key).toBe("qa.tool.suggestSaved");
     expect(qaError("no_model")).toBe("qa.error.no_model");
     expect(qaError("weird")).toBe("qa.error.model");
   });
