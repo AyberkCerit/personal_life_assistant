@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { SECTIONS, backupLine, settingsError, trapIndex } from "./settings";
+import { SECTIONS, WEEKDAYS, backupLine, reportLine, settingsError, trapIndex } from "./settings";
 
 describe("settings screen", () => {
   it("has the seven sections of FR-SET-011 in order", () => {
@@ -29,6 +29,15 @@ describe("settings screen", () => {
     expect(settingsError("download_running")).toMatchObject({ key: "settings.error.download_running" });
     expect(settingsError("missing|Notlar|")).toMatchObject({ key: "settings.error.missing", path: "Notlar" });
     expect(settingsError("vault_lost|C:/Kasa|disk")).toMatchObject({ key: "settings.error.vault_lost", path: "C:/Kasa", reason: "disk" });
+  });
+
+  it("says when the weekly report last ran or why it failed", () => {
+    // FR-SCH-011
+    const none = { last_success_at: null, last_attempt_at: null, last_error: null };
+    expect(reportLine(none)).toEqual({ key: "settings.report.never" });
+    expect(reportLine({ ...none, last_success_at: "2026-10-11T20:05:00+03:00", last_attempt_at: "2026-10-11T20:05:00+03:00" })).toEqual({ key: "settings.report.last", at: "2026-10-11T20:05:00+03:00" });
+    expect(reportLine({ last_success_at: null, last_attempt_at: "2026-10-11T20:05:00+03:00", last_error: "disk full" }).key).toBe("settings.report.failed");
+    expect(WEEKDAYS).toHaveLength(7);
   });
 
   it("says when the backup last ran or why it failed", () => {

@@ -77,6 +77,8 @@ pub fn run() {
             commands::inspect_vault_folder,
             commands::setup_vault,
             commands::set_language,
+            commands::weekly_report_settings,
+            commands::set_weekly_report,
             commands::finish_setup,
             commands::settings_get,
             commands::settings_set,

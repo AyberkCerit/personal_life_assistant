@@ -65,6 +65,7 @@ let mockLang: "tr" | "en" | null = null;
 let mockTheme: "dark" | "light" = "dark";
 let mockAutostart = false;
 let lastBackup: string | null = null;
+let mockWeekly = { enabled: true, weekday: 6, time: "20:00" };
 
 function hash(s: string): string {
   let h = 0;
@@ -421,6 +422,11 @@ export async function mockBackend<T>(cmd: string, args: Record<string, unknown>)
       return undefined as T;
     case "backup_status":
       return { job: { last_success_at: lastBackup, last_attempt_at: lastBackup, last_error: null }, backups: lastBackup ? ["pla-2026-10-05.db"] : [] } as T;
+    case "weekly_report_settings":
+      return { schedule: mockWeekly, job: { last_success_at: "2026-10-04T20:03:00+03:00", last_attempt_at: "2026-10-04T20:03:00+03:00", last_error: null } } as T;
+    case "set_weekly_report":
+      mockWeekly = args.schedule as typeof mockWeekly;
+      return undefined as T;
     case "export_data":
       return [`${args.dir}/PLA-gorevler.csv`, `${args.dir}/PLA-olcumler.csv`] as T;
     case "open_place":

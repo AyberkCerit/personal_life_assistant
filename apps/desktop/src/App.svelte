@@ -393,6 +393,8 @@
     const unPaused = api.onPausedChanged((p) => (status = { ...status, paused: p }));
     const unModel = api.onModelDownload((s) => (modelDownload = s));
     const unSettings = api.onOpenSettings(openSettings);
+    // FR-SCH-007: the weekly report's notification opens the report
+    const unOpen = api.onOpenNote((path) => void openNote(path));
     const unQuick = api.onOpenQuickMetric(() => openQuickMetric());
     const unAdded = api.onItemsAdded((items) => {
       if (items.some((i) => i.kind === "metric")) metricsVersion++;
@@ -445,6 +447,7 @@
       void unPaused.then((f) => f());
       void unModel.then((f) => f());
       void unSettings.then((f) => f());
+      void unOpen.then((f) => f());
       void unQuick.then((f) => f());
       void unAdded.then((f) => f());
       window.removeEventListener("keydown", shortcut);

@@ -33,6 +33,8 @@ pub struct AppSettings {
     pub tray_hint_shown: bool,
     /// The first-run wizard was finished (FR-SET-001); older files load as `false`.
     pub setup_complete: bool,
+    /// FR-SCH-016: when the weekly report is written; older files load the default (Sunday 20:00).
+    pub weekly_report: crate::report::WeeklySchedule,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -76,6 +78,15 @@ pub fn save_settings(app_root: &Path, settings: &AppSettings) -> std::io::Result
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_older_file_gets_the_default_weekly_report() {
+        // FR-SCH-016: Sunday 20:00, on
+        let s: AppSettings = serde_json::from_str(r#"{"theme":"dark","setup_complete":true}"#).unwrap();
+        assert_eq!(s.weekly_report, crate::report::WeeklySchedule { enabled: true, weekday: 6, time: "20:00".into() });
+        let off: AppSettings = serde_json::from_str(r#"{"weekly_report":{"enabled":false}}"#).unwrap();
+        assert!(!off.weekly_report.enabled && off.weekly_report.weekday == 6);
+    }
 
     #[test]
     fn peeking_at_the_language_leaves_a_broken_file_for_startup() {

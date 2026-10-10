@@ -2,13 +2,29 @@
   import { onMount } from "svelte";
   import CircleAlert from "@lucide/svelte/icons/circle-alert";
   import FolderOpen from "@lucide/svelte/icons/folder-open";
-  import { api, type BackupStatus } from "../api";
+  import { api, type BackupStatus, type WeeklyReportView } from "../api";
   import { lang, t, tf } from "../i18n";
-  import { backupLine, describeError } from "../settings";
+  import { WEEKDAYS, backupLine, describeError, reportLine } from "../settings";
+  import Row from "./Row.svelte";
   import Banner from "../ui/Banner.svelte";
   import Button from "../ui/Button.svelte";
 
   let status = $state<BackupStatus | null>(null);
+  // FR-SCH-016: the weekly report's day and time, or off
+  let report = $state<WeeklyReportView | null>(null);
+  let reportError = $state<string | null>(null);
+
+  async function saveReport(change: Partial<WeeklyReportView["schedule"]>) {
+    if (!report) return;
+    const schedule = { ...report.schedule, ...change };
+    reportError = null;
+    try {
+      await api.setWeeklyReport(schedule);
+      report = { ...report, schedule };
+    } catch (e) {
+      reportError = describeError(e);
+    }
+  }
   let running = $state(false);
   let error = $state<string | null>(null);
 
@@ -43,6 +59,7 @@
 
   onMount(() => {
     void refresh();
+    void api.weeklyReportSettings().then((r) => (report = r)).catch((e) => (reportError = describeError(e)));
     const un = api.onBackupChanged(() => {
       running = false;
       void refresh();
@@ -52,6 +69,27 @@
 
   const line = $derived(status ? backupLine(status.job) : null);
 </script>
+
+<h4>{t("settings.report.title")}</h4>
+<p class="hint">{t("settings.report.hint")}</p>
+{#if report}
+  {@const last = reportLine(report.job)}
+  <Row label={t("settings.report.enabled")} forId="report-on">
+    <input id="report-on" type="checkbox" checked={report.schedule.enabled} onchange={(e) => void saveReport({ enabled: e.currentTarget.checked })} />
+  </Row>
+  {#if report.schedule.enabled}
+    <Row label={t("settings.report.day")} forId="report-day">
+      <select id="report-day" value={report.schedule.weekday} onchange={(e) => void saveReport({ weekday: Number(e.currentTarget.value) })}>
+        {#each WEEKDAYS as day, i (day)}<option value={i}>{t(day)}</option>{/each}
+      </select>
+    </Row>
+    <Row label={t("settings.report.time")} forId="report-time">
+      <input id="report-time" class="time" type="time" value={report.schedule.time} onchange={(e) => e.currentTarget.value && void saveReport({ time: e.currentTarget.value })} />
+    </Row>
+  {/if}
+  <p class:failed={last.key === "settings.report.failed"} class="status" role="status">{tf(last.key, { at: last.at ? when(last.at) : "", error: last.error ?? "" })}</p>
+{/if}
+{#if reportError}<Banner kind="danger" icon={CircleAlert} role="alert">{reportError}</Banner>{/if}
 
 <h4>{t("settings.backup.title")}</h4>
 <p class="hint">{t("settings.backup.hint")}</p>
@@ -71,4 +109,10 @@
   .hint { color: var(--color-text-muted); font-size: var(--text-sm); }
   .failed { color: var(--color-danger); }
   .actions { display: flex; gap: var(--space-2); }
+  .status { margin-top: var(--space-2); font-size: var(--text-sm); }
+  .time {
+    font: inherit; font-size: var(--text-md); color: var(--color-text); background: var(--color-surface-raised);
+    border: 1px solid var(--color-border-strong); border-radius: var(--radius-md); padding: var(--space-1) var(--space-2);
+  }
+  h4:not(:first-child) { margin-top: var(--space-5); }
 </style>

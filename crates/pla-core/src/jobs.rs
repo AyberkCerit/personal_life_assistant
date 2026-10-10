@@ -7,6 +7,8 @@ use chrono::{DateTime, FixedOffset, NaiveDate};
 use rusqlite::{params, Connection, OptionalExtension};
 
 pub const DAILY: &str = "daily_maintenance";
+/// FR-SCH-007…011: the weekly report's bookkeeping.
+pub const WEEKLY_REPORT: &str = "weekly_report";
 pub const MAX_ATTEMPTS_PER_DAY: i64 = 2;
 const KEEP_BACKUPS: usize = 7;
 
@@ -71,6 +73,11 @@ pub fn record_failure(conn: &Connection, job: &str, now: DateTime<FixedOffset>, 
         params![job, now.to_rfc3339(), error, attempts],
     )?;
     Ok(attempts)
+}
+
+/// How many times `job` failed today (FR-SCH-015: a second failure stops it until tomorrow).
+pub fn failures_today(conn: &Connection, job: &str, today: NaiveDate) -> rusqlite::Result<i64> {
+    Ok(row(conn, job)?.filter(|j| day_of(&j.last_attempt) == Some(today) && j.attempts > 0).map_or(0, |j| j.attempts))
 }
 
 /// What the Scheduler settings show about a job.
@@ -138,6 +145,20 @@ mod tests {
     }
     fn d(s: &str) -> NaiveDate {
         NaiveDate::parse_from_str(s, "%Y-%m-%d").unwrap()
+    }
+
+    #[test]
+    fn failures_are_counted_per_day_and_cleared_by_success() {
+        // FR-SCH-015
+        let tmp = tempfile::tempdir().unwrap();
+        let conn = open_databases(tmp.path()).unwrap().pla;
+        assert_eq!(failures_today(&conn, WEEKLY_REPORT, d("2026-10-11")).unwrap(), 0);
+        record_failure(&conn, WEEKLY_REPORT, at("2026-10-11T20:01:00+03:00"), "disk").unwrap();
+        record_failure(&conn, WEEKLY_REPORT, at("2026-10-11T20:31:00+03:00"), "disk").unwrap();
+        assert_eq!(failures_today(&conn, WEEKLY_REPORT, d("2026-10-11")).unwrap(), 2);
+        assert_eq!(failures_today(&conn, WEEKLY_REPORT, d("2026-10-12")).unwrap(), 0, "a new day");
+        record_success(&conn, WEEKLY_REPORT, at("2026-10-11T21:00:00+03:00")).unwrap();
+        assert_eq!(failures_today(&conn, WEEKLY_REPORT, d("2026-10-11")).unwrap(), 0);
     }
 
     #[test]
