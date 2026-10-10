@@ -158,9 +158,9 @@ fn start_session(app: &AppHandle, root: &Path, settings: &AppSettings, own: Arc<
         })
     })
     .with_report_listener({
-        let report_app = app.clone();
+        let (report_app, report_vault) = (app.clone(), vault.root.clone());
         Box::new(move |week, outcome| match outcome {
-            crate::worker::ReportOutcome::Written(rel) => crate::notify::report_ready(&report_app, week, rel),
+            crate::worker::ReportOutcome::Written(rel) => crate::notify::report_ready(&report_app, &report_vault, week, rel),
             // FR-SCH-015: the second failure of a day is shown; the first is tried again
             crate::worker::ReportOutcome::Failed { attempts, reason } if *attempts >= pla_core::jobs::MAX_ATTEMPTS_PER_DAY => {
                 show_info(strings().problem_title, reason);
@@ -395,7 +395,7 @@ pub fn weekly_report_settings(state: State<AppState>) -> Result<WeeklyReportView
 #[tauri::command]
 pub fn set_weekly_report(state: State<AppState>, schedule: pla_core::report::WeeklySchedule) -> Result<(), String> {
     if schedule.weekday > 6 || chrono::NaiveTime::parse_from_str(&schedule.time, "%H:%M").is_err() {
-        return Err(format!("invalid|{}|{}", schedule.weekday, schedule.time));
+        return Err(format!("invalid_setting|weekly_report|{} {}", schedule.weekday, schedule.time));
     }
     update_settings(&app_root()?, &state.settings_lock, |s| s.weekly_report = schedule.clone())?;
     if let Some(session) = state.session.lock().expect("session lock").as_ref() {

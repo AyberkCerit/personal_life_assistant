@@ -14,15 +14,22 @@
   let report = $state<WeeklyReportView | null>(null);
   let reportError = $state<string | null>(null);
 
+  let savingReport = $state(false);
+
+  /** One save at a time; a failed one puts the controls back (final review M5). */
   async function saveReport(change: Partial<WeeklyReportView["schedule"]>) {
-    if (!report) return;
-    const schedule = { ...report.schedule, ...change };
+    if (!report || savingReport) return;
+    const before = report;
+    report = { ...report, schedule: { ...report.schedule, ...change } };
     reportError = null;
+    savingReport = true;
     try {
-      await api.setWeeklyReport(schedule);
-      report = { ...report, schedule };
+      await api.setWeeklyReport(report.schedule);
     } catch (e) {
+      report = before;
       reportError = describeError(e);
+    } finally {
+      savingReport = false;
     }
   }
   let running = $state(false);
@@ -75,16 +82,16 @@
 {#if report}
   {@const last = reportLine(report.job)}
   <Row label={t("settings.report.enabled")} forId="report-on">
-    <input id="report-on" type="checkbox" checked={report.schedule.enabled} onchange={(e) => void saveReport({ enabled: e.currentTarget.checked })} />
+    <input id="report-on" type="checkbox" disabled={savingReport} checked={report.schedule.enabled} onchange={(e) => void saveReport({ enabled: e.currentTarget.checked })} />
   </Row>
   {#if report.schedule.enabled}
     <Row label={t("settings.report.day")} forId="report-day">
-      <select id="report-day" value={report.schedule.weekday} onchange={(e) => void saveReport({ weekday: Number(e.currentTarget.value) })}>
+      <select id="report-day" disabled={savingReport} value={report.schedule.weekday} onchange={(e) => void saveReport({ weekday: Number(e.currentTarget.value) })}>
         {#each WEEKDAYS as day, i (day)}<option value={i}>{t(day)}</option>{/each}
       </select>
     </Row>
     <Row label={t("settings.report.time")} forId="report-time">
-      <input id="report-time" class="time" type="time" value={report.schedule.time} onchange={(e) => e.currentTarget.value && void saveReport({ time: e.currentTarget.value })} />
+      <input id="report-time" class="time" type="time" disabled={savingReport} value={report.schedule.time} onchange={(e) => e.currentTarget.value && void saveReport({ time: e.currentTarget.value })} />
     </Row>
   {/if}
   <p class:failed={last.key === "settings.report.failed"} class="status" role="status">{tf(last.key, { at: last.at ? when(last.at) : "", error: last.error ?? "" })}</p>

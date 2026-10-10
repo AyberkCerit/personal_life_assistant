@@ -35,8 +35,11 @@ pub trait Notifier: Send {
     fn backup_changed(&self) {}
     /// The daily maintenance window is open: the model may summarise past days (FR-MEM-006).
     fn maintenance(&self) {}
-    /// `week`'s report is due and missing: the worker writes it (FR-SCH-007, -012).
-    fn weekly_report(&self, _week: Week) {}
+    /// `week`'s report is due and missing: the worker writes it (FR-SCH-007, -012). `false` when
+    /// it could not be passed on (no session yet, at start): asked again on the next tick.
+    fn weekly_report(&self, _week: Week) -> bool {
+        false
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -133,8 +136,10 @@ impl Scheduler {
         if failures_today(&self.conn, WEEKLY_REPORT, now.date_naive()).unwrap_or(0) >= MAX_ATTEMPTS_PER_DAY {
             return;
         }
-        self.asked = Some((week, now));
-        self.notifier.weekly_report(week);
+        // remembered only once it reached the worker: a start's first tick has no session yet (final review I7)
+        if self.notifier.weekly_report(week) {
+            self.asked = Some((week, now));
+        }
     }
 
     pub fn pending(&self) -> Arc<Pending> {
@@ -269,8 +274,9 @@ mod tests {
         fn tasks_changed(&self) {
             self.0.lock().unwrap().push("changed".into());
         }
-        fn weekly_report(&self, week: Week) {
+        fn weekly_report(&self, week: Week) -> bool {
             self.0.lock().unwrap().push(format!("report {}", week.label()));
+            true
         }
     }
 
@@ -364,6 +370,33 @@ mod tests {
         schedule.lock().unwrap().enabled = false;
         r.at("2026-10-11T21:30:00+03:00");
         assert!(r.seen().is_empty(), "turned off (FR-SCH-016)");
+    }
+
+    /// No session yet: the request goes nowhere.
+    #[derive(Clone, Default)]
+    struct NoSession(Arc<Mutex<usize>>);
+    impl Notifier for NoSession {
+        fn reminder(&self, _: &DueReminder) {}
+        fn missed(&self, _: &[DueReminder]) {}
+        fn problem(&self, _: &str) {}
+        fn tasks_changed(&self) {}
+        fn weekly_report(&self, _: Week) -> bool {
+            *self.0.lock().unwrap() += 1;
+            false
+        }
+    }
+
+    #[test]
+    fn a_report_that_reached_no_worker_is_asked_for_on_the_next_tick() {
+        // final review I7: the start's first tick comes before the session is there
+        let tmp = tempfile::tempdir().unwrap();
+        let conn = open_databases(&tmp.path().join(".data")).unwrap().pla;
+        let calls = NoSession::default();
+        let mut sched = Scheduler::new(tmp.path().to_path_buf(), conn, Box::new(calls.clone()), Box::new(Probe(Arc::new(Mutex::new((600, true))))), Box::new(|| at("2026-10-12T09:00:00+03:00")))
+            .with_weekly_report(tmp.path().join("reports/weekly"), Arc::new(Mutex::new(WeeklySchedule::default())));
+        sched.tick();
+        sched.tick();
+        assert_eq!(*calls.0.lock().unwrap(), 2, "not taken for asked");
     }
 
     #[test]

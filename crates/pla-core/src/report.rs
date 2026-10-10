@@ -63,23 +63,22 @@ impl Week {
 
     pub fn parse(label: &str) -> Option<Self> {
         let (y, w) = label.split_once("-W")?;
+        if w.len() != 2 {
+            return None;
+        }
         let week = Self { year: y.parse().ok()?, number: w.parse().ok()? };
         NaiveDate::from_isoywd_opt(week.year, week.number, Weekday::Mon).map(|_| week)
     }
 }
 
-/// When `week`'s report is due: the chosen weekday and time. Wednesday to Sunday fall in the week
-/// itself; Monday and Tuesday in the next one, so a "Monday 09:00" report covers the week just past.
-pub fn slot(week: Week, schedule: &WeeklySchedule) -> DateTime<FixedOffset> {
-    let day = u32::from(schedule.weekday.min(6));
-    let date = if day <= 1 { week.next().monday() + Duration::days(i64::from(day)) } else { week.monday() + Duration::days(i64::from(day)) };
+/// When `week`'s report is due, in the offset of `now`'s clock (final review I6). On Sunday the
+/// report is the week's own, written on its last evening; any other day writes it in the next week,
+/// once the week is over, so no day of a week is left out of every report (final review I5).
+pub fn slot(week: Week, schedule: &WeeklySchedule, offset: FixedOffset) -> DateTime<FixedOffset> {
+    let day = i64::from(schedule.weekday.min(6));
+    let date = if day == 6 { week.sunday() } else { week.next().monday() + Duration::days(day) };
     let time = NaiveTime::parse_from_str(&schedule.time, "%H:%M").unwrap_or(NaiveTime::from_hms_opt(20, 0, 0).expect("a real time"));
-    local(date.and_time(time))
-}
-
-fn local(at: chrono::NaiveDateTime) -> DateTime<FixedOffset> {
-    use chrono::TimeZone;
-    chrono::Local.from_local_datetime(&at).earliest().map_or_else(|| at.and_utc().fixed_offset(), |t| t.fixed_offset())
+    date.and_time(time).and_local_timezone(offset).single().expect("a fixed offset has every time")
 }
 
 /// The week whose report is due at `now`: the latest one whose slot has come (FR-SCH-007). Only that
@@ -89,7 +88,7 @@ pub fn due_week(now: DateTime<FixedOffset>, schedule: &WeeklySchedule) -> Option
         return None;
     }
     let this = Week::of(now.date_naive());
-    [this.next(), this, this.previous(), this.previous().previous()].into_iter().find(|w| slot(*w, schedule) <= now)
+    [this, this.previous(), this.previous().previous()].into_iter().find(|w| slot(*w, schedule, *now.offset()) <= now)
 }
 
 /// `reports/weekly/2026-W41.md` (FR-SCH-009).
@@ -110,7 +109,7 @@ pub struct MetricLine {
 pub struct WeekStats {
     pub completed: Vec<String>,
     pub added: usize,
-    /// Open tasks whose day has come by the week's end.
+    /// Open tasks dated in the week (still open when the report is written).
     pub open_late: Vec<String>,
     /// (date, time, title) of next week's open tasks.
     pub next_week: Vec<(String, Option<String>, String)>,
@@ -148,8 +147,8 @@ pub fn week_stats(conn: &Connection, week: Week) -> rusqlite::Result<WeekStats> 
     )?;
     let added: i64 = conn.query_row("SELECT count(*) FROM task WHERE substr(created_at, 1, 10) BETWEEN ?1 AND ?2", [&from, &to], |r| r.get(0))?;
     let open_late = conn
-        .prepare("SELECT title FROM task WHERE status = 'open' AND date IS NOT NULL AND date <= ?1 ORDER BY date, time")?
-        .query_map([&to], |r| r.get(0))?
+        .prepare("SELECT title FROM task WHERE status = 'open' AND date BETWEEN ?1 AND ?2 ORDER BY date, time")?
+        .query_map([&from, &to], |r| r.get(0))?
         .collect::<Result<_, _>>()?;
     let (n_from, n_to) = day_range(week.next());
     let next_week = conn
@@ -217,8 +216,10 @@ pub fn clean_highlights(raw: &str) -> Option<String> {
 pub enum NoHighlights {
     /// The week has no daily summaries to read.
     NoSummaries,
-    /// No model, or it failed: the numbers still come.
+    /// No model is installed: the numbers still come.
     NoModel,
+    /// The model failed twice or wrote no points (final review I2): the numbers still come.
+    Failed,
 }
 
 const MONTHS_TR: [&str; 12] = ["Ocak", "Şubat", "Mart", "Nisan", "Mayıs", "Haziran", "Temmuz", "Ağustos", "Eylül", "Ekim", "Kasım", "Aralık"];
@@ -296,6 +297,7 @@ pub fn render(week: Week, lang: &str, highlights: Result<&str, NoHighlights>, st
         Ok(h) => s.push_str(h.trim()),
         Err(NoHighlights::NoSummaries) => s.push_str(t("_Bu hafta için günlük özet yok._", "_No daily summaries this week._")),
         Err(NoHighlights::NoModel) => s.push_str(t("_Dil modeli olmadan özet yazılamadı; sayılar aşağıda._", "_No summary without the language model; the numbers are below._")),
+        Err(NoHighlights::Failed) => s.push_str(t("_Dil modeli bu hafta için özet yazamadı; sayılar aşağıda._", "_The language model could not write this week's summary; the numbers are below._")),
     }
     s.push_str(&format!("\n\n## {}\n\n", t("Görevler", "Tasks")));
     s.push_str(&format!(
@@ -307,11 +309,16 @@ pub fn render(week: Week, lang: &str, highlights: Result<&str, NoHighlights>, st
         t("bekleyen", "still open"),
         stats.open_late.len()
     ));
+    // at most ten names a list, the rest counted (final review M3)
+    let names = |list: &[String]| {
+        let shown = list.iter().take(10).cloned().collect::<Vec<_>>().join(", ");
+        if list.len() > 10 { format!("{shown} {}{}", if en { "and " } else { "ve " }, if en { format!("{} more", list.len() - 10) } else { format!("{} tane daha", list.len() - 10) }) } else { shown }
+    };
     if !stats.completed.is_empty() {
-        s.push_str(&format!("\n{}: {}\n", t("Tamamlananlar", "Done"), stats.completed.join(", ")));
+        s.push_str(&format!("\n{}: {}\n", t("Tamamlananlar", "Done"), names(&stats.completed)));
     }
     if !stats.open_late.is_empty() {
-        s.push_str(&format!("\n{}: {}\n", t("Bekleyenler", "Still open"), stats.open_late.iter().take(10).cloned().collect::<Vec<_>>().join(", ")));
+        s.push_str(&format!("\n{}: {}\n", t("Bekleyenler", "Still open"), names(&stats.open_late)));
     }
     s.push_str(&format!("\n## {}\n\n", t("Ölçümler", "Measurements")));
     if stats.metrics.is_empty() {
@@ -347,23 +354,25 @@ pub enum ReportError {
     Path(String),
 }
 
-/// Writes the report; `Ok(None)` when it is there already (FR-SCH-010: never overwritten).
+/// Writes the report; `Ok(None)` when it is there already (FR-SCH-010: never overwritten). It is
+/// written whole beside its place, then linked in, which fails if a report appeared meanwhile: a
+/// full disk never leaves a half report that would count as written (final review I1).
 pub fn write_report(vault: &Vault, week: Week, text: &str) -> Result<Option<String>, ReportError> {
     let rel = report_rel(&vault.config.folders, week);
     let path = crate::files::resolve(vault, &rel).map_err(|e| ReportError::Path(e.to_string()))?;
     if path.exists() {
         return Ok(None);
     }
-    if let Some(dir) = path.parent() {
-        std::fs::create_dir_all(dir)?;
-    }
-    // create_new: a report written meanwhile (another window, the user) is never replaced
-    use std::io::Write;
-    match std::fs::OpenOptions::new().write(true).create_new(true).open(&path) {
-        Ok(mut f) => {
-            f.write_all(text.as_bytes())?;
-            Ok(Some(rel))
-        }
+    let dir = path.parent().ok_or_else(|| ReportError::Path(rel.clone()))?;
+    std::fs::create_dir_all(dir)?;
+    let tmp = dir.join(format!(".{}.{}.tmp", week.label(), std::process::id()));
+    std::fs::write(&tmp, text).inspect_err(|_| {
+        let _ = std::fs::remove_file(&tmp);
+    })?;
+    let linked = std::fs::hard_link(&tmp, &path);
+    let _ = std::fs::remove_file(&tmp);
+    match linked {
+        Ok(()) => Ok(Some(rel)),
         Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => Ok(None),
         Err(e) => Err(e.into()),
     }
@@ -384,7 +393,7 @@ mod tests {
     }
 
     fn at(s: &str) -> DateTime<FixedOffset> {
-        local(chrono::NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M").unwrap())
+        chrono::NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M").unwrap().and_local_timezone(FixedOffset::east_opt(3 * 3600).unwrap()).unwrap()
     }
 
     #[test]
@@ -397,6 +406,7 @@ mod tests {
         assert_eq!(Week::of(d("2025-12-29")).label(), "2026-W01");
         assert_eq!(Week::parse("2026-W41"), Some(Week::of(d("2026-10-09"))));
         assert_eq!(Week::parse("2026-W54"), None);
+        assert_eq!(Week::parse("2026-W5"), None, "two digits, as the files are named");
     }
 
     #[test]
@@ -410,6 +420,15 @@ mod tests {
         let monday = WeeklySchedule { weekday: 0, time: "09:00".into(), ..WeeklySchedule::default() };
         assert_eq!(due_week(at("2026-10-12 09:00"), &monday).map(Week::label).as_deref(), Some("2026-W41"));
         assert_eq!(due_week(at("2026-10-12 08:59"), &monday).map(Week::label).as_deref(), Some("2026-W40"));
+        // final review I5: a Friday report covers the last whole week, so no day falls between
+        let friday = WeeklySchedule { weekday: 4, time: "18:00".into(), ..WeeklySchedule::default() };
+        assert_eq!(due_week(at("2026-10-16 18:00"), &friday).map(Week::label).as_deref(), Some("2026-W41"));
+        assert_eq!(due_week(at("2026-10-16 17:59"), &friday).map(Week::label).as_deref(), Some("2026-W40"));
+        // across the year's end: W53 is reported on the Monday of 2027-W01
+        assert_eq!(due_week(at("2027-01-04 09:00"), &monday).map(Week::label).as_deref(), Some("2026-W53"));
+        // final review I6: the slot is read in the clock's own offset, not the machine's zone
+        let utc = chrono::DateTime::parse_from_rfc3339("2026-10-11T20:00:00+00:00").unwrap();
+        assert_eq!(due_week(utc, &s).map(Week::label).as_deref(), Some("2026-W41"));
         assert_eq!(due_week(at("2026-10-12 09:00"), &WeeklySchedule { enabled: false, ..s }), None, "FR-SCH-016");
     }
 
@@ -438,7 +457,7 @@ mod tests {
         let stats = week_stats(&conn, Week::of(d("2026-10-09"))).unwrap();
         assert_eq!(stats.completed, ["Fatura öde"]);
         assert_eq!(stats.added, 3);
-        assert_eq!(stats.open_late, ["Eski iş", "Rapor yaz"]);
+        assert_eq!(stats.open_late, ["Rapor yaz"], "this week's, not every open task ever (final review M3)");
         assert_eq!(stats.next_week, [("2026-10-13".to_owned(), None, "Dişçi".to_owned())]);
         assert_eq!(stats.metrics, [MetricLine { kind: MetricKind::Sleep, this_week: Some(6.5), last_week: Some(8.0) }]);
     }

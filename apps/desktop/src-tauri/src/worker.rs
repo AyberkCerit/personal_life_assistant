@@ -103,6 +103,9 @@ impl WorkerHandle {
     /// Pauses at once, also in the middle of a run (between two model calls), then tells the thread.
     pub fn set_paused(&self, paused: bool) {
         self.pause.store(paused, Ordering::SeqCst);
+        if paused {
+            self.interrupt.store(true, Ordering::SeqCst); // a running summary or report stops (final review I3)
+        }
         self.send(Command::Pause(paused));
     }
 
@@ -468,7 +471,7 @@ impl Worker {
         if report::report_exists(&self.vault, week) {
             return ReportOutcome::Exists;
         }
-        if self.status.paused {
+        if self.status.paused || self.pause.load(Ordering::SeqCst) {
             return ReportOutcome::Busy; // background AI paused (FR-SCH-014): later
         }
         let now = (self.clock)();
@@ -484,14 +487,18 @@ impl Worker {
         self.status.busy = true;
         (self.notify)(&self.status);
         let folders = self.vault.config.folders.clone();
-        let (cancel, dropping, asking) = (Arc::clone(&self.cancel), Arc::clone(&self.dropping), Arc::clone(&self.asking));
-        let interrupted = move || cancel.load(Ordering::SeqCst) || dropping.load(Ordering::SeqCst) || asking.load(Ordering::SeqCst) > 0;
+        // a question, a pause, a model removal or closing: later (final review I3)
+        let (cancel, dropping, asking, pause) = (Arc::clone(&self.cancel), Arc::clone(&self.dropping), Arc::clone(&self.asking), Arc::clone(&self.pause));
+        let interrupted = move || cancel.load(Ordering::SeqCst) || dropping.load(Ordering::SeqCst) || asking.load(Ordering::SeqCst) > 0 || pause.load(Ordering::SeqCst);
         let mut highlights: Result<String, NoHighlights> = Err(NoHighlights::NoModel);
         let mut busy = false;
+        let mut model_error: Option<String> = None;
+        let mut summarised: Vec<String> = Vec::new();
         if let Some(model) = self.extractor.as_mut().and_then(|x| x.chat_model()) {
-            let last = week.sunday().min(now.date_naive());
+            // the days before today, as the maintenance does: today is not over (final review M1)
+            let last = week.sunday().min(now.date_naive() - chrono::Duration::days(1));
             let mut day = week.monday();
-            while day <= last {
+            while day <= last && model_error.is_none() {
                 if interrupted() {
                     busy = true;
                     break;
@@ -501,38 +508,60 @@ impl Worker {
                     if !fresh && !sources.notes.is_empty() {
                         match pla_core::summary::summarize(model, &sources, &self.interrupt) {
                             Ok(text) if !text.is_empty() => {
-                                let _ = pla_core::summary::save(&cache, &sources, &text, now);
+                                if pla_core::summary::save(&cache, &sources, &text, now).is_ok() {
+                                    summarised.push(day.format("%Y-%m-%d").to_string());
+                                }
                             }
-                            Err(LlmError::Cancelled) => {
-                                busy = true;
-                                break;
-                            }
-                            _ => {} // the numbers still come; this day's summary waits for the maintenance
+                            Ok(_) => {}
+                            Err(LlmError::Cancelled) => busy = true,
+                            // the model is not answering: no more days (final review I2)
+                            Err(e) => model_error = Some(e.to_string()),
                         }
                     }
                 }
+                if busy {
+                    break;
+                }
                 day += chrono::Duration::days(1);
             }
-            if !busy {
+            if !busy && model_error.is_none() {
                 let summaries = report::week_summaries(&cache, week).unwrap_or_default();
                 highlights = if summaries.is_empty() {
                     Err(NoHighlights::NoSummaries)
+                } else if interrupted() {
+                    busy = true;
+                    Err(NoHighlights::Failed)
                 } else {
                     match model.complete(&report::highlights_request(week, &summaries, lang), &self.interrupt) {
-                        Ok(raw) => report::clean_highlights(&raw).ok_or(NoHighlights::NoModel),
+                        Ok(raw) => report::clean_highlights(&raw).ok_or(NoHighlights::Failed).inspect_err(|_| model_error = Some("no points in the answer".into())),
                         Err(LlmError::Cancelled) => {
                             busy = true;
-                            Err(NoHighlights::NoModel)
+                            Err(NoHighlights::Failed)
                         }
-                        Err(_) => Err(NoHighlights::NoModel),
+                        Err(e) => {
+                            model_error = Some(e.to_string());
+                            Err(NoHighlights::Failed)
+                        }
                     }
                 };
             }
         } else if report::week_summaries(&cache, week).map(|s| s.is_empty()).unwrap_or(true) {
             highlights = Err(NoHighlights::NoSummaries);
         }
-        let outcome = if busy || interrupted() {
+        // an open note's summary box hears of its day (final review M1)
+        if let Some(listener) = &self.on_summary {
+            for d in &summarised {
+                listener(d, None);
+            }
+        }
+        let first_failure = model_error.is_some() && pla_core::jobs::failures_today(&self.conn, pla_core::jobs::WEEKLY_REPORT, now.date_naive()).unwrap_or(0) == 0;
+        let outcome = if busy {
             ReportOutcome::Busy
+        } else if let (true, Some(reason)) = (first_failure, model_error.clone()) {
+            // a model that fails once is asked again later; the second time the numbers come alone
+            // (final review I2), so a passing hiccup never leaves a report without its points
+            self.status.last_error = Some(reason.clone());
+            fail(&self.conn, reason)
         } else {
             match report::week_stats(&self.conn, week) {
                 Err(e) => fail(&self.conn, e.to_string()),
@@ -950,6 +979,55 @@ mod tests {
         let conn = rusqlite::Connection::open(data.join("pla.db")).unwrap();
         let ok: Option<String> = conn.query_row("SELECT last_success_at FROM job_run WHERE job_type = 'weekly_report'", [], |r| r.get(0)).unwrap();
         assert!(ok.is_some(), "FR-SCH-011");
+        handle.shutdown();
+    }
+
+    /// A model that is there but does not answer (llama-server would not start).
+    struct Down;
+    impl Extractor for Down {
+        fn extract_raw(&mut self, _: NaiveDate, _: &str) -> Result<String, LlmError> {
+            Ok(r#"{"items":[]}"#.into())
+        }
+        fn chat_model(&mut self) -> Option<&mut dyn pla_core::qa::ChatModel> {
+            Some(self)
+        }
+    }
+    impl pla_core::qa::ChatModel for Down {
+        fn complete(&mut self, _: &serde_json::Value, _: &AtomicBool) -> Result<String, LlmError> {
+            Err(LlmError::Http("connection refused".into()))
+        }
+        fn stream(&mut self, _: &serde_json::Value, _: &AtomicBool, _: &mut dyn FnMut(&str)) -> Result<String, LlmError> {
+            Err(LlmError::Http("connection refused".into()))
+        }
+    }
+
+    #[test]
+    fn a_failing_model_is_tried_again_before_the_numbers_come_alone() {
+        // final review I2: a passing hiccup must not leave a report without its points for good
+        let tmp = tempfile::tempdir().unwrap();
+        let vault = open_vault(tmp.path()).unwrap();
+        let data = tmp.path().join(".data");
+        let dbs = open_databases(&data).unwrap();
+        dbs.cache
+            .execute("INSERT INTO daily_summary (date, summary_text, source_paths_json, generated_at, stale, signature) VALUES ('2026-10-06', '- Bütçe onaylandı', '[]', 'x', 0, 's')", [])
+            .unwrap();
+        let (tx, rx) = std::sync::mpsc::channel();
+        let tx = Mutex::new(tx);
+        let handle = Worker::new(vault, dbs.pla, Some(Box::new(Down)), Box::new(|_| {}))
+            .with_clock(Box::new(|| chrono::DateTime::parse_from_rfc3339("2026-10-11T20:05:00+03:00").unwrap()))
+            .with_report_listener(Box::new(move |_, outcome| {
+                let _ = tx.lock().unwrap().send(outcome.clone());
+            }))
+            .spawn();
+        let week = pla_core::report::Week::parse("2026-W41").unwrap();
+        let ask = || Command::WeeklyReport { week, cache_path: data.join("cache.db"), lang: "tr".into() };
+        handle.send(ask());
+        assert!(matches!(rx.recv_timeout(Duration::from_secs(10)).unwrap(), ReportOutcome::Failed { attempts: 1, .. }));
+        assert!(!tmp.path().join("reports/weekly/2026-W41.md").exists(), "not written after one failure");
+        handle.send(ask());
+        assert_eq!(rx.recv_timeout(Duration::from_secs(10)).unwrap(), ReportOutcome::Written("reports/weekly/2026-W41.md".into()));
+        let text = std::fs::read_to_string(tmp.path().join("reports/weekly/2026-W41.md")).unwrap();
+        assert!(text.contains("Dil modeli bu hafta için özet yazamadı"), "{text}");
         handle.shutdown();
     }
 

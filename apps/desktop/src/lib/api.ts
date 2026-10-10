@@ -208,8 +208,8 @@ export const api = {
   backupStatus: () => call<BackupStatus>("backup_status"),
   weeklyReportSettings: () => call<WeeklyReportView>("weekly_report_settings"),
   setWeeklyReport: (schedule: WeeklySchedule) => call<void>("set_weekly_report", { schedule }),
-  /** A notification asked for a note (the weekly report): its vault path. */
-  onOpenNote: (cb: (path: string) => void) => on<string>("open-note", cb),
+  /** A notification asked for a note (the weekly report): its path, in the vault it belongs to. */
+  onOpenNote: (cb: (note: { path: string; vault: string }) => void) => on<{ path: string; vault: string }>("open-note", cb),
   exportData: (dir: string, lang: string) => call<string[]>("export_data", { dir, lang }),
   openPlace: (kind: PlaceKind) => call<void>("open_place", { kind }),
   aboutInfo: () => call<About>("about_info"),
