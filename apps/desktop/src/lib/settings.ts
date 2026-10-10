@@ -33,6 +33,16 @@ export function backupLine(job: JobStatus): { key: Key; at?: string; error?: str
   return { key: "settings.backup.never" };
 }
 
+/** FR-SCH-011: when the weekly report was last written, or why it failed. */
+export function reportLine(job: JobStatus): { key: Key; at?: string; error?: string } {
+  if (job.last_error && job.last_attempt_at) return { key: "settings.report.failed", at: job.last_attempt_at, error: job.last_error };
+  if (job.last_success_at) return { key: "settings.report.last", at: job.last_success_at };
+  return { key: "settings.report.never" };
+}
+
+/** The weekly report's days, Monday first (0 = Monday, as the settings file keeps them). */
+export const WEEKDAYS: Key[] = ["day.mon", "day.tue", "day.wed", "day.thu", "day.fri", "day.sat", "day.sun"];
+
 /** An error from a settings command as text for the user, naming the folder and the reason. */
 export function describeError(e: unknown): string {
   const { key, path, reason, reasonKey } = settingsError(String(e));

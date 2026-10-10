@@ -30,6 +30,8 @@ pub struct Strings {
     pub tray_settings: &'static str,
     pub tray_quick_metric: &'static str,
     pub tray_quit: &'static str,
+    pub report_ready: &'static str,
+    pub report_week: &'static str,
 }
 
 const TR: Strings = Strings {
@@ -52,6 +54,8 @@ const TR: Strings = Strings {
     tray_settings: "Ayarlar",
     tray_quick_metric: "Hızlı ölçüm",
     tray_quit: "Çık",
+    report_ready: "Haftalık raporun hazır",
+    report_week: "Hafta",
 };
 
 const EN: Strings = Strings {
@@ -74,6 +78,8 @@ const EN: Strings = Strings {
     tray_settings: "Settings",
     tray_quick_metric: "Quick measurement",
     tray_quit: "Quit",
+    report_ready: "Your weekly report is ready",
+    report_week: "Week",
 };
 
 /// The language chosen in PLA: 0 = follow Windows, 1 = Turkish, 2 = English (FR-SET-003/012).
@@ -145,6 +151,33 @@ pub fn show_info(title: &str, body: &str) {
     }
 }
 
+/// FR-SCH-007: "Your weekly report is ready"; a click shows PLA with the report open.
+pub fn report_ready(app: &AppHandle, vault: &std::path::Path, week: pla_core::report::Week, rel: &str) {
+    let s = strings();
+    let body = format!("{} {} · {}", s.report_week, week.number, pla_core::report::span(week, ui_lang()));
+    #[cfg(windows)]
+    {
+        // the vault goes with it: another may be open by the time of the click (final review M6)
+        let (app, payload) = (app.clone(), serde_json::json!({ "path": rel, "vault": vault.to_string_lossy() }));
+        let shown = tauri_winrt_notification::Toast::new(app_id())
+            .title(s.report_ready)
+            .text1(&body)
+            .on_activated(move |_| {
+                crate::tray::show_main(&app);
+                let _ = app.emit("open-note", &payload);
+                Ok(())
+            })
+            .show();
+        if let Err(e) = shown {
+            eprintln!("PLA: notification failed: {e}");
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = (app, vault, rel, body);
+    }
+}
+
 pub struct AppNotifier {
     app: AppHandle,
     commands: Mutex<Sender<SchedCommand>>,
@@ -157,6 +190,16 @@ impl AppNotifier {
 }
 
 impl Notifier for AppNotifier {
+    /// FR-SCH-007: the worker (it has the model and the vault) writes the week's report.
+    fn weekly_report(&self, week: pla_core::report::Week) -> bool {
+        use tauri::Manager;
+        let state = self.app.state::<crate::commands::AppState>();
+        let guard = state.session.lock().expect("session lock");
+        let Some(session) = guard.as_ref() else { return false };
+        session.worker.send(crate::worker::Command::WeeklyReport { week, cache_path: session.cache_path.clone(), lang: ui_lang().to_owned() });
+        true
+    }
+
     /// FR-MEM-006: the worker (it has the model) summarises the days that need it.
     fn maintenance(&self) {
         use tauri::Manager;

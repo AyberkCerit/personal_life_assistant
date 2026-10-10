@@ -19,5 +19,6 @@ pub mod qa;
 pub mod summary;
 pub mod pipeline;
 pub mod reminders;
+pub mod report;
 pub mod settings;
 pub mod tasks;

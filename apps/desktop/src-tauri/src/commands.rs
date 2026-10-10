@@ -50,6 +50,8 @@ pub struct Session {
     /// Background AI paused (FR-SCH-014): the indexer stops embedding too.
     pub memory_pause: Arc<AtomicBool>,
     pub worker: WorkerHandle,
+    /// FR-SCH-016: when the weekly report is due; the settings screen changes it live.
+    pub weekly: Arc<Mutex<pla_core::report::WeeklySchedule>>,
 }
 
 #[derive(Default)]
@@ -154,6 +156,18 @@ fn start_session(app: &AppHandle, root: &Path, settings: &AppSettings, own: Arc<
         Box::new(move |date: &str, error: Option<&str>| {
             let _ = summary_app.emit("summary-changed", serde_json::json!({ "date": date, "error": error }));
         })
+    })
+    .with_report_listener({
+        let (report_app, report_vault) = (app.clone(), vault.root.clone());
+        Box::new(move |week, outcome| match outcome {
+            crate::worker::ReportOutcome::Written(rel) => crate::notify::report_ready(&report_app, &report_vault, week, rel),
+            // FR-SCH-015: the second failure of a day is shown; the first is tried again
+            crate::worker::ReportOutcome::Failed { attempts, reason } if *attempts >= pla_core::jobs::MAX_ATTEMPTS_PER_DAY => {
+                show_info(strings().problem_title, reason);
+                let _ = report_app.emit("background-problem", reason);
+            }
+            _ => {}
+        })
     });
     let handle = worker.spawn();
     if paused {
@@ -180,7 +194,10 @@ fn start_session(app: &AppHandle, root: &Path, settings: &AppSettings, own: Arc<
     let sched_db = connect(&dir.join("pla.db")).map_err(|e| e.to_string())?;
     let (cmd_tx, cmd_rx) = std::sync::mpsc::channel::<SchedCommand>();
     let notifier = AppNotifier::new(app.clone(), cmd_tx.clone());
-    let scheduler = Scheduler::new(vault.root.clone(), sched_db, Box::new(notifier), Box::new(WindowsProbe), Box::new(|| Local::now().fixed_offset()));
+    let weekly = Arc::new(Mutex::new(settings.weekly_report.clone()));
+    let reports = vault.root.join(&vault.config.folders.reports).join("weekly");
+    let scheduler = Scheduler::new(vault.root.clone(), sched_db, Box::new(notifier), Box::new(WindowsProbe), Box::new(|| Local::now().fixed_offset()))
+        .with_weekly_report(reports, Arc::clone(&weekly));
     let pending = scheduler.pending();
     let scheduler = scheduler.spawn(std::time::Duration::from_secs(30));
     // Toast buttons send to `cmd_tx`; forward them to the scheduler thread.
@@ -192,7 +209,7 @@ fn start_session(app: &AppHandle, root: &Path, settings: &AppSettings, own: Arc<
             }
         }
     });
-    Ok(Session { vault, scheduler, pending, db: Mutex::new(ui_db), status, _watch: watch_handle, indexer, cache: Mutex::new(cache), cache_path: dir.join("cache.db"), embeds, memory_pause, worker: handle })
+    Ok(Session { vault, scheduler, pending, db: Mutex::new(ui_db), status, _watch: watch_handle, indexer, cache: Mutex::new(cache), cache_path: dir.join("cache.db"), embeds, memory_pause, worker: handle, weekly })
 }
 
 fn with_vault<T>(state: &State<AppState>, f: impl FnOnce(&Vault) -> Result<T, FileError>) -> Result<T, String> {
@@ -354,6 +371,37 @@ pub fn setup_vault(app: AppHandle, state: State<AppState>, path: String, lang: S
 #[tauri::command]
 pub fn set_language(app: AppHandle, state: State<AppState>, lang: String) -> Result<(), String> {
     settings_set(app, state, "language".into(), serde_json::Value::String(lang)).map(|_| ())
+}
+
+/// The weekly report's settings and its last run (FR-SCH-011, -016).
+#[derive(Serialize)]
+pub struct WeeklyReportView {
+    schedule: pla_core::report::WeeklySchedule,
+    job: pla_core::jobs::JobStatus,
+}
+
+#[tauri::command]
+pub fn weekly_report_settings(state: State<AppState>) -> Result<WeeklyReportView, String> {
+    let settings = load_settings(&app_root()?).map_err(|e| e.to_string())?.settings;
+    let guard = state.session.lock().expect("session lock");
+    let job = match guard.as_ref() {
+        Some(session) => pla_core::jobs::status(&session.db.lock().expect("db lock"), pla_core::jobs::WEEKLY_REPORT).map_err(|e| e.to_string())?,
+        None => pla_core::jobs::JobStatus::default(),
+    };
+    Ok(WeeklyReportView { schedule: settings.weekly_report, job })
+}
+
+/// FR-SCH-016: the day and time of the weekly report, or off. The running scheduler hears it at once.
+#[tauri::command]
+pub fn set_weekly_report(state: State<AppState>, schedule: pla_core::report::WeeklySchedule) -> Result<(), String> {
+    if schedule.weekday > 6 || chrono::NaiveTime::parse_from_str(&schedule.time, "%H:%M").is_err() {
+        return Err(format!("invalid_setting|weekly_report|{} {}", schedule.weekday, schedule.time));
+    }
+    update_settings(&app_root()?, &state.settings_lock, |s| s.weekly_report = schedule.clone())?;
+    if let Some(session) = state.session.lock().expect("session lock").as_ref() {
+        *session.weekly.lock().expect("weekly schedule lock") = schedule;
+    }
+    Ok(())
 }
 
 /// What the settings screen shows (FR-SET-011).

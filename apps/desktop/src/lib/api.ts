@@ -61,6 +61,9 @@ export interface ModelStatus { installed: InstalledModel | null; recommended: Ca
 export interface WizardDefaults { suggested_vault: string | null }
 export interface SettingsView { language: "tr" | "en" | null; theme: "dark" | "light"; autostart: boolean; paused: boolean; vault_path: string | null }
 export interface BackupStatus { job: JobStatus; backups: string[] }
+/** FR-SCH-016: 0 = Monday … 6 = Sunday; time "HH:MM". */
+export interface WeeklySchedule { enabled: boolean; weekday: number; time: string }
+export interface WeeklyReportView { schedule: WeeklySchedule; job: JobStatus }
 export interface Component { name: string; licence: string; url: string }
 export interface About { version: string; model: string | null; model_licence: string | null; components: Component[] }
 export type PlaceKind = "vault" | "backups" | "app_data" | "local_data" | "model_folder" | "notification_settings";
@@ -203,6 +206,10 @@ export const api = {
   modelRemove: () => call<void>("model_remove"),
   backupNow: () => call<void>("backup_now"),
   backupStatus: () => call<BackupStatus>("backup_status"),
+  weeklyReportSettings: () => call<WeeklyReportView>("weekly_report_settings"),
+  setWeeklyReport: (schedule: WeeklySchedule) => call<void>("set_weekly_report", { schedule }),
+  /** A notification asked for a note (the weekly report): its path, in the vault it belongs to. */
+  onOpenNote: (cb: (note: { path: string; vault: string }) => void) => on<{ path: string; vault: string }>("open-note", cb),
   exportData: (dir: string, lang: string) => call<string[]>("export_data", { dir, lang }),
   openPlace: (kind: PlaceKind) => call<void>("open_place", { kind }),
   aboutInfo: () => call<About>("about_info"),

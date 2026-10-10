@@ -9,7 +9,8 @@ use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 use chrono::{DateTime, FixedOffset, TimeDelta};
-use pla_core::jobs::{backup, maintenance_due, record_failure, record_success, DAILY, MAX_ATTEMPTS_PER_DAY};
+use pla_core::jobs::{backup, failures_today, maintenance_due, record_failure, record_success, DAILY, MAX_ATTEMPTS_PER_DAY, WEEKLY_REPORT};
+use pla_core::report::{due_week, Week, WeeklySchedule};
 use pla_core::reminders::{complete, due_reminders, local_minute, mark_notified, mark_seen, snooze, unanswered, DueReminder};
 use rusqlite::Connection;
 use serde::Serialize;
@@ -17,6 +18,10 @@ use serde::Serialize;
 pub use crate::system::SystemProbe;
 
 const IDLE_FOR_MAINTENANCE_SECS: u64 = 300;
+/// FR-SCH-013: the weekly report waits while the user typed or moved the mouse in the last minute.
+const IDLE_FOR_REPORT_SECS: u64 = 60;
+/// A report asked for and not there yet (being written, or the model busy) is asked again after this.
+const ASK_REPORT_AGAIN_MINUTES: i64 = 30;
 /// A reminder older than this when it is first seen was missed (PLA closed, the PC asleep, a past
 /// time, a catch-up extraction): it joins one list instead of popping up (decision 2, FR-TSK-016).
 const LATE_AFTER_MINUTES: i64 = 5;
@@ -30,6 +35,11 @@ pub trait Notifier: Send {
     fn backup_changed(&self) {}
     /// The daily maintenance window is open: the model may summarise past days (FR-MEM-006).
     fn maintenance(&self) {}
+    /// `week`'s report is due and missing: the worker writes it (FR-SCH-007, -012). `false` when
+    /// it could not be passed on (no session yet, at start): asked again on the next tick.
+    fn weekly_report(&self, _week: Week) -> bool {
+        false
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -92,11 +102,44 @@ pub struct Scheduler {
     clock: Clock,
     pending: Arc<Pending>,
     every: Duration,
+    /// Where the reports go and when they are due (FR-SCH-016: the settings change it live).
+    weekly: Option<(PathBuf, Arc<Mutex<WeeklySchedule>>)>,
+    /// The report last asked for, and when: not asked again while it is being written.
+    asked: Option<(Week, DateTime<FixedOffset>)>,
 }
 
 impl Scheduler {
     pub fn new(vault_root: PathBuf, conn: Connection, notifier: Box<dyn Notifier>, probe: Box<dyn SystemProbe>, clock: Clock) -> Self {
-        Self { vault_root, conn, notifier, probe, clock, pending: Arc::default(), every: Duration::from_secs(30) }
+        Self { vault_root, conn, notifier, probe, clock, pending: Arc::default(), every: Duration::from_secs(30), weekly: None, asked: None }
+    }
+
+    /// The weekly report (FR-SCH-007): written into `dir` (`<vault>/reports/weekly`) on `schedule`.
+    pub fn with_weekly_report(mut self, dir: PathBuf, schedule: Arc<Mutex<WeeklySchedule>>) -> Self {
+        self.weekly = Some((dir, schedule));
+        self
+    }
+
+    /// Asks for the latest due week's report when it is missing, the user is away for a minute and
+    /// it has not failed twice today (FR-SCH-007, -010, -012, -013, -015). Start and resume from
+    /// sleep come here too, so only the most recent missed week is written.
+    fn weekly_report(&mut self, now: DateTime<FixedOffset>) {
+        let Some((dir, schedule)) = &self.weekly else { return };
+        let schedule = schedule.lock().expect("weekly schedule lock").clone();
+        let Some(week) = due_week(now, &schedule) else { return };
+        if dir.join(format!("{}.md", week.label())).exists() {
+            return;
+        }
+        let asked_lately = self.asked.is_some_and(|(w, at)| w == week && now - at < TimeDelta::minutes(ASK_REPORT_AGAIN_MINUTES));
+        if asked_lately || self.probe.idle_seconds() < IDLE_FOR_REPORT_SECS {
+            return;
+        }
+        if failures_today(&self.conn, WEEKLY_REPORT, now.date_naive()).unwrap_or(0) >= MAX_ATTEMPTS_PER_DAY {
+            return;
+        }
+        // remembered only once it reached the worker: a start's first tick has no session yet (final review I7)
+        if self.notifier.weekly_report(week) {
+            self.asked = Some((week, now));
+        }
     }
 
     pub fn pending(&self) -> Arc<Pending> {
@@ -128,6 +171,7 @@ impl Scheduler {
             self.run_maintenance(now);
             self.notifier.maintenance();
         }
+        self.weekly_report(now);
     }
 
     fn run_maintenance(&mut self, now: DateTime<FixedOffset>) {
@@ -230,6 +274,10 @@ mod tests {
         fn tasks_changed(&self) {
             self.0.lock().unwrap().push("changed".into());
         }
+        fn weekly_report(&self, week: Week) -> bool {
+            self.0.lock().unwrap().push(format!("report {}", week.label()));
+            true
+        }
     }
 
     struct Probe(Arc<Mutex<(u64, bool)>>);
@@ -292,6 +340,80 @@ mod tests {
         fn seen(&self) -> Vec<String> {
             std::mem::take(&mut *self.seen.0.lock().unwrap())
         }
+    }
+
+    #[test]
+    fn the_weekly_report_is_asked_for_once_when_due_and_the_user_is_away() {
+        // FR-SCH-007, -010, -012, -013
+        let mut r = rig("2026-10-11T19:00:00+03:00");
+        let dir = r.vault.join("reports").join("weekly");
+        let schedule = Arc::new(Mutex::new(WeeklySchedule::default()));
+        r.sched = std::mem::replace(&mut r.sched, Scheduler::new(PathBuf::new(), rusqlite::Connection::open_in_memory().unwrap(), Box::new(Seen::default()), Box::new(Probe(Arc::clone(&r.probe))), Box::new(|| at("2026-10-11T19:00:00+03:00"))))
+            .with_weekly_report(dir.clone(), Arc::clone(&schedule));
+        r.probe.lock().unwrap().0 = 600;
+        r.at("2026-10-11T19:00:00+03:00");
+        assert_eq!(r.seen(), ["report 2026-W40"], "on start: last week's, missed while closed");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("2026-W40.md"), "x").unwrap();
+        r.at("2026-10-11T19:30:00+03:00");
+        assert!(r.seen().is_empty(), "there already (FR-SCH-010)");
+        r.probe.lock().unwrap().0 = 10;
+        r.at("2026-10-11T20:00:00+03:00");
+        assert!(r.seen().is_empty(), "the user is typing (FR-SCH-013)");
+        r.probe.lock().unwrap().0 = 90;
+        r.at("2026-10-11T20:01:00+03:00");
+        assert_eq!(r.seen(), ["report 2026-W41"]);
+        r.at("2026-10-11T20:02:00+03:00");
+        assert!(r.seen().is_empty(), "asked once while it is written");
+        r.at("2026-10-11T20:32:00+03:00");
+        assert_eq!(r.seen(), ["report 2026-W41"], "asked again when still missing");
+        schedule.lock().unwrap().enabled = false;
+        r.at("2026-10-11T21:30:00+03:00");
+        assert!(r.seen().is_empty(), "turned off (FR-SCH-016)");
+    }
+
+    /// No session yet: the request goes nowhere.
+    #[derive(Clone, Default)]
+    struct NoSession(Arc<Mutex<usize>>);
+    impl Notifier for NoSession {
+        fn reminder(&self, _: &DueReminder) {}
+        fn missed(&self, _: &[DueReminder]) {}
+        fn problem(&self, _: &str) {}
+        fn tasks_changed(&self) {}
+        fn weekly_report(&self, _: Week) -> bool {
+            *self.0.lock().unwrap() += 1;
+            false
+        }
+    }
+
+    #[test]
+    fn a_report_that_reached_no_worker_is_asked_for_on_the_next_tick() {
+        // final review I7: the start's first tick comes before the session is there
+        let tmp = tempfile::tempdir().unwrap();
+        let conn = open_databases(&tmp.path().join(".data")).unwrap().pla;
+        let calls = NoSession::default();
+        let mut sched = Scheduler::new(tmp.path().to_path_buf(), conn, Box::new(calls.clone()), Box::new(Probe(Arc::new(Mutex::new((600, true))))), Box::new(|| at("2026-10-12T09:00:00+03:00")))
+            .with_weekly_report(tmp.path().join("reports/weekly"), Arc::new(Mutex::new(WeeklySchedule::default())));
+        sched.tick();
+        sched.tick();
+        assert_eq!(*calls.0.lock().unwrap(), 2, "not taken for asked");
+    }
+
+    #[test]
+    fn two_failed_reports_wait_for_the_next_day() {
+        // FR-SCH-015
+        let mut r = rig("2026-10-11T20:01:00+03:00");
+        let dir = r.vault.join("reports").join("weekly");
+        r.sched = std::mem::replace(&mut r.sched, Scheduler::new(PathBuf::new(), rusqlite::Connection::open_in_memory().unwrap(), Box::new(Seen::default()), Box::new(Probe(Arc::clone(&r.probe))), Box::new(|| at("2026-10-11T19:00:00+03:00"))))
+            .with_weekly_report(dir, Arc::new(Mutex::new(WeeklySchedule::default())));
+        r.probe.lock().unwrap().0 = 600;
+        for t in ["2026-10-11T20:00:00+03:00", "2026-10-11T20:31:00+03:00"] {
+            pla_core::jobs::record_failure(&r.sched.conn, WEEKLY_REPORT, at(t), "disk").unwrap();
+        }
+        r.at("2026-10-11T21:30:00+03:00");
+        assert!(r.seen().is_empty());
+        r.at("2026-10-12T09:00:00+03:00");
+        assert_eq!(r.seen(), ["report 2026-W41"]);
     }
 
     #[test]
