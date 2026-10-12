@@ -1,8 +1,8 @@
 //! How reminders reach the user: a Windows notification with Done / Snooze buttons (FR-TSK-012)
 //! and, while the window is open, an in-app banner via events (decision 3, FR-TSK-015).
 
-use std::sync::mpsc::Sender;
 use std::sync::atomic::{AtomicU8, Ordering};
+use std::sync::mpsc::Sender;
 use std::sync::Mutex;
 
 use pla_core::reminders::DueReminder;
@@ -108,7 +108,11 @@ fn lang_code(saved: u8, os_turkish: bool) -> &'static str {
 }
 
 fn pick(saved: u8, os_turkish: bool) -> &'static Strings {
-    if lang_code(saved, os_turkish) == "tr" { &TR } else { &EN }
+    if lang_code(saved, os_turkish) == "tr" {
+        &TR
+    } else {
+        &EN
+    }
 }
 
 fn os_turkish() -> bool {

@@ -69,7 +69,8 @@ fn words(text: &str) -> Vec<String> {
 /// A plan or program, word for word: not "plank", "planlama", "programming" or "Bulgarian split
 /// squat" (final review I4).
 fn names_a_plan(text: &str) -> bool {
-    const PLAN: [&str; 14] = ["program", "programi", "programim", "programimiz", "programs", "plan", "plani", "planim", "planimiz", "plans", "routine", "rutin", "rutinim", "split"];
+    const PLAN: [&str; 14] =
+        ["program", "programi", "programim", "programimiz", "programs", "plan", "plani", "planim", "planimiz", "plans", "routine", "rutin", "rutinim", "split"];
     let w = words(text);
     w.iter().enumerate().any(|(i, x)| PLAN.contains(&x.as_str()) && !(x == "split" && w.get(i + 1).is_some_and(|n| n == "squat")))
 }
@@ -78,14 +79,23 @@ fn names_a_plan(text: &str) -> bool {
 /// that would make it a log written beside a plan for later.
 fn is_future(text: &str) -> bool {
     let w = words(text);
-    let past = w.iter().any(|x| x.len() > 4 && ["dim", "dum", "tim", "tum"].iter().any(|e| x.ends_with(e)) || ["did", "done", "finished"].contains(&x.as_str()));
-    !past && w.iter().any(|w| ["acagim", "ecegim", "acagiz", "ecegiz", "acak", "ecek"].iter().any(|e| w.ends_with(e) && w.len() > e.len() + 1) || w == "will" || w == "haftaya")
+    let past =
+        w.iter().any(|x| x.len() > 4 && ["dim", "dum", "tim", "tum"].iter().any(|e| x.ends_with(e)) || ["did", "done", "finished"].contains(&x.as_str()));
+    !past
+        && w.iter().any(|w| {
+            ["acagim", "ecegim", "acagiz", "ecegiz", "acak", "ecek"].iter().any(|e| w.ends_with(e) && w.len() > e.len() + 1) || w == "will" || w == "haftaya"
+        })
 }
 
 /// Whether the note gives a weight unit at all; without one a workout's number is not kilograms.
 fn names_a_weight(text: &str) -> bool {
     words(text).iter().any(|w| {
-        (w.starts_with("kg") || (w.starts_with("kilo") && !w.starts_with("kilomet")) || w == "lb" || w == "lbs" || w.starts_with("pound") || w.starts_with("libre"))
+        (w.starts_with("kg")
+            || (w.starts_with("kilo") && !w.starts_with("kilomet"))
+            || w == "lb"
+            || w == "lbs"
+            || w.starts_with("pound")
+            || w.starts_with("libre"))
             || (w.ends_with("kg") && w.trim_end_matches("kg").chars().all(|c| c.is_ascii_digit() || c == '.' || c == ','))
     })
 }
@@ -100,7 +110,8 @@ fn numbers(text: &str) -> Vec<f64> {
     while i < chars.len() {
         if chars[i].is_ascii_digit() {
             let mut j = i;
-            while j < chars.len() && (chars[j].is_ascii_digit() || ((chars[j] == ',' || chars[j] == '.') && chars.get(j + 1).is_some_and(char::is_ascii_digit))) {
+            while j < chars.len() && (chars[j].is_ascii_digit() || ((chars[j] == ',' || chars[j] == '.') && chars.get(j + 1).is_some_and(char::is_ascii_digit)))
+            {
                 j += 1;
             }
             let n: String = chars[i..j].iter().map(|c| if *c == ',' { '.' } else { *c }).collect();
@@ -225,7 +236,11 @@ Bugün bench press 4x6 60 kg yaptım.";
         assert!(section.starts_with("Güç 2") && section.contains("3-4x5"), "{section}");
         assert!(guard("- Squat: 4x5", section, parse_extraction(&workout(r#""value":0"#)).unwrap()).items.is_empty());
         let done = "Bugün bench press 4x6 60 kg yaptım.";
-        assert_eq!(guard(done, section_of(note, done), parse_extraction(&workout(r#""value":60,"unit":"kg""#)).unwrap()).items.len(), 1, "a log beside a program stays");
+        assert_eq!(
+            guard(done, section_of(note, done), parse_extraction(&workout(r#""value":60,"unit":"kg""#)).unwrap()).items.len(),
+            1,
+            "a log beside a program stays"
+        );
     }
 
     #[test]
@@ -233,7 +248,13 @@ Bugün bench press 4x6 60 kg yaptım.";
         // the owner's pasted program
         let text = "Güç 1 (Pazar)\n- Bench press: 4x4-6\n- Barbell row: 4x4-6";
         assert!(guard(text, text, parse_extraction(&workout(r#""value":6"#)).unwrap()).items.is_empty());
-        for t in ["Deadlift: 3-4x5 (RPE 8)", "Leg curl: 3 x 8-10", "Antrenman planı:\nSquat 5x5", "Yarın bench press 4x6 80 kg deneyeceğim.", "Haftaya programım: pazartesi göğüs"] {
+        for t in [
+            "Deadlift: 3-4x5 (RPE 8)",
+            "Leg curl: 3 x 8-10",
+            "Antrenman planı:\nSquat 5x5",
+            "Yarın bench press 4x6 80 kg deneyeceğim.",
+            "Haftaya programım: pazartesi göğüs",
+        ] {
             assert!(guard(t, t, parse_extraction(&workout(r#""value":80,"unit":"kg""#)).unwrap()).items.is_empty(), "{t}");
         }
     }
@@ -270,11 +291,27 @@ Bugün bench press 4x6 60 kg yaptım.";
 Akşam sinemaya gideceğim.";
         let block = "Sabah squat 5x5 100 kg yaptım.
 Akşam sinemaya gideceğim.";
-        assert_eq!(guard(block, section_of(day, block), parse_extraction(&workout(r#""value":100,"unit":"kg""#)).unwrap()).items.len(), 1, "done today, whatever is planned for tonight");
+        assert_eq!(
+            guard(block, section_of(day, block), parse_extraction(&workout(r#""value":100,"unit":"kg""#)).unwrap()).items.len(),
+            1,
+            "done today, whatever is planned for tonight"
+        );
         let log = "Sabah squat 5x5 100 kg yaptım.";
-        assert_eq!(guard(log, section_of("Sabah squat 5x5 100 kg yaptım.
+        assert_eq!(
+            guard(
+                log,
+                section_of(
+                    "Sabah squat 5x5 100 kg yaptım.
 
-Akşam sinemaya gideceğim.", log), parse_extraction(&workout(r#""value":100,"unit":"kg""#)).unwrap()).items.len(), 1);
+Akşam sinemaya gideceğim.",
+                    log
+                ),
+                parse_extraction(&workout(r#""value":100,"unit":"kg""#)).unwrap()
+            )
+            .items
+            .len(),
+            1
+        );
         let km = guard_one("5 kilometre koştum, bench 3x10", parse_extraction(&workout(r#""value":40,"unit":"kg""#)).unwrap());
         assert_eq!(km.items[0].metric.as_ref().unwrap().value, None, "kilometres are not kilograms (M6)");
     }
@@ -309,7 +346,11 @@ Pazartesi dişçi var.";
         let task = r#"{"items":[{"type":"task","title":"Güç","when":{"weekday":"mon","which":"this"}}]}"#;
         assert!(guard("Güç 2 (Pazartesi)", section_of(note, "Güç 2 (Pazartesi)"), parse_extraction(task).unwrap()).items.is_empty());
         let dentist = r#"{"items":[{"type":"task","title":"Dişçi","when":{"weekday":"mon","which":"this"}}]}"#;
-        assert_eq!(guard("Pazartesi dişçi var.", section_of(note, "Pazartesi dişçi var."), parse_extraction(dentist).unwrap()).items.len(), 1, "a task beside it stays");
+        assert_eq!(
+            guard("Pazartesi dişçi var.", section_of(note, "Pazartesi dişçi var."), parse_extraction(dentist).unwrap()).items.len(),
+            1,
+            "a task beside it stays"
+        );
         let todo = "Yapılacaklar
 - Faturayı öde
 - Annemi ara";

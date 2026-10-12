@@ -1,17 +1,17 @@
 //! The scheduler thread (FR-SCH, FR-TSK-012…016): reminders on time, missed reminders after a
 //! start or a sleep, and the daily maintenance when the user is away and the PC is on mains power.
 
+use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
-use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 use chrono::{DateTime, FixedOffset, TimeDelta};
 use pla_core::jobs::{backup, failures_today, maintenance_due, record_failure, record_success, DAILY, MAX_ATTEMPTS_PER_DAY, WEEKLY_REPORT};
-use pla_core::report::{due_week, Week, WeeklySchedule};
 use pla_core::reminders::{complete, due_reminders, local_minute, mark_notified, mark_seen, snooze, unanswered, DueReminder};
+use pla_core::report::{due_week, Week, WeeklySchedule};
 use rusqlite::Connection;
 use serde::Serialize;
 
@@ -164,9 +164,7 @@ impl Scheduler {
             }
         }
 
-        if maintenance_due(&self.conn, now.date_naive()).unwrap_or(false)
-            && self.probe.idle_seconds() >= IDLE_FOR_MAINTENANCE_SECS
-            && self.probe.on_ac_power()
+        if maintenance_due(&self.conn, now.date_naive()).unwrap_or(false) && self.probe.idle_seconds() >= IDLE_FOR_MAINTENANCE_SECS && self.probe.on_ac_power()
         {
             self.run_maintenance(now);
             self.notifier.maintenance();
@@ -348,8 +346,17 @@ mod tests {
         let mut r = rig("2026-10-11T19:00:00+03:00");
         let dir = r.vault.join("reports").join("weekly");
         let schedule = Arc::new(Mutex::new(WeeklySchedule::default()));
-        r.sched = std::mem::replace(&mut r.sched, Scheduler::new(PathBuf::new(), rusqlite::Connection::open_in_memory().unwrap(), Box::new(Seen::default()), Box::new(Probe(Arc::clone(&r.probe))), Box::new(|| at("2026-10-11T19:00:00+03:00"))))
-            .with_weekly_report(dir.clone(), Arc::clone(&schedule));
+        r.sched = std::mem::replace(
+            &mut r.sched,
+            Scheduler::new(
+                PathBuf::new(),
+                rusqlite::Connection::open_in_memory().unwrap(),
+                Box::new(Seen::default()),
+                Box::new(Probe(Arc::clone(&r.probe))),
+                Box::new(|| at("2026-10-11T19:00:00+03:00")),
+            ),
+        )
+        .with_weekly_report(dir.clone(), Arc::clone(&schedule));
         r.probe.lock().unwrap().0 = 600;
         r.at("2026-10-11T19:00:00+03:00");
         assert_eq!(r.seen(), ["report 2026-W40"], "on start: last week's, missed while closed");
@@ -392,8 +399,14 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let conn = open_databases(&tmp.path().join(".data")).unwrap().pla;
         let calls = NoSession::default();
-        let mut sched = Scheduler::new(tmp.path().to_path_buf(), conn, Box::new(calls.clone()), Box::new(Probe(Arc::new(Mutex::new((600, true))))), Box::new(|| at("2026-10-12T09:00:00+03:00")))
-            .with_weekly_report(tmp.path().join("reports/weekly"), Arc::new(Mutex::new(WeeklySchedule::default())));
+        let mut sched = Scheduler::new(
+            tmp.path().to_path_buf(),
+            conn,
+            Box::new(calls.clone()),
+            Box::new(Probe(Arc::new(Mutex::new((600, true))))),
+            Box::new(|| at("2026-10-12T09:00:00+03:00")),
+        )
+        .with_weekly_report(tmp.path().join("reports/weekly"), Arc::new(Mutex::new(WeeklySchedule::default())));
         sched.tick();
         sched.tick();
         assert_eq!(*calls.0.lock().unwrap(), 2, "not taken for asked");
@@ -404,8 +417,17 @@ mod tests {
         // FR-SCH-015
         let mut r = rig("2026-10-11T20:01:00+03:00");
         let dir = r.vault.join("reports").join("weekly");
-        r.sched = std::mem::replace(&mut r.sched, Scheduler::new(PathBuf::new(), rusqlite::Connection::open_in_memory().unwrap(), Box::new(Seen::default()), Box::new(Probe(Arc::clone(&r.probe))), Box::new(|| at("2026-10-11T19:00:00+03:00"))))
-            .with_weekly_report(dir, Arc::new(Mutex::new(WeeklySchedule::default())));
+        r.sched = std::mem::replace(
+            &mut r.sched,
+            Scheduler::new(
+                PathBuf::new(),
+                rusqlite::Connection::open_in_memory().unwrap(),
+                Box::new(Seen::default()),
+                Box::new(Probe(Arc::clone(&r.probe))),
+                Box::new(|| at("2026-10-11T19:00:00+03:00")),
+            ),
+        )
+        .with_weekly_report(dir, Arc::new(Mutex::new(WeeklySchedule::default())));
         r.probe.lock().unwrap().0 = 600;
         for t in ["2026-10-11T20:00:00+03:00", "2026-10-11T20:31:00+03:00"] {
             pla_core::jobs::record_failure(&r.sched.conn, WEEKLY_REPORT, at(t), "disk").unwrap();

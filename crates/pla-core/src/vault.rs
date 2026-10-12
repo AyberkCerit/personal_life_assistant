@@ -477,18 +477,24 @@ mod tests {
         for bad in ["../outside", "C:/Users/x/Desktop", "/abs", ".obsidian", ".pla", "", "notes/../../x"] {
             let tmp = tempfile::tempdir().unwrap();
             std::fs::create_dir(tmp.path().join(".pla")).unwrap();
-            let config = format!("vault_id = \"0123456789abcdef0123456789abcdef\"
+            let config = format!(
+                "vault_id = \"0123456789abcdef0123456789abcdef\"
 [folders]
 daily = {bad:?}
-");
+"
+            );
             std::fs::write(tmp.path().join(".pla/config"), &config).unwrap();
             assert!(matches!(open_vault(tmp.path()), Err(VaultError::InvalidFolder(_))), "accepted {bad:?}");
         }
         let tmp = tempfile::tempdir().unwrap();
         std::fs::create_dir(tmp.path().join(".pla")).unwrap();
-        std::fs::write(tmp.path().join(".pla/config"), "[folders]
+        std::fs::write(
+            tmp.path().join(".pla/config"),
+            "[folders]
 notes = \"Notlar/Arşiv\"
-").unwrap();
+",
+        )
+        .unwrap();
         open_vault(tmp.path()).unwrap();
         assert!(tmp.path().join("Notlar/Arşiv").is_dir());
     }
@@ -515,7 +521,13 @@ notes = \"Notlar/Arşiv\"
     fn a_folder_inside_plas_own_data_cannot_be_the_vault() {
         // NFR-SEC-010: the uninstaller may delete these folders; a vault there would go with them
         let roots = [PathBuf::from(r"C:\Users\a\AppData\Roaming\PLA"), PathBuf::from(r"C:\Users\a\AppData\Local\PLA")];
-        for p in [r"C:\Users\a\AppData\Roaming\PLA", r"c:\users\A\appdata\roaming\pla\Notlar", r"C:\Users\a\AppData\Local\PLA\models\x", r"\\?\C:\Users\a\AppData\Roaming\PLA\Notlar", r"C:\Users\a\AppData\Roaming\x\..\PLA\Notlar"] {
+        for p in [
+            r"C:\Users\a\AppData\Roaming\PLA",
+            r"c:\users\A\appdata\roaming\pla\Notlar",
+            r"C:\Users\a\AppData\Local\PLA\models\x",
+            r"\\?\C:\Users\a\AppData\Roaming\PLA\Notlar",
+            r"C:\Users\a\AppData\Roaming\x\..\PLA\Notlar",
+        ] {
             assert!(inside_app_data(Path::new(p), &roots), "{p}");
         }
         for p in [r"C:\Users\a\AppData\Roaming\PLA Notlar", r"C:\Users\a\AppData\Roaming", r"D:\PLA", r"C:\Users\a\Documents\PLA Vault"] {
@@ -585,7 +597,14 @@ notes = \"Notlar/Arşiv\"
     #[test]
     fn network_paths_are_recognised_in_every_spelling() {
         // final review I1: the wizard's text field accepts whatever the user types
-        for p in [r"\\sunucu\paylasim", "//sunucu/paylasim/Kasa", r"\/sunucu\paylasim", r"\\.\UNC\sunucu\paylasim\x", r"\\?\unc\sunucu\paylasim", r"\\?\UNC\sunucu\paylasim"] {
+        for p in [
+            r"\\sunucu\paylasim",
+            "//sunucu/paylasim/Kasa",
+            r"\/sunucu\paylasim",
+            r"\\.\UNC\sunucu\paylasim\x",
+            r"\\?\unc\sunucu\paylasim",
+            r"\\?\UNC\sunucu\paylasim",
+        ] {
             assert!(is_network_path(Path::new(p)), "{p}");
             assert_eq!(inspect_folder(Path::new(p)).state, FolderState::Network, "{p}");
         }

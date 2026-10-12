@@ -218,7 +218,11 @@ fn clean_stem(name: &str) -> String {
     let cleaned: String = cleaned.trim().trim_start_matches('.').chars().take(100).collect();
     let cleaned = cleaned.trim_end_matches(['.', ' ']).to_owned();
     // a Windows device name (`con.png` dragged from a browser) would not be a file
-    if cleaned.is_empty() || crate::fileops::check_name(&cleaned).is_err() { "image".to_owned() } else { cleaned }
+    if cleaned.is_empty() || crate::fileops::check_name(&cleaned).is_err() {
+        "image".to_owned()
+    } else {
+        cleaned
+    }
 }
 
 /// FR-EDT-017: stores a pasted (`name` = `None`) or dropped image in `attachments/` and returns its
@@ -261,7 +265,11 @@ pub fn save_attachment(vault: &Vault, bytes: &[u8], name: Option<&str>, now: Dat
 /// What goes inside `![[…]]` for `rel`: the file name when that finds it, else the whole path.
 pub fn embed_target(vault: &Vault, rel: &str) -> String {
     let name = rel.rsplit('/').next().unwrap_or(rel);
-    if resolve_image(vault, name).as_deref() == Some(rel) { name.to_owned() } else { rel.to_owned() }
+    if resolve_image(vault, name).as_deref() == Some(rel) {
+        name.to_owned()
+    } else {
+        rel.to_owned()
+    }
 }
 
 #[cfg(test)]

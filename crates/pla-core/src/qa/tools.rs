@@ -274,10 +274,8 @@ pub fn run(env: &ToolEnv<'_>, tool: &str, args: &Value) -> Result<ToolRecord, St
         "complete_task" => {
             unknown_keys(args, &["task_id"])?;
             let id = required(args, "task_id", 64)?;
-            let found: Option<(String, String)> = env
-                .pla
-                .query_row("SELECT title, status FROM task WHERE task_id = ?1", [&id], |r| Ok((r.get(0)?, r.get(1)?)))
-                .ok();
+            let found: Option<(String, String)> =
+                env.pla.query_row("SELECT title, status FROM task WHERE task_id = ?1", [&id], |r| Ok((r.get(0)?, r.get(1)?))).ok();
             let Some((title, status)) = found else { return Err(format!("there is no task {id:?}; take the task_id from query_tasks")) };
             if status != "open" {
                 return Err(format!("task {title:?} is not open"));
@@ -297,7 +295,10 @@ pub fn run(env: &ToolEnv<'_>, tool: &str, args: &Value) -> Result<ToolRecord, St
             let exercise = text(args, "exercise", 100)?;
             let input = MetricInput { kind, date: date.clone(), value: Some(value), unit, exercise, sets: None, reps: None, confirmed: false };
             let id = metrics::log_metric_as(env.pla, &input, &env.validation, "assistant", env.now).map_err(|e| e.to_string())?;
-            Ok(done(json!({ "metric_id": id, "kind": args["kind"], "date": date, "value": value, "unit": args["unit"] }), Some(Undo { kind: "metric".into(), id })))
+            Ok(done(
+                json!({ "metric_id": id, "kind": args["kind"], "date": date, "value": value, "unit": args["unit"] }),
+                Some(Undo { kind: "metric".into(), id }),
+            ))
         }
         "create_note" => {
             unknown_keys(args, &["title", "body"])?;
@@ -312,7 +313,10 @@ pub fn run(env: &ToolEnv<'_>, tool: &str, args: &Value) -> Result<ToolRecord, St
             let body = required(args, "body", 600)?;
             let title = note_title(&text(args, "title", 120)?.unwrap_or_default(), &body, today);
             // the model said "the note was created" before Save (real window)
-            Ok(done(json!({ "suggested": true, "title": title, "body": body, "saved": null, "note_for_you": "nothing is saved yet: tell the user they can press Save" }), None))
+            Ok(done(
+                json!({ "suggested": true, "title": title, "body": body, "saved": null, "note_for_you": "nothing is saved yet: tell the user they can press Save" }),
+                None,
+            ))
         }
         other => Err(format!("unknown tool {other:?}")),
     }

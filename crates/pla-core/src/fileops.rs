@@ -41,9 +41,7 @@ pub fn same_ignoring_case(a: &str, b: &str) -> bool {
 /// The system folders PLA keeps its own things in: they stay where `.pla/config` says, and so does
 /// any folder that holds one (a configured `journal/daily` keeps `journal` in place).
 pub fn is_system_folder(folders: &Folders, rel: &str) -> bool {
-    [&folders.daily, &folders.inbox, &folders.notes, &folders.reports, &folders.attachments, &folders.templates]
-        .iter()
-        .any(|f| crate::vault::is_under(f, rel))
+    [&folders.daily, &folders.inbox, &folders.notes, &folders.reports, &folders.attachments, &folders.templates].iter().any(|f| crate::vault::is_under(f, rel))
 }
 
 /// Puts `from` at `to` on disk: refuses an existing target (unless only the letter case differs,
@@ -326,7 +324,11 @@ mod tests {
         assert_eq!(rewrite_links("[[Plan]] ve [[arşiv/x/Plan]]", "arşiv/x/Plan.md", "arşiv/x/Eski.md", false).as_deref(), Some("[[Plan]] ve [[arşiv/x/Eski]]"));
         // a move keeps the name: a link written in other letter case is left as it is (M4)
         assert_eq!(rewrite_links("[[proje planı]]", "notes/Proje Planı.md", "arşiv/Proje Planı.md", true), None);
-        assert_eq!(rewrite_links("![[Proje Planı]] gömülü", "notes/Proje Planı.md", "notes/Yeni.md", true).as_deref(), Some("![[Yeni]] gömülü"), "embeds point at the note too");
+        assert_eq!(
+            rewrite_links("![[Proje Planı]] gömülü", "notes/Proje Planı.md", "notes/Yeni.md", true).as_deref(),
+            Some("![[Yeni]] gömülü"),
+            "embeds point at the note too"
+        );
     }
 
     #[test]

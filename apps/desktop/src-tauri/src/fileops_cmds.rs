@@ -35,7 +35,11 @@ fn parent_of(rel: &str) -> &str {
 
 fn join(folder: &str, name: &str) -> String {
     let folder = folder.trim_matches('/');
-    if folder.is_empty() { name.to_owned() } else { format!("{folder}/{name}") }
+    if folder.is_empty() {
+        name.to_owned()
+    } else {
+        format!("{folder}/{name}")
+    }
 }
 
 fn with_session<T>(state: &State<AppState>, f: impl FnOnce(&Session) -> Result<T, String>) -> Result<T, String> {
@@ -200,7 +204,9 @@ pub fn delete_entry(app: AppHandle, state: State<AppState>, path: String) -> Res
 
 #[cfg(windows)]
 pub(crate) fn to_recycle_bin(path: &Path) -> Result<(), String> {
-    use windows_sys::Win32::UI::Shell::{SHFileOperationW, FOF_ALLOWUNDO, FOF_NOCONFIRMATION, FOF_NOERRORUI, FOF_SILENT, FOF_WANTNUKEWARNING, FO_DELETE, SHFILEOPSTRUCTW};
+    use windows_sys::Win32::UI::Shell::{
+        SHFileOperationW, FOF_ALLOWUNDO, FOF_NOCONFIRMATION, FOF_NOERRORUI, FOF_SILENT, FOF_WANTNUKEWARNING, FO_DELETE, SHFILEOPSTRUCTW,
+    };
     // a list of paths, each NUL-terminated, ended by one more NUL
     let from: Vec<u16> = path.as_os_str().to_string_lossy().encode_utf16().chain([0, 0]).collect();
     let mut op = SHFILEOPSTRUCTW {

@@ -27,11 +27,9 @@ struct JobRow {
 }
 
 fn row(conn: &Connection, job: &str) -> rusqlite::Result<Option<JobRow>> {
-    conn.query_row(
-        "SELECT last_success_at, last_attempt_at, attempts FROM job_run WHERE job_type = ?1",
-        [job],
-        |r| Ok(JobRow { last_success: r.get(0)?, last_attempt: r.get(1)?, attempts: r.get(2)? }),
-    )
+    conn.query_row("SELECT last_success_at, last_attempt_at, attempts FROM job_run WHERE job_type = ?1", [job], |r| {
+        Ok(JobRow { last_success: r.get(0)?, last_attempt: r.get(1)?, attempts: r.get(2)? })
+    })
     .optional()
 }
 
@@ -106,10 +104,7 @@ pub fn backups(vault_root: &Path) -> Vec<String> {
 }
 
 fn is_backup_name(name: &str) -> bool {
-    name.len() == "pla-YYYY-MM-DD.db".len()
-        && name.starts_with("pla-")
-        && name.ends_with(".db")
-        && NaiveDate::parse_from_str(&name[4..14], "%Y-%m-%d").is_ok()
+    name.len() == "pla-YYYY-MM-DD.db".len() && name.starts_with("pla-") && name.ends_with(".db") && NaiveDate::parse_from_str(&name[4..14], "%Y-%m-%d").is_ok()
 }
 
 /// A consistent copy of pla.db in the vault, so copying the vault folder is a full backup (FR-BKP-001).
@@ -220,7 +215,8 @@ mod tests {
         std::fs::write(vault.join(".pla/backup/notlarım.txt"), "kullanıcının dosyası").unwrap();
         let path = backup(&conn, &vault, d("2026-10-09")).unwrap();
         assert_eq!(path, vault.join(".pla/backup/pla-2026-10-09.db"));
-        let mut names: Vec<String> = std::fs::read_dir(vault.join(".pla/backup")).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
+        let mut names: Vec<String> =
+            std::fs::read_dir(vault.join(".pla/backup")).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
         names.sort();
         assert_eq!(names.len(), 8, "7 backups + the user's own file: {names:?}");
         assert!(names.contains(&"notlarım.txt".to_owned()), "never touches other files");

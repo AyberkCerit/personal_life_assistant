@@ -50,7 +50,11 @@ pub fn query_text(question: &str) -> String {
 
 pub fn document_text(title: &str, heading: &str, text: &str) -> String {
     let title = if title.trim().is_empty() { "none" } else { title.trim() };
-    if heading.is_empty() { format!("title: {title} | text: {text}") } else { format!("title: {title} | text: {heading}\n{text}") }
+    if heading.is_empty() {
+        format!("title: {title} | text: {text}")
+    } else {
+        format!("title: {title} | text: {heading}\n{text}")
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -140,8 +144,10 @@ fn hash(text: &str) -> String {
 /// for embedding. Called inside the indexer's transaction for the note.
 pub fn sync_chunks(conn: &Connection, rel: &str, title: &str, body: &str) -> rusqlite::Result<()> {
     let new = chunk(body);
-    let old: Vec<(i64, String)> =
-        conn.prepare("SELECT chunk_id, text_hash FROM chunk WHERE note_path = ?1")?.query_map([rel], |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<Result<_, _>>()?;
+    let old: Vec<(i64, String)> = conn
+        .prepare("SELECT chunk_id, text_hash FROM chunk WHERE note_path = ?1")?
+        .query_map([rel], |r| Ok((r.get(0)?, r.get(1)?)))?
+        .collect::<Result<_, _>>()?;
     let mut keep: Vec<i64> = Vec::new();
     for (ord, c) in new.iter().enumerate() {
         // the title is part of what is embedded, so a new title makes a new chunk
@@ -208,10 +214,7 @@ pub fn embed_pending(conn: &Connection, embedder: &mut dyn Embedder, batch: usiz
     let model = embedder.model_id().to_owned();
     // FR-MEM-013: another model's vectors go at once; they would fill the vector search's top k
     // with rows it then has to drop (final review M3)
-    conn.execute(
-        "DELETE FROM chunk_vec WHERE chunk_id IN (SELECT chunk_id FROM chunk WHERE embedded_model IS NOT NULL AND embedded_model <> ?1)",
-        [&model],
-    )?;
+    conn.execute("DELETE FROM chunk_vec WHERE chunk_id IN (SELECT chunk_id FROM chunk WHERE embedded_model IS NOT NULL AND embedded_model <> ?1)", [&model])?;
     conn.execute("UPDATE chunk SET embedded_model = NULL WHERE embedded_model IS NOT NULL AND embedded_model <> ?1", [&model])?;
     let mut embedded = 0;
     while Instant::now() < until && !stop.load(Ordering::SeqCst) {

@@ -177,9 +177,8 @@ pub fn add_task_as(conn: &Connection, input: &TaskInput, origin: &str, now: Date
 pub fn edit_task(conn: &Connection, id: &str, input: &TaskInput, now: DateTime<FixedOffset>) -> Result<(), TaskError> {
     let c = clean(input)?;
     type Stored = (Option<String>, Option<String>, Option<String>);
-    let current: Option<Stored> = conn
-        .query_row("SELECT notify_at, date, time FROM task WHERE task_id = ?1", [id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
-        .optional()?;
+    let current: Option<Stored> =
+        conn.query_row("SELECT notify_at, date, time FROM task WHERE task_id = ?1", [id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).optional()?;
     let Some((stored, date, time)) = current else { return Err(TaskError::NotFound) };
     let is_reminder = c.remind.unwrap_or(stored.is_some());
     let notify_at = match stored {
@@ -254,11 +253,7 @@ pub fn list_review(conn: &Connection) -> Result<Vec<ReviewView>, TaskError> {
 pub fn accept_review(conn: &Connection, review_id: &str, input: &TaskInput, now: DateTime<FixedOffset>) -> Result<String, TaskError> {
     let c = clean(input)?;
     let found: Option<(Option<String>, String)> = conn
-        .query_row(
-            "SELECT block_id, payload_json FROM review_item WHERE review_id = ?1 AND resolved = 0",
-            [review_id],
-            |r| Ok((r.get(0)?, r.get(1)?)),
-        )
+        .query_row("SELECT block_id, payload_json FROM review_item WHERE review_id = ?1 AND resolved = 0", [review_id], |r| Ok((r.get(0)?, r.get(1)?)))
         .optional()?;
     let Some((block_id, payload)) = found else { return Err(TaskError::NotFound) };
     let raw = serde_json::from_str::<RawItem>(&payload).map_err(|_| TaskError::NotAnAction)?;
@@ -458,8 +453,7 @@ mod tests {
         // Final review I2: text ordering and notify_at parsing rely on YYYY-MM-DD / HH:MM
         let (_t, conn) = setup();
         let id = add_task(&conn, &input("Kısa", Some("2026-1-5"), Some("9:5")), now()).unwrap();
-        let (date, time): (String, String) =
-            conn.query_row("SELECT date, time FROM task WHERE task_id = ?1", [&id], |r| Ok((r.get(0)?, r.get(1)?))).unwrap();
+        let (date, time): (String, String) = conn.query_row("SELECT date, time FROM task WHERE task_id = ?1", [&id], |r| Ok((r.get(0)?, r.get(1)?))).unwrap();
         assert_eq!((date.as_str(), time.as_str()), ("2026-01-05", "09:05"));
     }
 }

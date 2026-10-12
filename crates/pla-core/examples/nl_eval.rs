@@ -54,7 +54,11 @@ fn closeness(a: &str, b: &str) -> f64 {
     };
     let (x, y) = (stems(a), stems(b));
     let union = x.union(&y).count();
-    if union == 0 { 0.0 } else { x.intersection(&y).count() as f64 / union as f64 }
+    if union == 0 {
+        0.0
+    } else {
+        x.intersection(&y).count() as f64 / union as f64
+    }
 }
 
 /// A held-out case shares less than this with every example in the bank.
@@ -65,8 +69,30 @@ fn answer_language(text: &str) -> Option<&'static str> {
     let lower = pla_core::index::key(text); // "İyi" → "iyi" (Rust's own lower case adds a dot)
     let words: Vec<&str> = lower.split(|c: char| !c.is_alphanumeric()).filter(|w| !w.is_empty()).collect();
     let tr_letters = lower.chars().filter(|c| "çğıöşü".contains(*c)).count();
-    const TR: [&str; 20] = ["ve", "bir", "bu", "için", "ile", "de", "da", "ne", "var", "yok", "olarak", "sana", "size", "senin", "notlarında", "notlar", "bugün", "yarın", "evet", "tamam"];
-    const EN: [&str; 20] = ["the", "and", "you", "your", "is", "are", "to", "of", "in", "i", "it", "that", "for", "have", "with", "notes", "today", "this", "can", "not"];
+    const TR: [&str; 20] = [
+        "ve",
+        "bir",
+        "bu",
+        "için",
+        "ile",
+        "de",
+        "da",
+        "ne",
+        "var",
+        "yok",
+        "olarak",
+        "sana",
+        "size",
+        "senin",
+        "notlarında",
+        "notlar",
+        "bugün",
+        "yarın",
+        "evet",
+        "tamam",
+    ];
+    const EN: [&str; 20] =
+        ["the", "and", "you", "your", "is", "are", "to", "of", "in", "i", "it", "that", "for", "have", "with", "notes", "today", "this", "can", "not"];
     let tr = words.iter().filter(|w| TR.contains(w)).count() + tr_letters.min(5);
     let en = words.iter().filter(|w| EN.contains(w)).count();
     match (tr, en) {
@@ -276,7 +302,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             if fails.is_empty() {
                 e.0 += 1;
             }
-            println!("{} {id} ({:.1}s){}", if fails.is_empty() { "PASS" } else { "FAIL" }, t.elapsed().as_secs_f64(), if fails.is_empty() { String::new() } else { format!(": {}", fails.join("; ")) });
+            println!(
+                "{} {id} ({:.1}s){}",
+                if fails.is_empty() { "PASS" } else { "FAIL" },
+                t.elapsed().as_secs_f64(),
+                if fails.is_empty() { String::new() } else { format!(": {}", fails.join("; ")) }
+            );
             results.push(json!({ "id": id, "pass": fails.is_empty(), "fails": fails, "got": got }));
         }
     }

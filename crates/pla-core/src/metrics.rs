@@ -304,7 +304,9 @@ fn check(input: &MetricInput, settings: &ValidationSettings, today: NaiveDate) -
             return Err(MetricError::EmptyWorkout);
         }
         // SRS §3.8.1: sets 1-50, reps 1-500, kg 0-500
-        for (field, v, lo, hi) in [("sets", input.sets.map(|s| s as f64), 1.0, 50.0), ("reps", input.reps.map(|r| r as f64), 1.0, 500.0), ("kg", value, 0.0, 500.0)] {
+        for (field, v, lo, hi) in
+            [("sets", input.sets.map(|s| s as f64), 1.0, 50.0), ("reps", input.reps.map(|r| r as f64), 1.0, 500.0), ("kg", value, 0.0, 500.0)]
+        {
             if let Some(v) = v.filter(|v| !(lo..=hi).contains(v)) {
                 out(field, v)?;
             }
@@ -324,7 +326,13 @@ pub fn log_metric(conn: &Connection, input: &MetricInput, settings: &ValidationS
 }
 
 /// `log_metric` with its origin: `manual`, or `assistant` for the Q&A panel's log_metric (FR-QA-008).
-pub fn log_metric_as(conn: &Connection, input: &MetricInput, settings: &ValidationSettings, origin: &str, now: DateTime<FixedOffset>) -> Result<String, MetricError> {
+pub fn log_metric_as(
+    conn: &Connection,
+    input: &MetricInput,
+    settings: &ValidationSettings,
+    origin: &str,
+    now: DateTime<FixedOffset>,
+) -> Result<String, MetricError> {
     let (date, (value, exercise, sets, reps)) = check(input, settings, now.date_naive())?;
     let id = uuid::Uuid::new_v4().simple().to_string();
     conn.execute(

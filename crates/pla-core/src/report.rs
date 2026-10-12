@@ -140,11 +140,7 @@ fn week_value(conn: &Connection, kind: MetricKind, week: Week) -> rusqlite::Resu
 pub fn week_stats(conn: &Connection, week: Week) -> rusqlite::Result<WeekStats> {
     let (from, to) = day_range(week);
     let titles = |sql: &str, a: &str, b: &str| -> rusqlite::Result<Vec<String>> { conn.prepare(sql)?.query_map([a, b], |r| r.get(0))?.collect() };
-    let completed = titles(
-        "SELECT title FROM task WHERE status = 'done' AND substr(completed_at, 1, 10) BETWEEN ?1 AND ?2 ORDER BY completed_at",
-        &from,
-        &to,
-    )?;
+    let completed = titles("SELECT title FROM task WHERE status = 'done' AND substr(completed_at, 1, 10) BETWEEN ?1 AND ?2 ORDER BY completed_at", &from, &to)?;
     let added: i64 = conn.query_row("SELECT count(*) FROM task WHERE substr(created_at, 1, 10) BETWEEN ?1 AND ?2", [&from, &to], |r| r.get(0))?;
     let open_late = conn
         .prepare("SELECT title FROM task WHERE status = 'open' AND date BETWEEN ?1 AND ?2 ORDER BY date, time")?
@@ -268,7 +264,19 @@ fn metric_cell(kind: MetricKind, v: Option<f64>, lang: &str) -> String {
         MetricKind::Steps => number(v, 0, lang),
         MetricKind::Water => format!("{} L", number(v / 1000.0, 1, lang)),
         MetricKind::Weight => format!("{} kg", number(v, 1, lang)),
-        MetricKind::Workout => format!("{} {}", number(v, 0, lang), if tr { "oturum" } else { if v == 1.0 { "session" } else { "sessions" } }),
+        MetricKind::Workout => format!(
+            "{} {}",
+            number(v, 0, lang),
+            if tr {
+                "oturum"
+            } else {
+                if v == 1.0 {
+                    "session"
+                } else {
+                    "sessions"
+                }
+            }
+        ),
     }
 }
 
@@ -296,8 +304,13 @@ pub fn render(week: Week, lang: &str, highlights: Result<&str, NoHighlights>, st
     match highlights {
         Ok(h) => s.push_str(h.trim()),
         Err(NoHighlights::NoSummaries) => s.push_str(t("_Bu hafta için günlük özet yok._", "_No daily summaries this week._")),
-        Err(NoHighlights::NoModel) => s.push_str(t("_Dil modeli olmadan özet yazılamadı; sayılar aşağıda._", "_No summary without the language model; the numbers are below._")),
-        Err(NoHighlights::Failed) => s.push_str(t("_Dil modeli bu hafta için özet yazamadı; sayılar aşağıda._", "_The language model could not write this week's summary; the numbers are below._")),
+        Err(NoHighlights::NoModel) => {
+            s.push_str(t("_Dil modeli olmadan özet yazılamadı; sayılar aşağıda._", "_No summary without the language model; the numbers are below._"))
+        }
+        Err(NoHighlights::Failed) => s.push_str(t(
+            "_Dil modeli bu hafta için özet yazamadı; sayılar aşağıda._",
+            "_The language model could not write this week's summary; the numbers are below._",
+        )),
     }
     s.push_str(&format!("\n\n## {}\n\n", t("Görevler", "Tasks")));
     s.push_str(&format!(
@@ -312,7 +325,15 @@ pub fn render(week: Week, lang: &str, highlights: Result<&str, NoHighlights>, st
     // at most ten names a list, the rest counted (final review M3)
     let names = |list: &[String]| {
         let shown = list.iter().take(10).cloned().collect::<Vec<_>>().join(", ");
-        if list.len() > 10 { format!("{shown} {}{}", if en { "and " } else { "ve " }, if en { format!("{} more", list.len() - 10) } else { format!("{} tane daha", list.len() - 10) }) } else { shown }
+        if list.len() > 10 {
+            format!(
+                "{shown} {}{}",
+                if en { "and " } else { "ve " },
+                if en { format!("{} more", list.len() - 10) } else { format!("{} tane daha", list.len() - 10) }
+            )
+        } else {
+            shown
+        }
     };
     if !stats.completed.is_empty() {
         s.push_str(&format!("\n{}: {}\n", t("Tamamlananlar", "Done"), names(&stats.completed)));
@@ -326,7 +347,12 @@ pub fn render(week: Week, lang: &str, highlights: Result<&str, NoHighlights>, st
     } else {
         s.push_str(&format!("| | {} | {} |\n| --- | --- | --- |\n", t("Bu hafta", "This week"), t("Geçen hafta", "Last week")));
         for m in &stats.metrics {
-            s.push_str(&format!("| {} | {} | {} |\n", metric_name(m.kind, lang), metric_cell(m.kind, m.this_week, lang), metric_cell(m.kind, m.last_week, lang)));
+            s.push_str(&format!(
+                "| {} | {} | {} |\n",
+                metric_name(m.kind, lang),
+                metric_cell(m.kind, m.this_week, lang),
+                metric_cell(m.kind, m.last_week, lang)
+            ));
         }
     }
     s.push_str(&format!("\n## {}\n\n", t("Gelecek hafta", "Next week")));
@@ -450,7 +476,24 @@ mod tests {
         add_task_as(&conn, &input("Dişçi", "2026-10-13"), "manual", made).unwrap();
         add_task_as(&conn, &input("Eski iş", "2026-10-01"), "manual", at("2026-09-28 09:00")).unwrap();
         let s = crate::extraction::ValidationSettings::default();
-        let sleep = |date: &str, h: f64| crate::metrics::log_metric(&conn, &crate::metrics::MetricInput { kind: MetricKind::Sleep, date: date.into(), value: Some(h), unit: None, exercise: None, sets: None, reps: None, confirmed: false }, &s, at("2026-10-11 21:00")).unwrap();
+        let sleep = |date: &str, h: f64| {
+            crate::metrics::log_metric(
+                &conn,
+                &crate::metrics::MetricInput {
+                    kind: MetricKind::Sleep,
+                    date: date.into(),
+                    value: Some(h),
+                    unit: None,
+                    exercise: None,
+                    sets: None,
+                    reps: None,
+                    confirmed: false,
+                },
+                &s,
+                at("2026-10-11 21:00"),
+            )
+            .unwrap()
+        };
         sleep("2026-10-06", 7.0);
         sleep("2026-10-07", 6.0);
         sleep("2026-09-30", 8.0);
@@ -470,11 +513,20 @@ mod tests {
             added: 3,
             open_late: vec!["Rapor yaz".into()],
             next_week: vec![("2026-10-13".into(), Some("10:00".into()), "Dişçi".into())],
-            metrics: vec![MetricLine { kind: MetricKind::Sleep, this_week: Some(6.5), last_week: Some(8.0) }, MetricLine { kind: MetricKind::Steps, this_week: Some(8420.0), last_week: None }],
+            metrics: vec![
+                MetricLine { kind: MetricKind::Sleep, this_week: Some(6.5), last_week: Some(8.0) },
+                MetricLine { kind: MetricKind::Steps, this_week: Some(8420.0), last_week: None },
+            ],
         };
         let tr = render(week, "tr", Ok("- Bütçe onaylandı [[Toplantı]]"), &stats);
         assert!(tr.starts_with("---\npla_generated: true\nweek: 2026-W41\n---\n# Hafta 41 · 5–11 Ekim 2026"), "{tr}");
-        for want in ["- Bütçe onaylandı [[Toplantı]]", "Tamamlanan 1 · eklenen 3 · bekleyen 1", "| Uyku (günlük ort.) | 6,5 sa | 8 sa |", "| Adım (günlük ort.) | 8.420 | – |", "- 13 Ekim Sal 10:00 · Dişçi"] {
+        for want in [
+            "- Bütçe onaylandı [[Toplantı]]",
+            "Tamamlanan 1 · eklenen 3 · bekleyen 1",
+            "| Uyku (günlük ort.) | 6,5 sa | 8 sa |",
+            "| Adım (günlük ort.) | 8.420 | – |",
+            "- 13 Ekim Sal 10:00 · Dişçi",
+        ] {
             assert!(tr.contains(want), "{want}\n{tr}");
         }
         let en = render(week, "en", Err(NoHighlights::NoModel), &WeekStats::default());

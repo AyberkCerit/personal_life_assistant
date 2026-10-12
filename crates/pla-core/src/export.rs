@@ -187,11 +187,36 @@ mod tests {
         .unwrap();
         let task = "INSERT INTO task (task_id, title, details, date, time, notify_at, status, origin, block_id, completed_at, created_at, updated_at)
                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?11)";
-        conn.execute(task, rusqlite::params!["t1", "Dişçi", None::<String>, "2026-10-07", "09:00", "2026-10-07T09:00", "open", "extracted", "b1", None::<String>, NOW]).unwrap();
-        conn.execute(task, rusqlite::params!["t2", "Fatura, \"elektrik\"", "satır 1\nsatır 2", None::<String>, None::<String>, None::<String>, "done", "manual", None::<String>, NOW, "2026-10-05T08:00:00+03:00"]).unwrap();
-        let metric = "INSERT INTO metric_record (metric_id, type, value_json, unit, date, origin, block_id, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)";
+        conn.execute(
+            task,
+            rusqlite::params!["t1", "Dişçi", None::<String>, "2026-10-07", "09:00", "2026-10-07T09:00", "open", "extracted", "b1", None::<String>, NOW],
+        )
+        .unwrap();
+        conn.execute(
+            task,
+            rusqlite::params![
+                "t2",
+                "Fatura, \"elektrik\"",
+                "satır 1\nsatır 2",
+                None::<String>,
+                None::<String>,
+                None::<String>,
+                "done",
+                "manual",
+                None::<String>,
+                NOW,
+                "2026-10-05T08:00:00+03:00"
+            ],
+        )
+        .unwrap();
+        let metric =
+            "INSERT INTO metric_record (metric_id, type, value_json, unit, date, origin, block_id, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)";
         conn.execute(metric, rusqlite::params!["m1", "sleep", r#"{"value":7.5}"#, "h", "2026-10-05", "extracted", "b1", NOW]).unwrap();
-        conn.execute(metric, rusqlite::params!["m2", "workout", r#"{"exercise":"şınav","sets":3,"reps":10}"#, None::<String>, "2026-10-06", "manual", None::<String>, NOW]).unwrap();
+        conn.execute(
+            metric,
+            rusqlite::params!["m2", "workout", r#"{"exercise":"şınav","sets":3,"reps":10}"#, None::<String>, "2026-10-06", "manual", None::<String>, NOW],
+        )
+        .unwrap();
         (tmp, conn)
     }
 

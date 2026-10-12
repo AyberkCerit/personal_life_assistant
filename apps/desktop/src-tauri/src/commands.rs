@@ -5,19 +5,19 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use chrono::Local;
+use pla_core::db::connect;
 use pla_core::db::open_databases;
 use pla_core::files::{self, FileError, NoteFile, TreeEntry};
 use pla_core::llm::ModelHost;
-use pla_core::pipeline::Extractor;
-use pla_core::settings::{load_settings, save_settings, AppSettings, Theme};
-use pla_core::vault::{default_app_root, open_vault as open_vault_dir, resolve_data_dir, Vault};
-use chrono::Local;
-use pla_core::db::connect;
-use pla_core::pipeline::items::{reject_item, ItemRef};
-use pla_core::reminders;
 use pla_core::models::{self, catalog, download as dl, local};
+use pla_core::pipeline::items::{reject_item, ItemRef};
 use pla_core::pipeline::write_tx;
+use pla_core::pipeline::Extractor;
+use pla_core::reminders;
+use pla_core::settings::{load_settings, save_settings, AppSettings, Theme};
 use pla_core::tasks::{self, ReviewView, TaskInput, TaskList, TaskView};
+use pla_core::vault::{default_app_root, open_vault as open_vault_dir, resolve_data_dir, Vault};
 use rusqlite::Connection;
 
 use crate::worker::{AddedItem, WorkerStatus};
@@ -136,7 +136,8 @@ fn start_session(app: &AppHandle, root: &Path, settings: &AppSettings, own: Arc<
     let dir = resolve_data_dir(&app_root()?, &mut vault).map_err(|e| e.to_string())?;
     let dbs = open_databases(&dir).map_err(|e| e.to_string())?;
     let ui_db = connect(&dir.join("pla.db")).map_err(|e| e.to_string())?;
-    let status = Arc::new(Mutex::new(WorkerStatus { queued: 0, model: crate::worker::ModelState::Off, busy: false, last_error: None, added: 0, paused: false }));
+    let status =
+        Arc::new(Mutex::new(WorkerStatus { queued: 0, model: crate::worker::ModelState::Off, busy: false, last_error: None, added: 0, paused: false }));
     let (status_app, status_copy) = (app.clone(), Arc::clone(&status));
     let added_app = app.clone();
     let worker = Worker::new(
@@ -186,9 +187,14 @@ fn start_session(app: &AppHandle, root: &Path, settings: &AppSettings, own: Arc<
             let _ = progress_app.emit("memory-progress", serde_json::json!({ "pending": pending, "total": total }));
         }),
     };
-    let indexer = crate::indexer::spawn(vault.root.clone(), dir.join("cache.db"), Box::new(move || {
-        let _ = index_app.emit("index-changed", ());
-    }), Some(memory));
+    let indexer = crate::indexer::spawn(
+        vault.root.clone(),
+        dir.join("cache.db"),
+        Box::new(move || {
+            let _ = index_app.emit("index-changed", ());
+        }),
+        Some(memory),
+    );
     let cache = dbs.cache;
     let watch_handle = watch(vault.clone(), own, handle.sender(), indexer.sender(), app.clone()).ok();
     let sched_db = connect(&dir.join("pla.db")).map_err(|e| e.to_string())?;
@@ -209,7 +215,21 @@ fn start_session(app: &AppHandle, root: &Path, settings: &AppSettings, own: Arc<
             }
         }
     });
-    Ok(Session { vault, scheduler, pending, db: Mutex::new(ui_db), status, _watch: watch_handle, indexer, cache: Mutex::new(cache), cache_path: dir.join("cache.db"), embeds, memory_pause, worker: handle, weekly })
+    Ok(Session {
+        vault,
+        scheduler,
+        pending,
+        db: Mutex::new(ui_db),
+        status,
+        _watch: watch_handle,
+        indexer,
+        cache: Mutex::new(cache),
+        cache_path: dir.join("cache.db"),
+        embeds,
+        memory_pause,
+        worker: handle,
+        weekly,
+    })
 }
 
 fn with_vault<T>(state: &State<AppState>, f: impl FnOnce(&Vault) -> Result<T, FileError>) -> Result<T, String> {
@@ -706,7 +726,6 @@ pub fn hide_to_tray(window: tauri::WebviewWindow, state: State<AppState>) -> Res
     Ok(())
 }
 
-
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct InstalledModel {
     pub name: String,
@@ -858,7 +877,15 @@ pub fn model_download_start(app: AppHandle, state: State<AppState>) -> Result<()
         .downloads
         .start(
             move |cancel, report| {
-                let req = dl::Request { entry, dir: &dir, policy: policy.as_ref(), free_space: &dl::free_space, cancel, progress_every: Duration::from_secs(1), stall_after: Duration::from_secs(60) };
+                let req = dl::Request {
+                    entry,
+                    dir: &dir,
+                    policy: policy.as_ref(),
+                    free_space: &dl::free_space,
+                    cancel,
+                    progress_every: Duration::from_secs(1),
+                    stall_after: Duration::from_secs(60),
+                };
                 dl::download(&req, report)
             },
             move |s| {
@@ -908,7 +935,12 @@ mod tests {
         apply_setting(&mut s, "theme", &serde_json::json!("light")).unwrap();
         assert_eq!(s.theme, Theme::Light);
         let before = s.clone();
-        for (key, value) in [("language", serde_json::json!("de")), ("theme", serde_json::json!("blue")), ("vault_path", serde_json::json!("C:/x")), ("theme", serde_json::json!(1))] {
+        for (key, value) in [
+            ("language", serde_json::json!("de")),
+            ("theme", serde_json::json!("blue")),
+            ("vault_path", serde_json::json!("C:/x")),
+            ("theme", serde_json::json!(1)),
+        ] {
             assert!(apply_setting(&mut s, key, &value).is_err(), "{key} = {value}");
         }
         assert_eq!(s, before, "a refused value changes nothing");

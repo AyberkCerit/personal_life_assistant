@@ -44,17 +44,20 @@ pub fn key(s: &str) -> String {
 
 /// `key` without the Turkish diacritics FTS5 also drops (ç ğ ş ö ü), for finding the matching line.
 fn loose(s: &str) -> String {
-    key(s).chars().map(|c| match c {
-        'ç' => 'c',
-        'ğ' => 'g',
-        'ş' => 's',
-        'ö' => 'o',
-        'ü' => 'u',
-        'â' => 'a',
-        'î' => 'i',
-        'û' => 'u',
-        c => c,
-    }).collect()
+    key(s)
+        .chars()
+        .map(|c| match c {
+            'ç' => 'c',
+            'ğ' => 'g',
+            'ş' => 's',
+            'ö' => 'o',
+            'ü' => 'u',
+            'â' => 'a',
+            'î' => 'i',
+            'û' => 'u',
+            c => c,
+        })
+        .collect()
 }
 
 /// How a link target or note name is compared: lower-case, `/` separators, no `.md`, no `#heading`.
@@ -220,7 +223,10 @@ pub fn index_note(conn: &Connection, rel: &str, text: &str, mtime: i64, size: i6
     tx.execute("INSERT INTO note_fts (note_path, title, body) VALUES (?1, ?2, ?3)", params![rel, note.title, note.body])?;
     crate::memory::sync_chunks(&tx, rel, &note.title, &note.body)?; // FR-MEM-002: only changed chunks lose their vector
     for link in &note.links {
-        tx.execute("INSERT INTO link (source_path, target_path, line_text, line) VALUES (?1, ?2, ?3, ?4)", params![rel, link.target, link.line_text, link.line as i64])?;
+        tx.execute(
+            "INSERT INTO link (source_path, target_path, line_text, line) VALUES (?1, ?2, ?3, ?4)",
+            params![rel, link.target, link.line_text, link.line as i64],
+        )?;
     }
     tx.commit()
 }
@@ -288,9 +294,8 @@ pub fn find_on_disk(root: &Path, target: &str) -> Option<String> {
     }
     let files = markdown_files(root);
     let shortest = |hits: Vec<&String>| hits.into_iter().min_by_key(|p| (p.len(), (*p).clone())).cloned();
-    shortest(files.iter().filter(|p| normalize_name(p) == wanted).collect()).or_else(|| {
-        shortest(files.iter().filter(|p| normalize_name(p).rsplit('/').next() == Some(name.as_str()) && !wanted.contains('/')).collect())
-    })
+    shortest(files.iter().filter(|p| normalize_name(p) == wanted).collect())
+        .or_else(|| shortest(files.iter().filter(|p| normalize_name(p).rsplit('/').next() == Some(name.as_str()) && !wanted.contains('/')).collect()))
 }
 
 fn stamp(meta: &std::fs::Metadata) -> (i64, i64) {
@@ -441,10 +446,10 @@ pub struct NoteText {
 
 /// Words that say nothing about what is asked (Turkish and English question words and fillers).
 const STOPWORDS: &[&str] = &[
-    "ben", "bana", "beni", "benim", "bir", "bu", "şu", "ve", "ile", "için", "ama", "gibi", "kadar", "daha", "çok", "mi", "mı", "mu", "mü", "ne",
-    "neler", "nedir", "nasıl", "neden", "niye", "hangi", "kaç", "var", "yok", "olan", "oldu", "olarak", "da", "de", "ki", "the", "and", "for",
-    "what", "which", "how", "why", "when", "where", "who", "did", "does", "was", "were", "are", "have", "has", "with", "about", "from", "that",
-    "this", "you", "your", "my", "me", "can", "will",
+    "ben", "bana", "beni", "benim", "bir", "bu", "şu", "ve", "ile", "için", "ama", "gibi", "kadar", "daha", "çok", "mi", "mı", "mu", "mü", "ne", "neler",
+    "nedir", "nasıl", "neden", "niye", "hangi", "kaç", "var", "yok", "olan", "oldu", "olarak", "da", "de", "ki", "the", "and", "for", "what", "which", "how",
+    "why", "when", "where", "who", "did", "does", "was", "were", "are", "have", "has", "with", "about", "from", "that", "this", "you", "your", "my", "me",
+    "can", "will",
 ];
 
 /// The question's words for retrieval: folded, at least three letters, no filler words.
@@ -587,7 +592,9 @@ pub fn backlinks(conn: &Connection, rel: &str) -> rusqlite::Result<Vec<Backlink>
          WHERE l.target_path = ?1 AND l.source_path <> ?2 ORDER BY l.source_path, l.line",
     )?;
     for name in candidates.iter().collect::<std::collections::BTreeSet<_>>() {
-        let rows = stmt.query_map(params![name, rel], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, i64>(2)?, r.get::<_, String>(3)?, r.get::<_, String>(4)?)))?;
+        let rows = stmt.query_map(params![name, rel], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, i64>(2)?, r.get::<_, String>(3)?, r.get::<_, String>(4)?))
+        })?;
         for row in rows {
             let (source_path, source_title, line, line_text, target) = row?;
             let goes_to = match resolved.get(&target) {
@@ -855,10 +862,7 @@ mod tests {
         put(&conn, "b.md", "---\ntags: [proje]\n---\n#Proje tekrar");
         put(&conn, "c.md", "#okuma");
         let tags = list_tags(&conn).unwrap();
-        assert_eq!(
-            tags.iter().map(|t| (t.tag.as_str(), t.count)).collect::<Vec<_>>(),
-            vec![("okuma", 1), ("proje", 2), ("proje/pla", 1)]
-        );
+        assert_eq!(tags.iter().map(|t| (t.tag.as_str(), t.count)).collect::<Vec<_>>(), vec![("okuma", 1), ("proje", 2), ("proje/pla", 1)]);
     }
 
     #[test]

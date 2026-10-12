@@ -182,7 +182,15 @@ mod tests {
         // Review Focus 3
         let d = ModelDownloads::default();
         let (go_tx, go_rx) = mpsc::channel::<()>();
-        d.start(move |_, _| { go_rx.recv().unwrap(); Ok(PathBuf::from("m")) }, |_| {}, |_| {}).unwrap();
+        d.start(
+            move |_, _| {
+                go_rx.recv().unwrap();
+                Ok(PathBuf::from("m"))
+            },
+            |_| {},
+            |_| {},
+        )
+        .unwrap();
         assert_eq!(d.start(|_, _| Ok(PathBuf::from("n")), |_| {}, |_| {}), Err(AlreadyRunning));
         go_tx.send(()).unwrap();
         d.shutdown(Duration::from_secs(2));
@@ -219,7 +227,17 @@ mod tests {
         d.start(|_, _| Err(DownloadError::InsufficientSpace { needed: 9, available: 3 }), move |s| tx.send(s.clone()).unwrap(), |_| {}).unwrap();
         assert_eq!(
             rx.recv().unwrap(),
-            DownloadState::Failed { failure: Failure { kind: "space", needed: Some(9), available: Some(3), status: None, detail: "not enough disk space: 9 bytes needed, 3 available".into() }, received: 0, total: 0 }
+            DownloadState::Failed {
+                failure: Failure {
+                    kind: "space",
+                    needed: Some(9),
+                    available: Some(3),
+                    status: None,
+                    detail: "not enough disk space: 9 bytes needed, 3 available".into()
+                },
+                received: 0,
+                total: 0
+            }
         );
         for (e, kind) in [
             (DownloadError::Network("x".into()), "network"),
@@ -238,7 +256,15 @@ mod tests {
     fn shutdown_returns_quickly_even_if_the_run_hangs() {
         // Review Focus 1: Quit stays under 5 s (FR-SCH-003)
         let d = ModelDownloads::default();
-        d.start(|_, _| { std::thread::sleep(Duration::from_secs(30)); Ok(PathBuf::from("m")) }, |_| {}, |_| {}).unwrap();
+        d.start(
+            |_, _| {
+                std::thread::sleep(Duration::from_secs(30));
+                Ok(PathBuf::from("m"))
+            },
+            |_| {},
+            |_| {},
+        )
+        .unwrap();
         let t = std::time::Instant::now();
         d.shutdown(Duration::from_millis(300));
         assert!(t.elapsed() < Duration::from_secs(1), "{:?}", t.elapsed());

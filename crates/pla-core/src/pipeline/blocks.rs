@@ -86,8 +86,7 @@ pub fn sync_note_blocks(
     }
     // Blocks that disappear in this sync: a new block made of their text (a split or merged
     // paragraph) keeps their first-seen time, so "yarın" keeps meaning the day it was written.
-    let vanished: Vec<&Stored> =
-        m.unmatched_old.iter().filter_map(|id| stored.iter().find(|s| &s.block.id == id && !s.missing)).collect();
+    let vanished: Vec<&Stored> = m.unmatched_old.iter().filter_map(|id| stored.iter().find(|s| &s.block.id == id && !s.missing)).collect();
     for &i in &m.unmatched_new {
         let b = &blocks[i];
         if first_sight {
@@ -155,9 +154,9 @@ fn take_over_moved_block(
         )?
         .query_map(params![note_path, block.text], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))?
         .collect::<rusqlite::Result<_>>()?;
-    let Some((id, first_seen_at, extracted_hash, _)) = candidates.into_iter().find(|(_, _, _, since)| {
-        since.as_deref().and_then(|t| DateTime::parse_from_rfc3339(t).ok()).is_some_and(|t| t >= revive_after)
-    }) else {
+    let Some((id, first_seen_at, extracted_hash, _)) =
+        candidates.into_iter().find(|(_, _, _, since)| since.as_deref().and_then(|t| DateTime::parse_from_rfc3339(t).ok()).is_some_and(|t| t >= revive_after))
+    else {
         return Ok(None);
     };
     let hash = text_hash(&block.text);
@@ -183,10 +182,8 @@ pub fn mark_extracted(conn: &Connection, block_id: &str) -> rusqlite::Result<()>
 
 /// FR-VLT-019: the note is gone; its items stay, marked as having lost their source.
 pub fn mark_note_missing(conn: &Connection, note_path: &str, now: DateTime<FixedOffset>) -> rusqlite::Result<usize> {
-    let ids: Vec<String> = conn
-        .prepare("SELECT block_id FROM block WHERE note_path = ?1 AND missing = 0")?
-        .query_map([note_path], |r| r.get(0))?
-        .collect::<Result<_, _>>()?;
+    let ids: Vec<String> =
+        conn.prepare("SELECT block_id FROM block WHERE note_path = ?1 AND missing = 0")?.query_map([note_path], |r| r.get(0))?.collect::<Result<_, _>>()?;
     let now_s = now.to_rfc3339();
     for id in &ids {
         mark_missing(conn, id, &now_s)?;
@@ -213,9 +210,7 @@ fn has_any_block(conn: &Connection, note_path: &str) -> rusqlite::Result<bool> {
 fn load(conn: &Connection, note_path: &str, now: DateTime<FixedOffset>) -> rusqlite::Result<Vec<Stored>> {
     let revive_after = now - TimeDelta::hours(REVIVE_WINDOW_HOURS);
     let rows = conn
-        .prepare(
-            "SELECT block_id, position, text, extracted_hash, first_seen_at, missing, missing_since FROM block WHERE note_path = ?1 ORDER BY position",
-        )?
+        .prepare("SELECT block_id, position, text, extracted_hash, first_seen_at, missing, missing_since FROM block WHERE note_path = ?1 ORDER BY position")?
         .query_map([note_path], |r| {
             Ok((
                 Stored {
@@ -230,13 +225,7 @@ fn load(conn: &Connection, note_path: &str, now: DateTime<FixedOffset>) -> rusql
         .collect::<rusqlite::Result<Vec<_>>>()?;
     Ok(rows
         .into_iter()
-        .filter(|(s, since)| {
-            !s.missing
-                || since
-                    .as_deref()
-                    .and_then(|t| DateTime::parse_from_rfc3339(t).ok())
-                    .is_some_and(|t| t >= revive_after)
-        })
+        .filter(|(s, since)| !s.missing || since.as_deref().and_then(|t| DateTime::parse_from_rfc3339(t).ok()).is_some_and(|t| t >= revive_after))
         .map(|(s, _)| s)
         .collect())
 }
@@ -328,10 +317,8 @@ mod tests {
         let first = sync(&dbs.pla, "notes/x.md", "Cuma fatura öde.", None, T1);
         insert_task(&dbs.pla, "t1", &first[0].block_id);
         assert_eq!(mark_note_missing(&dbs.pla, "notes/x.md", at(T1)).unwrap(), 1);
-        let (task, block): (i64, i64) = dbs
-            .pla
-            .query_row("SELECT t.source_missing, b.missing FROM task t JOIN block b USING (block_id)", [], |r| Ok((r.get(0)?, r.get(1)?)))
-            .unwrap();
+        let (task, block): (i64, i64) =
+            dbs.pla.query_row("SELECT t.source_missing, b.missing FROM task t JOIN block b USING (block_id)", [], |r| Ok((r.get(0)?, r.get(1)?))).unwrap();
         assert_eq!((task, block), (1, 1));
     }
 

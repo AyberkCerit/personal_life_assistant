@@ -60,9 +60,7 @@ pub enum FileError {
 pub fn resolve(vault: &Vault, rel: &str) -> Result<PathBuf, FileError> {
     let path = Path::new(rel);
     let ok = !rel.is_empty()
-        && path.components().all(|c| {
-            matches!(c, Component::Normal(p) if { let p = p.to_string_lossy(); !p.starts_with('.') && !p.contains(':') })
-        });
+        && path.components().all(|c| matches!(c, Component::Normal(p) if { let p = p.to_string_lossy(); !p.starts_with('.') && !p.contains(':') }));
     if !ok {
         return Err(FileError::BadPath(rel.to_owned()));
     }

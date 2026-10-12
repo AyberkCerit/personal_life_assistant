@@ -66,8 +66,7 @@ mod tests {
 
     #[test]
     fn messages_match_the_evaluated_python_prompt() {
-        let fx: serde_json::Value =
-            serde_json::from_str(include_str!("../../tests/fixtures/messages_sample.json")).unwrap();
+        let fx: serde_json::Value = serde_json::from_str(include_str!("../../tests/fixtures/messages_sample.json")).unwrap();
         let got = messages(d(fx["ref"].as_str().unwrap()), fx["text"].as_str().unwrap());
         assert_eq!(got, fx["messages"]);
     }

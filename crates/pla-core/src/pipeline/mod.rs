@@ -77,10 +77,8 @@ pub fn enqueue(conn: &Connection, note_path: &str, now: DateTime<FixedOffset>) -
 /// known note that is no longer on disk, so its items get marked (FR-VLT-019).
 pub fn enqueue_all(vault: &Vault, conn: &Connection, now: DateTime<FixedOffset>) -> Result<usize, PipelineError> {
     let mut notes = list_user_notes(vault)?;
-    let known: std::collections::HashSet<String> = conn
-        .prepare("SELECT DISTINCT note_path FROM block WHERE missing = 0")?
-        .query_map([], |r| r.get(0))?
-        .collect::<Result<_, _>>()?;
+    let known: std::collections::HashSet<String> =
+        conn.prepare("SELECT DISTINCT note_path FROM block WHERE missing = 0")?.query_map([], |r| r.get(0))?.collect::<Result<_, _>>()?;
     // A note PLA wrote itself (FR-EXT-001) that never had blocks has nothing to extract: leaving it
     // out keeps "waiting for the model" honest. One that had blocks is still queued, so its items
     // are marked as having lost their source.
@@ -94,9 +92,7 @@ pub fn enqueue_all(vault: &Vault, conn: &Connection, now: DateTime<FixedOffset>)
 }
 
 pub fn queued_notes(conn: &Connection) -> rusqlite::Result<Vec<String>> {
-    conn.prepare("SELECT note_path FROM extraction_queue ORDER BY attempts, queued_at, note_path")?
-        .query_map([], |r| r.get(0))?
-        .collect()
+    conn.prepare("SELECT note_path FROM extraction_queue ORDER BY attempts, queued_at, note_path")?.query_map([], |r| r.get(0))?.collect()
 }
 
 /// A write transaction that takes the write lock at once. With two connections (worker and task
@@ -141,8 +137,7 @@ pub fn process_queue_with(
     // Vanished notes first, so a renamed note can take over their blocks (decision 2026-10-02).
     queue.sort_by_key(|note| vault.root.join(note).exists());
     for note in queue {
-        let generation: i64 =
-            conn.query_row("SELECT generation FROM extraction_queue WHERE note_path = ?1", [&note], |r| r.get(0))?;
+        let generation: i64 = conn.query_row("SELECT generation FROM extraction_queue WHERE note_path = ?1", [&note], |r| r.get(0))?;
         let path = vault.root.join(&note);
         let mut written = None;
         // Gone, excluded (moved into templates/, a conflict copy) or written by PLA: the note no
@@ -167,10 +162,7 @@ pub fn process_queue_with(
                 Err(e) if e.kind() == std::io::ErrorKind::InvalidData => None, // FR-VLT-016: not UTF-8, left alone
                 Err(e) => {
                     // Locked or unreadable right now: try again next run, keep going with the others.
-                    conn.execute(
-                        "UPDATE extraction_queue SET attempts = attempts + 1, last_error = ?1 WHERE note_path = ?2",
-                        params![e.to_string(), note],
-                    )?;
+                    conn.execute("UPDATE extraction_queue SET attempts = attempts + 1, last_error = ?1 WHERE note_path = ?2", params![e.to_string(), note])?;
                     continue;
                 }
             }
@@ -545,11 +537,7 @@ mod tests {
         let mut x = Scripted::new(&[]);
         let report = run(&vault, &mut conn, &mut x, T1);
         assert!(x.calls.is_empty());
-        assert!(
-            matches!(&report.outcomes[..], [(_, Outcome::Review { reason, .. })] if reason.contains("too long")),
-            "{:?}",
-            report.outcomes
-        );
+        assert!(matches!(&report.outcomes[..], [(_, Outcome::Review { reason, .. })] if reason.contains("too long")), "{:?}", report.outcomes);
     }
 
     #[cfg(windows)]
@@ -614,10 +602,7 @@ mod tests {
         run(&vault, &mut conn, &mut x, T1);
         write(&vault, "notes/plan.md", "- Yarın dişçiye git\n- Cuma faturayı öde".as_bytes());
         run(&vault, &mut conn, &mut x, T2);
-        assert_eq!(
-            tasks(&conn),
-            vec![("Dişçi".into(), Some("2026-10-07".into()), 0), ("Fatura öde".into(), Some("2026-10-09".into()), 0)]
-        );
+        assert_eq!(tasks(&conn), vec![("Dişçi".into(), Some("2026-10-07".into()), 0), ("Fatura öde".into(), Some("2026-10-09".into()), 0)]);
     }
 
     #[test]
@@ -702,10 +687,8 @@ mod tests {
         let mut x = Scripted::new(&[(DENTIST, DENTIST_JSON)]);
         enqueue_all(&vault, &conn, at(T1)).unwrap();
         let mut seen: Vec<(String, usize)> = Vec::new();
-        process_queue_with(&vault, &mut conn, &mut x, &PipelineSettings::default(), at(T1), &mut |note, outcomes| {
-            seen.push((note.to_owned(), outcomes.len()))
-        })
-        .unwrap();
+        process_queue_with(&vault, &mut conn, &mut x, &PipelineSettings::default(), at(T1), &mut |note, outcomes| seen.push((note.to_owned(), outcomes.len())))
+            .unwrap();
         assert_eq!(seen, vec![("notes/a.md".to_owned(), 1), ("notes/b.md".to_owned(), 1)]);
     }
 }

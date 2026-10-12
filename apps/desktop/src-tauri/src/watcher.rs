@@ -148,11 +148,7 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let vault = open_vault(tmp.path()).unwrap();
         let own = SelfWrites::new();
-        let paths = [
-            vault.root.join(".obsidian/workspace.json"),
-            vault.root.join("templates/gunluk.md"),
-            vault.root.join("attachments/resim.png"),
-        ];
+        let paths = [vault.root.join(".obsidian/workspace.json"), vault.root.join("templates/gunluk.md"), vault.root.join("attachments/resim.png")];
         let c = classify(&vault, &paths, &own);
         assert!(c.notes.is_empty());
         assert!(c.tree_changed, "a new picture still changes the tree");

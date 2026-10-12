@@ -120,7 +120,9 @@ fn user_dword(subkey: &str, value: &str) -> Option<u32> {
     let mut data = 0u32;
     let mut size = std::mem::size_of::<u32>() as u32;
     // SAFETY: NUL-terminated names, a DWORD-sized out buffer and its size.
-    let status = unsafe { RegGetValueW(HKEY_CURRENT_USER, key.as_ptr(), name.as_ptr(), RRF_RT_REG_DWORD, std::ptr::null_mut(), (&mut data as *mut u32).cast(), &mut size) };
+    let status = unsafe {
+        RegGetValueW(HKEY_CURRENT_USER, key.as_ptr(), name.as_ptr(), RRF_RT_REG_DWORD, std::ptr::null_mut(), (&mut data as *mut u32).cast(), &mut size)
+    };
     (status == 0).then_some(data)
 }
 
@@ -137,7 +139,6 @@ pub fn windows_notifications_on() -> bool {
         true
     }
 }
-
 
 #[derive(Serialize)]
 pub struct BackupStatus {

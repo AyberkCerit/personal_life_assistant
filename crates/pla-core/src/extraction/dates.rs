@@ -19,9 +19,7 @@ pub fn resolve_date(item: &RawItem, reference: NaiveDate) -> Result<Option<Naive
     let when = item.when.as_ref().unwrap_or(&empty);
 
     if let Some(s) = &when.date {
-        return NaiveDate::parse_from_str(s, "%Y-%m-%d")
-            .map(Some)
-            .map_err(|_| DateError::InvalidDate(s.clone()));
+        return NaiveDate::parse_from_str(s, "%Y-%m-%d").map(Some).map_err(|_| DateError::InvalidDate(s.clone()));
     }
     if let Some(n) = when.day_offset {
         return add_days(reference, n).map(Some).ok_or(DateError::OffsetOutOfRange(n));
@@ -65,7 +63,10 @@ mod tests {
     #[test]
     fn day_offset_counts_from_the_reference_date() {
         assert_eq!(resolve_date(&item(r#"{"type":"task","title":"x","when":{"day_offset":1}}"#), d(TUE)), Ok(Some(d("2026-10-07"))));
-        assert_eq!(resolve_date(&item(r#"{"type":"metric","when":{"day_offset":-1},"metric":{"kind":"sleep","value":7,"unit":"h"}}"#), d(TUE)), Ok(Some(d("2026-10-05"))));
+        assert_eq!(
+            resolve_date(&item(r#"{"type":"metric","when":{"day_offset":-1},"metric":{"kind":"sleep","value":7,"unit":"h"}}"#), d(TUE)),
+            Ok(Some(d("2026-10-05")))
+        );
     }
 
     #[test]

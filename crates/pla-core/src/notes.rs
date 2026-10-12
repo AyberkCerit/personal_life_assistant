@@ -86,12 +86,7 @@ fn frontmatter_end(lines: &[&str]) -> usize {
     if lines.first().map(|l| l.trim_end()) != Some("---") {
         return 0;
     }
-    lines
-        .iter()
-        .enumerate()
-        .skip(1)
-        .find(|(_, l)| matches!(l.trim_end(), "---" | "..."))
-        .map_or(0, |(i, _)| i + 1)
+    lines.iter().enumerate().skip(1).find(|(_, l)| matches!(l.trim_end(), "---" | "...")).map_or(0, |(i, _)| i + 1)
 }
 
 /// FR-EXT-001: notes written by PLA itself carry `pla_generated: true` and are never extracted.
@@ -102,8 +97,7 @@ pub fn is_generated(text: &str) -> bool {
     end > 0
         && lines[1..end - 1].iter().any(|line| {
             line.split_once(':').is_some_and(|(key, value)| {
-                key.trim().eq_ignore_ascii_case("pla_generated")
-                    && value.trim().trim_matches(|c| c == '"' || c == '\'').eq_ignore_ascii_case("true")
+                key.trim().eq_ignore_ascii_case("pla_generated") && value.trim().trim_matches(|c| c == '"' || c == '\'').eq_ignore_ascii_case("true")
             })
         })
 }
@@ -183,13 +177,7 @@ mod tests {
     #[test]
     fn paragraphs_and_list_items_are_blocks() {
         let note = "Yarın 9'da dişçi.\nSonra market.\n\n- süt al\n- ekmek al\n  (tam buğday)\n1. birinci\n\nSon paragraf.";
-        assert_eq!(texts(note), vec![
-            "Yarın 9'da dişçi.\nSonra market.",
-            "- süt al",
-            "- ekmek al\n  (tam buğday)",
-            "1. birinci",
-            "Son paragraf.",
-        ]);
+        assert_eq!(texts(note), vec!["Yarın 9'da dişçi.\nSonra market.", "- süt al", "- ekmek al\n  (tam buğday)", "1. birinci", "Son paragraf.",]);
         let positions: Vec<usize> = split_blocks(note).iter().map(|b| b.position).collect();
         assert_eq!(positions, vec![0, 1, 2, 3, 4]);
     }

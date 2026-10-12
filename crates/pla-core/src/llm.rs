@@ -123,38 +123,22 @@ pub fn free_port() -> std::io::Result<u16> {
 
 /// Plain HTTP to 127.0.0.1 only: environment proxies are ignored (NFR-SEC-001).
 fn http_agent() -> ureq::Agent {
-    ureq::Agent::config_builder()
-        .proxy(None)
-        .timeout_global(Some(Duration::from_secs(120)))
-        .build()
-        .into()
+    ureq::Agent::config_builder().proxy(None).timeout_global(Some(Duration::from_secs(120))).build().into()
 }
 
 /// A question can take minutes on a slow CPU (an 8k-token prompt, then the answer); Stop ends it.
 fn chat_agent() -> ureq::Agent {
-    ureq::Agent::config_builder()
-        .proxy(None)
-        .timeout_global(Some(Duration::from_secs(600)))
-        .build()
-        .into()
+    ureq::Agent::config_builder().proxy(None).timeout_global(Some(Duration::from_secs(600))).build().into()
 }
 
 /// Eight chunks take a few seconds on a CPU; more means the server is stuck (FR-MEM-003).
 fn embed_agent() -> ureq::Agent {
-    ureq::Agent::config_builder()
-        .proxy(None)
-        .timeout_global(Some(Duration::from_secs(30)))
-        .build()
-        .into()
+    ureq::Agent::config_builder().proxy(None).timeout_global(Some(Duration::from_secs(30))).build().into()
 }
 
 /// One health probe must not outlive the startup limit (FR-MDL-014).
 fn health_agent() -> ureq::Agent {
-    ureq::Agent::config_builder()
-        .proxy(None)
-        .timeout_global(Some(Duration::from_secs(1)))
-        .build()
-        .into()
+    ureq::Agent::config_builder().proxy(None).timeout_global(Some(Duration::from_secs(1))).build().into()
 }
 
 const STDERR_TAIL_LINES: usize = 20;
@@ -183,8 +167,8 @@ pub(crate) fn kill_with_parent(child: &Child) {
     use std::sync::OnceLock;
     use windows_sys::Win32::Foundation::HANDLE;
     use windows_sys::Win32::System::JobObjects::{
-        AssignProcessToJobObject, CreateJobObjectW, JobObjectExtendedLimitInformation, SetInformationJobObject,
-        JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+        AssignProcessToJobObject, CreateJobObjectW, JobObjectExtendedLimitInformation, SetInformationJobObject, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
+        JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
     };
 
     struct Job(HANDLE);
@@ -246,11 +230,7 @@ impl LlamaServer {
         let api_key = new_api_key()?;
 
         let mut cmd = Command::new(&cfg.server_bin);
-        cmd.args(cfg.args(port))
-            .env("LLAMA_API_KEY", &api_key)
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::piped());
+        cmd.args(cfg.args(port)).env("LLAMA_API_KEY", &api_key).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::piped());
         #[cfg(windows)]
         {
             use std::os::windows::process::CommandExt;
@@ -278,15 +258,8 @@ impl LlamaServer {
             })
         });
 
-        let mut server = Self {
-            child,
-            base_url: format!("http://127.0.0.1:{port}"),
-            api_key,
-            agent: http_agent(),
-            stderr_tail,
-            stderr_reader,
-            in_flight: Mutex::new(None),
-        };
+        let mut server =
+            Self { child, base_url: format!("http://127.0.0.1:{port}"), api_key, agent: http_agent(), stderr_tail, stderr_reader, in_flight: Mutex::new(None) };
         match wait_until_healthy(&mut server.child, &health_agent(), &server.base_url, cfg.startup_timeout) {
             Ok(()) => Ok(server),
             Err(LlmError::Exited(status)) => {
@@ -728,7 +701,20 @@ mod tests {
     fn args_bind_localhost_with_low_memory_flags_and_no_key() {
         let cfg = ServerConfig::new("llama-server.exe".into(), "m.gguf".into());
         let args = cfg.args(5555).join(" ");
-        for expected in ["--host 127.0.0.1", "--port 5555", "-c 8192", "-t 4", "-ngl 0", "-fa on", "-ctk q8_0", "-ctv q8_0", "-ub 256", "-b 512", "--cache-ram 512", "--no-webui"] {
+        for expected in [
+            "--host 127.0.0.1",
+            "--port 5555",
+            "-c 8192",
+            "-t 4",
+            "-ngl 0",
+            "-fa on",
+            "-ctk q8_0",
+            "-ctv q8_0",
+            "-ub 256",
+            "-b 512",
+            "--cache-ram 512",
+            "--no-webui",
+        ] {
             assert!(args.contains(expected), "missing `{expected}` in `{args}`");
         }
         assert!(!args.contains("api-key"), "API key must not appear on the command line (NFR-SEC-002)");
@@ -787,13 +773,7 @@ mod tests {
     fn child_processes_die_with_their_parent() {
         // Final review C2: a closed, crashed or killed PLA must not leave llama-server behind
         if std::env::var_os("PLA_JOB_PARENT").is_some() {
-            let child = Command::new("ping")
-                .args(["-n", "60", "127.0.0.1"])
-                .stdin(Stdio::null())
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .spawn()
-                .unwrap();
+            let child = Command::new("ping").args(["-n", "60", "127.0.0.1"]).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).spawn().unwrap();
             kill_with_parent(&child);
             println!("CHILD_PID={}", child.id());
             std::process::exit(0); // leaves without dropping or killing the child

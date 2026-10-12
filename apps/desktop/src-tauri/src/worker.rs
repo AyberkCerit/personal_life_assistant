@@ -9,8 +9,8 @@ use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
-use chrono::{DateTime, FixedOffset, Local};
 use chrono::NaiveDate;
+use chrono::{DateTime, FixedOffset, Local};
 use pla_core::llm::LlmError;
 use pla_core::pipeline::items::ItemRef;
 use pla_core::pipeline::{enqueue, enqueue_all, process_queue_with, queued_notes, Extractor, Outcome, PipelineSettings};
@@ -43,9 +43,16 @@ pub enum Command {
     Ask(AskJob),
     /// FR-MEM-006: summarise the days that need it (maintenance), or `only` this day (the user
     /// asked for it again).
-    Summarize { only: Option<chrono::NaiveDate>, cache_path: std::path::PathBuf },
+    Summarize {
+        only: Option<chrono::NaiveDate>,
+        cache_path: std::path::PathBuf,
+    },
     /// FR-SCH-007…011: write `week`'s report in `lang` (the week's missing summaries first).
-    WeeklyReport { week: pla_core::report::Week, cache_path: std::path::PathBuf, lang: String },
+    WeeklyReport {
+        week: pla_core::report::Week,
+        cache_path: std::path::PathBuf,
+        lang: String,
+    },
     Shutdown,
 }
 
@@ -72,12 +79,29 @@ impl std::fmt::Debug for AskJob {
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum QaEvent {
     /// The model is choosing (no tool) or running a tool.
-    Working { turn_id: String, tool: Option<String> },
-    Tool { turn_id: String, record: Box<ToolRecord> },
-    Token { turn_id: String, text: String },
-    Done { turn_id: String, turn: Box<Turn>, sources: Vec<String> },
+    Working {
+        turn_id: String,
+        tool: Option<String>,
+    },
+    Tool {
+        turn_id: String,
+        record: Box<ToolRecord>,
+    },
+    Token {
+        turn_id: String,
+        text: String,
+    },
+    Done {
+        turn_id: String,
+        turn: Box<Turn>,
+        sources: Vec<String>,
+    },
     /// `no_model`, `model` (llama-server failed) or `db`.
-    Failed { turn_id: String, code: String, detail: String },
+    Failed {
+        turn_id: String,
+        code: String,
+        detail: String,
+    },
 }
 
 /// The running worker. Dropping it (or `shutdown`) stops the current run between two model calls,
@@ -405,8 +429,7 @@ impl Worker {
     }
 
     fn flush_quiet_external_changes(&mut self) {
-        let due: Vec<String> =
-            self.later.iter().filter(|(_, at)| at.elapsed() >= self.external_delay).map(|(n, _)| n.clone()).collect();
+        let due: Vec<String> = self.later.iter().filter(|(_, at)| at.elapsed() >= self.external_delay).map(|(n, _)| n.clone()).collect();
         if due.is_empty() {
             return;
         }
@@ -498,7 +521,8 @@ impl Worker {
         let folders = self.vault.config.folders.clone();
         // a question, a pause, a model removal or closing: later (final review I3)
         let (cancel, dropping, asking, pause) = (Arc::clone(&self.cancel), Arc::clone(&self.dropping), Arc::clone(&self.asking), Arc::clone(&self.pause));
-        let interrupted = move || cancel.load(Ordering::SeqCst) || dropping.load(Ordering::SeqCst) || asking.load(Ordering::SeqCst) > 0 || pause.load(Ordering::SeqCst);
+        let interrupted =
+            move || cancel.load(Ordering::SeqCst) || dropping.load(Ordering::SeqCst) || asking.load(Ordering::SeqCst) > 0 || pause.load(Ordering::SeqCst);
         let mut highlights: Result<String, NoHighlights> = Err(NoHighlights::NoModel);
         let mut busy = false;
         let mut model_error: Option<String> = None;
@@ -542,7 +566,9 @@ impl Worker {
                     Err(NoHighlights::Failed)
                 } else {
                     match model.complete(&report::highlights_request(week, &summaries, lang), &self.interrupt) {
-                        Ok(raw) => report::clean_highlights(&raw).ok_or(NoHighlights::Failed).inspect_err(|_| model_error = Some("no points in the answer".into())),
+                        Ok(raw) => {
+                            report::clean_highlights(&raw).ok_or(NoHighlights::Failed).inspect_err(|_| model_error = Some("no points in the answer".into()))
+                        }
                         Err(LlmError::Cancelled) => {
                             busy = true;
                             Err(NoHighlights::Failed)
@@ -563,7 +589,8 @@ impl Worker {
                 listener(d, None);
             }
         }
-        let first_failure = model_error.is_some() && pla_core::jobs::failures_today(&self.conn, pla_core::jobs::WEEKLY_REPORT, now.date_naive()).unwrap_or(0) == 0;
+        let first_failure =
+            model_error.is_some() && pla_core::jobs::failures_today(&self.conn, pla_core::jobs::WEEKLY_REPORT, now.date_naive()).unwrap_or(0) == 0;
         let outcome = if busy {
             ReportOutcome::Busy
         } else if let (true, Some(reason)) = (first_failure, model_error.clone()) {
@@ -791,8 +818,8 @@ mod tests {
         let conn = open_databases(&data).unwrap().pla;
         let statuses = Arc::new(Mutex::new(Vec::new()));
         let sink = Arc::clone(&statuses);
-        let worker = Worker::new(vault, conn, extractor, Box::new(move |s| sink.lock().unwrap().push(s.clone())))
-            .with_external_delay(Duration::from_millis(300));
+        let worker =
+            Worker::new(vault, conn, extractor, Box::new(move |s| sink.lock().unwrap().push(s.clone()))).with_external_delay(Duration::from_millis(300));
         let handle = worker.spawn();
         (tmp, handle, statuses, data)
     }
@@ -1082,8 +1109,13 @@ mod tests {
         let conn = open_databases(&data).unwrap().pla;
         let statuses = Arc::new(Mutex::new(Vec::new()));
         let sink = Arc::clone(&statuses);
-        let handle = Worker::new(vault, conn, Some(Box::new(Chatty { extract_delay: Duration::from_millis(400) })), Box::new(move |s| sink.lock().unwrap().push(s.clone())))
-            .spawn();
+        let handle = Worker::new(
+            vault,
+            conn,
+            Some(Box::new(Chatty { extract_delay: Duration::from_millis(400) })),
+            Box::new(move |s| sink.lock().unwrap().push(s.clone())),
+        )
+        .spawn();
         wait_for(&statuses, |s| s.busy);
         let started = Instant::now();
         let events = until_end(&ask(&handle, &data, "hatırlat"));
@@ -1176,10 +1208,8 @@ mod tests {
         let started = Instant::now();
         handle.shutdown();
         assert!(started.elapsed() < Duration::from_secs(3), "shutdown took {:?}", started.elapsed());
-        let queued: i64 = rusqlite::Connection::open(data.join("pla.db"))
-            .unwrap()
-            .query_row("SELECT COUNT(*) FROM extraction_queue", [], |r| r.get(0))
-            .unwrap();
+        let queued: i64 =
+            rusqlite::Connection::open(data.join("pla.db")).unwrap().query_row("SELECT COUNT(*) FROM extraction_queue", [], |r| r.get(0)).unwrap();
         assert_eq!(queued, 1, "the unfinished note waits for the next start");
     }
     #[test]

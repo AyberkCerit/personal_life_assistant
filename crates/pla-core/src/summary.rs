@@ -44,11 +44,8 @@ pub fn day_of(ms: i64) -> Option<NaiveDate> {
 
 fn day_bounds(date: NaiveDate) -> (i64, i64) {
     // where midnight does not exist (a DST jump at 00:00), the day starts at its first real hour
-    let start = |d: NaiveDate| {
-        (0..3)
-            .find_map(|h| Local.from_local_datetime(&d.and_hms_opt(h, 0, 0).expect("an hour")).earliest())
-            .map_or(0, |t| t.timestamp_millis())
-    };
+    let start =
+        |d: NaiveDate| (0..3).find_map(|h| Local.from_local_datetime(&d.and_hms_opt(h, 0, 0).expect("an hour")).earliest()).map_or(0, |t| t.timestamp_millis());
     (start(date), start(date + Duration::days(1)))
 }
 
@@ -100,8 +97,10 @@ pub fn sources(conn: &Connection, folders: &Folders, date: NaiveDate) -> rusqlit
     let mut rows = day_notes(conn, folders, date)?;
     let signature = signature_of(&rows);
     for (n, _) in rows.iter_mut() {
-        let parts: Vec<(String, String)> =
-            conn.prepare("SELECT heading, text FROM chunk WHERE note_path = ?1 ORDER BY ord")?.query_map([&n.note_path], |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<Result<_, _>>()?;
+        let parts: Vec<(String, String)> = conn
+            .prepare("SELECT heading, text FROM chunk WHERE note_path = ?1 ORDER BY ord")?
+            .query_map([&n.note_path], |r| Ok((r.get(0)?, r.get(1)?)))?
+            .collect::<Result<_, _>>()?;
         let mut last = String::new();
         let mut body = String::new();
         for (heading, text) in parts {
@@ -119,7 +118,8 @@ pub fn sources(conn: &Connection, folders: &Folders, date: NaiveDate) -> rusqlit
 
 /// Every past day that has notes: last-change days and daily-note dates, newest first.
 pub fn note_days(conn: &Connection, folders: &Folders, today: NaiveDate) -> rusqlite::Result<Vec<NaiveDate>> {
-    let rows: Vec<(String, i64)> = conn.prepare("SELECT note_path, mtime FROM note_index")?.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<Result<_, _>>()?;
+    let rows: Vec<(String, i64)> =
+        conn.prepare("SELECT note_path, mtime FROM note_index")?.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<Result<_, _>>()?;
     let mut days: Vec<NaiveDate> = Vec::new();
     for (rel, mtime) in rows {
         if excluded(&rel, folders) {
@@ -304,12 +304,16 @@ pub fn find_days(conn: &Connection, question: &str, query: crate::qa::context::M
     }
     if let Some((vector, model)) = query {
         let blob: Vec<u8> = vector.iter().flat_map(|x| x.to_le_bytes()).collect();
-        let days: Vec<i64> =
-            conn.prepare("SELECT day FROM summary_vec WHERE embedding MATCH ?1 AND k = 10 ORDER BY distance")?.query_map([blob], |r| r.get(0))?.collect::<Result<_, _>>()?;
+        let days: Vec<i64> = conn
+            .prepare("SELECT day FROM summary_vec WHERE embedding MATCH ?1 AND k = 10 ORDER BY distance")?
+            .query_map([blob], |r| r.get(0))?
+            .collect::<Result<_, _>>()?;
         for (i, n) in days.into_iter().enumerate() {
             let Some(d) = NaiveDate::from_num_days_from_ce_opt(n as i32) else { continue };
-            let same_model: Option<String> =
-                conn.query_row("SELECT embedded_model FROM daily_summary WHERE date = ?1", [d.format("%Y-%m-%d").to_string()], |r| r.get(0)).optional()?.flatten();
+            let same_model: Option<String> = conn
+                .query_row("SELECT embedded_model FROM daily_summary WHERE date = ?1", [d.format("%Y-%m-%d").to_string()], |r| r.get(0))
+                .optional()?
+                .flatten();
             if same_model.as_deref() == Some(model) {
                 add(d, i + 1);
             }
@@ -321,9 +325,8 @@ pub fn find_days(conn: &Connection, question: &str, query: crate::qa::context::M
 
 /// The notes a stored summary came from.
 pub fn source_paths(conn: &Connection, date: NaiveDate) -> rusqlite::Result<Vec<String>> {
-    let paths: Option<String> = conn
-        .query_row("SELECT source_paths_json FROM daily_summary WHERE date = ?1", [date.format("%Y-%m-%d").to_string()], |r| r.get(0))
-        .optional()?;
+    let paths: Option<String> =
+        conn.query_row("SELECT source_paths_json FROM daily_summary WHERE date = ?1", [date.format("%Y-%m-%d").to_string()], |r| r.get(0)).optional()?;
     Ok(paths.and_then(|p| serde_json::from_str(&p).ok()).unwrap_or_default())
 }
 

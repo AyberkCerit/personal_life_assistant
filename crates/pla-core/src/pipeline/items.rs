@@ -123,12 +123,8 @@ pub fn apply_block_items(
     for raw in &extraction.items {
         match validate(raw, reference, settings) {
             Err(reason) => outcomes.push(review(conn, block_id, raw, &reason.to_string(), &now_s)?),
-            Ok(ValidItem::Action { reminder: true, date: None, .. }) => {
-                outcomes.push(review(conn, block_id, raw, "reminder without a date", &now_s)?)
-            }
-            Ok(ValidItem::Action { date: Some(d), .. }) if skip_past_before.is_some_and(|today| d < today) => {
-                outcomes.push(Outcome::SkippedPast)
-            }
+            Ok(ValidItem::Action { reminder: true, date: None, .. }) => outcomes.push(review(conn, block_id, raw, "reminder without a date", &now_s)?),
+            Ok(ValidItem::Action { date: Some(d), .. }) if skip_past_before.is_some_and(|today| d < today) => outcomes.push(Outcome::SkippedPast),
             Ok(item) => {
                 let signature = item_signature(&item);
                 accepted.push((item, signature));
@@ -189,13 +185,7 @@ pub fn apply_block_items(
     Ok(outcomes)
 }
 
-pub fn record_unreadable_answer(
-    conn: &Connection,
-    block_id: &str,
-    answer: &str,
-    reason: &str,
-    now: DateTime<FixedOffset>,
-) -> rusqlite::Result<Outcome> {
+pub fn record_unreadable_answer(conn: &Connection, block_id: &str, answer: &str, reason: &str, now: DateTime<FixedOffset>) -> rusqlite::Result<Outcome> {
     let payload = serde_json::json!({ "raw_answer": answer }).to_string();
     insert_review(conn, block_id, &payload, reason, &now.to_rfc3339())
 }
@@ -212,9 +202,8 @@ pub fn reject_item(conn: &Connection, item: &ItemRef, now: DateTime<FixedOffset>
         ItemRef::Task(id) => ("task", "task_id", id),
         ItemRef::Metric(id) => ("metric_record", "metric_id", id),
     };
-    let found: Option<(Option<String>, Option<String>)> = conn
-        .query_row(&format!("SELECT block_id, item_signature FROM {table} WHERE {key} = ?1"), [id], |r| Ok((r.get(0)?, r.get(1)?)))
-        .optional()?;
+    let found: Option<(Option<String>, Option<String>)> =
+        conn.query_row(&format!("SELECT block_id, item_signature FROM {table} WHERE {key} = ?1"), [id], |r| Ok((r.get(0)?, r.get(1)?))).optional()?;
     let Some((block_id, signature)) = found else { return Ok(false) };
     if let (Some(block_id), Some(signature)) = (block_id, signature) {
         conn.execute(
@@ -231,9 +220,7 @@ fn new_id() -> String {
 }
 
 fn load_rejections(conn: &Connection, block_id: &str) -> rusqlite::Result<Vec<String>> {
-    conn.prepare("SELECT item_signature FROM rejection WHERE block_id = ?1")?
-        .query_map([block_id], |r| r.get(0))?
-        .collect()
+    conn.prepare("SELECT item_signature FROM rejection WHERE block_id = ?1")?.query_map([block_id], |r| r.get(0))?.collect()
 }
 
 fn review(conn: &Connection, block_id: &str, raw: &RawItem, reason: &str, now: &str) -> rusqlite::Result<Outcome> {
@@ -271,26 +258,15 @@ fn load_existing(conn: &Connection, block_id: &str, now: &str) -> rusqlite::Resu
     const SOURCES: &str = "(block_id = ?1 OR block_id IN (SELECT o.block_id FROM block o JOIN block b ON o.note_path = b.note_path
                            WHERE b.block_id = ?1 AND o.missing = 1 AND o.missing_since = ?2))";
     let mut out: Vec<Existing> = conn
-        .prepare(&format!(
-            "SELECT task_id, COALESCE(item_signature, ''), user_modified, status FROM task WHERE origin = 'extracted' AND {SOURCES}"
-        ))?
+        .prepare(&format!("SELECT task_id, COALESCE(item_signature, ''), user_modified, status FROM task WHERE origin = 'extracted' AND {SOURCES}"))?
         .query_map([block_id, now], |r| {
             let status: String = r.get(3)?;
-            Ok(Existing {
-                item: ItemRef::Task(r.get(0)?),
-                signature: r.get(1)?,
-                user_owned: r.get::<_, bool>(2)? || status != "open",
-                claimed: false,
-            })
+            Ok(Existing { item: ItemRef::Task(r.get(0)?), signature: r.get(1)?, user_owned: r.get::<_, bool>(2)? || status != "open", claimed: false })
         })?
         .collect::<Result<_, _>>()?;
     let metrics: Vec<Existing> = conn
-        .prepare(&format!(
-            "SELECT metric_id, COALESCE(item_signature, ''), user_modified FROM metric_record WHERE origin = 'extracted' AND {SOURCES}"
-        ))?
-        .query_map([block_id, now], |r| {
-            Ok(Existing { item: ItemRef::Metric(r.get(0)?), signature: r.get(1)?, user_owned: r.get(2)?, claimed: false })
-        })?
+        .prepare(&format!("SELECT metric_id, COALESCE(item_signature, ''), user_modified FROM metric_record WHERE origin = 'extracted' AND {SOURCES}"))?
+        .query_map([block_id, now], |r| Ok(Existing { item: ItemRef::Metric(r.get(0)?), signature: r.get(1)?, user_owned: r.get(2)?, claimed: false }))?
         .collect::<Result<_, _>>()?;
     out.extend(metrics);
     Ok(out)
@@ -300,9 +276,7 @@ fn load_existing(conn: &Connection, block_id: &str, now: &str) -> rusqlite::Resu
 fn adopt(conn: &Connection, item: &ItemRef, block_id: &str) -> rusqlite::Result<()> {
     match item {
         ItemRef::Task(id) => conn.execute("UPDATE task SET block_id = ?1, source_missing = 0 WHERE task_id = ?2", [block_id, id])?,
-        ItemRef::Metric(id) => {
-            conn.execute("UPDATE metric_record SET block_id = ?1, source_missing = 0 WHERE metric_id = ?2", [block_id, id])?
-        }
+        ItemRef::Metric(id) => conn.execute("UPDATE metric_record SET block_id = ?1, source_missing = 0 WHERE metric_id = ?2", [block_id, id])?,
     };
     Ok(())
 }
@@ -563,8 +537,8 @@ mod tests {
         let (_t, conn) = setup();
         apply(&conn, r#"{"type":"task","title":"Dişçi"},{"type":"task","title":"Market"}"#);
         apply(&conn, r#"{"type":"task","title":"Markete git"},{"type":"task","title":"Dişçiye git"}"#);
-        let titles: Vec<String> = conn.prepare("SELECT title FROM task ORDER BY title").unwrap()
-            .query_map([], |r| r.get(0)).unwrap().map(Result::unwrap).collect();
+        let titles: Vec<String> =
+            conn.prepare("SELECT title FROM task ORDER BY title").unwrap().query_map([], |r| r.get(0)).unwrap().map(Result::unwrap).collect();
         assert_eq!(titles, vec!["Dişçiye git", "Markete git"]);
     }
 

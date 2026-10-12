@@ -2,23 +2,23 @@
 
 mod commands;
 pub mod fileops_cmds;
-pub mod media_cmds;
-pub mod memory_cmds;
-pub mod summary_cmds;
-pub mod qa_cmds;
 pub mod indexer;
 pub mod links_cmds;
+pub mod media_cmds;
+pub mod memory_cmds;
 pub mod metrics_cmds;
 pub mod model_download;
 pub mod model_paths;
-pub mod wizard;
 mod notify;
-mod tray;
-mod webview_memory;
+pub mod qa_cmds;
 pub mod scheduler;
 pub mod settings_screen;
+pub mod summary_cmds;
 pub mod system;
+mod tray;
 pub mod watcher;
+mod webview_memory;
+pub mod wizard;
 pub mod worker;
 
 pub fn run() {
@@ -177,7 +177,12 @@ mod tests {
     fn the_window_icon_has_small_and_large_frames() {
         let ico = include_bytes!("../icons/icon.ico");
         let count = u16::from_le_bytes([ico[4], ico[5]]) as usize;
-        let sizes: Vec<u32> = (0..count).map(|i| match ico[6 + i * 16] { 0 => 256, w => w as u32 }).collect();
+        let sizes: Vec<u32> = (0..count)
+            .map(|i| match ico[6 + i * 16] {
+                0 => 256,
+                w => w as u32,
+            })
+            .collect();
         for want in [16, 32, 256] {
             assert!(sizes.contains(&want), "missing {want} px frame: {sizes:?}");
         }

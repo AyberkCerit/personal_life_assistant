@@ -3,8 +3,8 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
+use std::sync::Arc;
 use std::thread::JoinHandle;
 use std::time::Duration;
 
@@ -133,7 +133,8 @@ pub fn spawn(root: PathBuf, cache: PathBuf, changed: Box<dyn Fn() + Send>, memor
     let (tx, rx) = mpsc::channel();
     let stop = Arc::new(AtomicBool::new(false));
     let thread_stop = Arc::clone(&stop);
-    let join = std::thread::Builder::new().name("pla-indexer".into()).spawn(move || run(&root, &cache, rx, changed, &thread_stop, memory)).expect("spawn indexer");
+    let join =
+        std::thread::Builder::new().name("pla-indexer".into()).spawn(move || run(&root, &cache, rx, changed, &thread_stop, memory)).expect("spawn indexer");
     IndexerHandle { tx, stop, join: Some(join) }
 }
 

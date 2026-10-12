@@ -72,12 +72,7 @@ pub struct SavedImage {
 #[tauri::command(async)]
 pub fn save_image(app: AppHandle, state: State<'_, AppState>, request: Request<'_>) -> Result<SavedImage, String> {
     let InvokeBody::Raw(bytes) = request.body() else { return Err("not_image||".into()) };
-    let name = request
-        .headers()
-        .get("x-name")
-        .and_then(|v| v.to_str().ok())
-        .map(percent_decode)
-        .filter(|n| !n.trim().is_empty());
+    let name = request.headers().get("x-name").and_then(|v| v.to_str().ok()).map(percent_decode).filter(|n| !n.trim().is_empty());
     let vault = vault_of(&state)?;
     let path = media::save_attachment(&vault, bytes, name.as_deref(), Local::now().fixed_offset()).map_err(media_code)?;
     *IMAGES.lock().expect("images lock") = None; // the new image is found at once
