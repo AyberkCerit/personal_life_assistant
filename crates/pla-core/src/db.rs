@@ -172,10 +172,7 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let dbs = open_databases(tmp.path()).unwrap();
         for table in ["task", "metric_record", "review_item"] {
-            let plan: String = dbs
-                .pla
-                .query_row(&format!("EXPLAIN QUERY PLAN SELECT * FROM {table} WHERE block_id = 'b'"), [], |r| r.get(3))
-                .unwrap();
+            let plan: String = dbs.pla.query_row(&format!("EXPLAIN QUERY PLAN SELECT * FROM {table} WHERE block_id = 'b'"), [], |r| r.get(3)).unwrap();
             assert!(plan.contains("USING INDEX"), "{table}: {plan}");
         }
     }
