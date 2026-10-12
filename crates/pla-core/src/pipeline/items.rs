@@ -183,13 +183,24 @@ pub fn reject_item(conn: &Connection, item: &ItemRef, now: DateTime<FixedOffset>
     let found: Option<(Option<String>, Option<String>)> =
         conn.query_row(&format!("SELECT block_id, item_signature FROM {table} WHERE {key} = ?1"), [id], |r| Ok((r.get(0)?, r.get(1)?))).optional()?;
     let Some((block_id, signature)) = found else { return Ok(false) };
-    if let (Some(block_id), Some(signature)) = (block_id, signature) {
-        conn.execute(
-            "INSERT OR IGNORE INTO rejection (rejection_id, block_id, item_signature, rejected_at) VALUES (?1, ?2, ?3, ?4)",
-            params![new_id(), block_id, signature, now.to_rfc3339()],
-        )?;
+    // One step: a savepoint works alone and inside a caller's transaction (architecture review M9).
+    conn.execute_batch("SAVEPOINT reject_item")?;
+    let done = (|| {
+        if let (Some(block_id), Some(signature)) = (&block_id, &signature) {
+            conn.execute(
+                "INSERT OR IGNORE INTO rejection (rejection_id, block_id, item_signature, rejected_at) VALUES (?1, ?2, ?3, ?4)",
+                params![new_id(), block_id, signature, now.to_rfc3339()],
+            )?;
+        }
+        conn.execute(&format!("DELETE FROM {table} WHERE {key} = ?1"), [id])
+    })();
+    match done {
+        Ok(_) => conn.execute_batch("RELEASE reject_item")?,
+        Err(e) => {
+            conn.execute_batch("ROLLBACK TO reject_item; RELEASE reject_item")?;
+            return Err(e);
+        }
     }
-    conn.execute(&format!("DELETE FROM {table} WHERE {key} = ?1"), [id])?;
     Ok(true)
 }
 
@@ -397,6 +408,22 @@ mod tests {
         let (origin, block, sig): (String, String, String) =
             conn.query_row("SELECT origin, block_id, item_signature FROM task", [], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).unwrap();
         assert_eq!((origin.as_str(), block.as_str(), sig.as_str()), ("extracted", "b1", "action:dişçi"));
+    }
+
+    #[test]
+    fn a_rejection_is_kept_only_with_its_deletion() {
+        // architecture review M9: remembering the rejection and deleting the item are one step
+        let (_t, conn) = setup();
+        apply(&conn, DENTIST);
+        let id: String = conn.query_row("SELECT task_id FROM task", [], |r| r.get(0)).unwrap();
+        conn.execute_batch("CREATE TRIGGER no_delete BEFORE DELETE ON task BEGIN SELECT RAISE(ABORT, 'locked'); END;").unwrap();
+        assert!(reject_item(&conn, &ItemRef::Task(id.clone()), now()).is_err());
+        assert_eq!((count(&conn, "rejection"), count(&conn, "task")), (0, 1), "nothing half done");
+        conn.execute_batch("DROP TRIGGER no_delete;").unwrap();
+        let tx = conn.unchecked_transaction().unwrap(); // inside a caller's transaction too
+        assert!(reject_item(&tx, &ItemRef::Task(id), now()).unwrap());
+        tx.commit().unwrap();
+        assert_eq!((count(&conn, "rejection"), count(&conn, "task")), (1, 0));
     }
 
     #[test]
