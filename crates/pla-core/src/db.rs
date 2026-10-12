@@ -10,6 +10,7 @@ const PLA_MIGRATIONS: &[&str] = &[
     include_str!("../migrations/pla/003_reminders.sql"),
     include_str!("../migrations/pla/004_reminder_seen.sql"),
     include_str!("../migrations/pla/005_qa.sql"),
+    include_str!("../migrations/pla/006_item_block_index.sql"),
 ];
 const CACHE_MIGRATIONS: &[&str] = &[
     include_str!("../migrations/cache/001_init.sql"),
@@ -162,6 +163,21 @@ mod tests {
             [],
         );
         assert!(err.is_err(), "foreign key must be enforced");
+    }
+
+    #[test]
+    fn items_are_found_by_their_block_through_an_index() {
+        // architecture review A10: every block that goes missing updates metric_record by block_id,
+        // and extraction reads review_item by it
+        let tmp = tempfile::tempdir().unwrap();
+        let dbs = open_databases(tmp.path()).unwrap();
+        for table in ["task", "metric_record", "review_item"] {
+            let plan: String = dbs
+                .pla
+                .query_row(&format!("EXPLAIN QUERY PLAN SELECT * FROM {table} WHERE block_id = 'b'"), [], |r| r.get(3))
+                .unwrap();
+            assert!(plan.contains("USING INDEX"), "{table}: {plan}");
+        }
     }
 
     #[test]
