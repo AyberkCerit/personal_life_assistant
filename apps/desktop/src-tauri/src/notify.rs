@@ -155,7 +155,7 @@ pub fn show_info(title: &str, body: &str) {
     #[cfg(windows)]
     {
         if let Err(e) = tauri_winrt_notification::Toast::new(app_id()).title(title).text1(body).show() {
-            eprintln!("PLA: notification failed: {e}");
+            crate::applog::error(&format!("notification failed: {e}"));
         }
     }
 }
@@ -178,7 +178,7 @@ pub fn report_ready(app: &AppHandle, vault: &std::path::Path, week: pla_core::re
             })
             .show();
         if let Err(e) = shown {
-            eprintln!("PLA: notification failed: {e}");
+            crate::applog::error(&format!("notification failed: {e}"));
         }
     }
     #[cfg(not(windows))]
@@ -246,7 +246,7 @@ impl Notifier for AppNotifier {
                 })
                 .show();
             if let Err(e) = shown {
-                eprintln!("PLA: notification failed: {e}");
+                crate::applog::error(&format!("notification failed: {e}"));
             }
         }
     }

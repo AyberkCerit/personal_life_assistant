@@ -42,14 +42,14 @@ fn embed_step(conn: &rusqlite::Connection, job: &MemoryJob, stop: &AtomicBool, l
     if pending > 0 {
         let pause_or_stop = AtomicBool::new(stop.load(Ordering::SeqCst) || job.pause.load(Ordering::SeqCst));
         if let Err(e) = memory::embed_pending(conn, embedder.as_mut(), 8, std::time::Instant::now() + SLICE, &pause_or_stop) {
-            eprintln!("PLA: embedding failed: {e}");
+            crate::applog::error(&format!("embedding failed: {e}"));
         }
     }
     // FR-MEM-008: the days' summaries get vectors once the chunks have theirs
     if memory::pending(conn, &model).unwrap_or(pending) == 0 {
         let pause_or_stop = AtomicBool::new(stop.load(Ordering::SeqCst) || job.pause.load(Ordering::SeqCst));
         if let Err(e) = pla_core::summary::embed_pending(conn, embedder.as_mut(), std::time::Instant::now() + SLICE, &pause_or_stop) {
-            eprintln!("PLA: embedding summaries failed: {e}");
+            crate::applog::error(&format!("embedding summaries failed: {e}"));
         }
     }
     let now = (memory::pending(conn, &model).unwrap_or(pending), total);
@@ -141,7 +141,7 @@ pub fn spawn(root: PathBuf, cache: PathBuf, changed: Box<dyn Fn() + Send>, memor
 fn run(root: &Path, cache: &Path, rx: Receiver<IndexCommand>, changed: Box<dyn Fn() + Send>, stop: &AtomicBool, memory: Option<MemoryJob>) {
     let Ok(conn) = connect(cache) else { return };
     if let Err(e) = index::sync_vault_until(&conn, root, stop) {
-        eprintln!("PLA: index sync failed: {e}");
+        crate::applog::error(&format!("index sync failed: {e}"));
     }
     changed();
     let mut last = None;
@@ -176,7 +176,7 @@ fn run(root: &Path, cache: &Path, rx: Receiver<IndexCommand>, changed: Box<dyn F
             match result {
                 Ok(true) => any = true,
                 Ok(false) => {}
-                Err(e) => eprintln!("PLA: indexing failed: {e}"),
+                Err(e) => crate::applog::error(&format!("indexing failed: {e}")),
             }
         }
         if any {

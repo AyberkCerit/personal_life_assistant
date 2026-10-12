@@ -1,5 +1,6 @@
 //! PLA desktop app: Tauri shell around pla-core.
 
+pub mod applog;
 mod commands;
 pub mod fileops_cmds;
 pub mod indexer;
