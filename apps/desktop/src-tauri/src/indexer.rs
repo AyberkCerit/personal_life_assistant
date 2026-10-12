@@ -109,12 +109,17 @@ pub fn index_events(root: &Path, paths: &[PathBuf]) -> (Vec<String>, bool) {
             if !notes.contains(&rel) {
                 notes.push(rel);
             }
-        } else if path.is_dir() || (!path.exists() && !looks_like_a_file(path)) {
-            // a folder appeared or vanished (its name may have a dot: `2026.10`)
+        } else if is_folder_event(path) {
             rescan = true;
         }
     }
     (notes, rescan)
+}
+
+/// A folder appeared or vanished (its name may have a dot: `2026.10`). The watcher and the index
+/// read events the same way (architecture review M3).
+pub fn is_folder_event(path: &Path) -> bool {
+    path.is_dir() || (!path.exists() && !looks_like_a_file(path))
 }
 
 /// A vanished path that was most likely a file (`resim.png`), not a folder (`2026.10`, `v1.2`).
