@@ -190,7 +190,7 @@ export const api = {
   metricsOverview: () => call<MetricCard[]>("metrics_overview"),
   metricsSummary: (kind: MetricKind, days: number) => call<Summary>("metrics_summary", { kind, days }),
   metricRecords: (kind: MetricKind, days: number) => call<MetricRecord[]>("metric_records", { kind, days }),
-  /** Errors are codes, e.g. `out_of_range|450` (see `metricError`). */
+  /** Errors are codes, e.g. `out_of_range|value|450` (see `metricError`). */
   metricLog: (input: MetricInput) => call<string>("metric_log", { input }),
   metricEdit: (id: string, input: MetricInput) => call<void>("metric_edit", { id, input }),
   metricDelete: (id: string) => call<void>("metric_delete", { id }),
