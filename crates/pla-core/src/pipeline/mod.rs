@@ -79,9 +79,11 @@ pub fn enqueue_all(vault: &Vault, conn: &Connection, now: DateTime<FixedOffset>)
         .query_map([], |r| r.get(0))?
         .collect::<Result<_, _>>()?;
     // A note PLA wrote itself (FR-EXT-001) that never had blocks has nothing to extract: leaving it
-    // out keeps "waiting for the model" honest. One that had blocks is still queued so they go away.
+    // out keeps "waiting for the model" honest. One that had blocks is still queued, so its items
+    // are marked as having lost their source.
     notes.retain(|n| known.contains(n) || !std::fs::read_to_string(vault.root.join(n)).is_ok_and(|t| is_generated(&t)));
-    notes.extend(known.into_iter().filter(|n| !vault.root.join(n).exists()));
+    // gone from disk, or no longer the user's (moved into templates/, renamed to a conflict copy)
+    notes.extend(known.into_iter().filter(|n| !vault.root.join(n).exists() || is_excluded(n, &vault.config.folders)));
     for note in &notes {
         enqueue(conn, note, now)?;
     }
@@ -99,6 +101,15 @@ pub fn queued_notes(conn: &Connection) -> rusqlite::Result<Vec<String>> {
 /// SQLITE_BUSY_SNAPSHOT; an immediate one waits for `busy_timeout` instead.
 pub fn write_tx(conn: &mut Connection) -> rusqlite::Result<rusqlite::Transaction<'_>> {
     conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+}
+
+/// FR-VLT-019: the note's blocks are missing, their items kept and marked; a note that comes back
+/// within a day takes them again.
+fn mark_note_gone(conn: &mut Connection, note: &str, now: DateTime<FixedOffset>) -> Result<(), PipelineError> {
+    let tx = write_tx(conn)?;
+    blocks::mark_note_missing(&tx, note, now)?;
+    tx.commit()?;
+    Ok(())
 }
 
 /// Processes queued notes in one model session (FR-EXT-008). Only changed blocks reach the model.
@@ -131,7 +142,10 @@ pub fn process_queue_with(
             conn.query_row("SELECT generation FROM extraction_queue WHERE note_path = ?1", [&note], |r| r.get(0))?;
         let path = vault.root.join(&note);
         let mut written = None;
+        // Gone, excluded (moved into templates/, a conflict copy) or written by PLA: the note no
+        // longer says its items, so they lose their source (architecture review M6).
         let text = if is_excluded(&note, &vault.config.folders) {
+            mark_note_gone(conn, &note, now)?;
             None
         } else {
             match std::fs::metadata(&path).and_then(|meta| {
@@ -139,11 +153,12 @@ pub fn process_queue_with(
                 std::fs::read_to_string(&path)
             }) {
                 Ok(text) if !is_generated(&text) => Some(text),
-                Ok(_) => None,
+                Ok(_) => {
+                    mark_note_gone(conn, &note, now)?;
+                    None
+                }
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                    let tx = write_tx(conn)?;
-                    blocks::mark_note_missing(&tx, &note, now)?;
-                    tx.commit()?;
+                    mark_note_gone(conn, &note, now)?;
                     None
                 }
                 Err(e) if e.kind() == std::io::ErrorKind::InvalidData => None, // FR-VLT-016: not UTF-8, left alone
@@ -442,6 +457,47 @@ mod tests {
         assert!(tasks(&conn).is_empty());
         assert!(queued_notes(&conn).unwrap().is_empty());
         assert_eq!(report.model_error, None);
+    }
+
+    #[test]
+    fn a_note_that_stops_being_the_users_loses_its_source() {
+        // architecture review M6: moved into templates/ or marked pla_generated, the note no longer
+        // says its items; they stay, marked like a deleted note's, and come back with the note
+        let tmp = tempfile::tempdir().unwrap();
+        let vault = open_vault(tmp.path()).unwrap();
+        let mut conn = open_databases(&tmp.path().join(".data")).unwrap().pla;
+        write(&vault, "notes/a.md", DENTIST.as_bytes());
+        let mut x = Scripted::new(&[(DENTIST, DENTIST_JSON)]);
+        run(&vault, &mut conn, &mut x, T1);
+        assert_eq!(tasks(&conn)[0].2, 0);
+
+        crate::fileops::move_note(&vault, &conn, "notes/a.md", "templates/a.md").unwrap();
+        enqueue(&conn, "templates/a.md", at(T1)).unwrap();
+        process_queue(&vault, &mut conn, &mut x, &PipelineSettings::default(), at(T1)).unwrap();
+        assert_eq!(tasks(&conn)[0].2, 1, "moved into templates/");
+
+        crate::fileops::move_note(&vault, &conn, "templates/a.md", "notes/a.md").unwrap();
+        enqueue(&conn, "notes/a.md", at(T1)).unwrap();
+        process_queue(&vault, &mut conn, &mut x, &PipelineSettings::default(), at(T1)).unwrap();
+        assert_eq!(tasks(&conn), vec![("Dişçi".to_owned(), Some("2026-10-07".to_owned()), 0)], "back again, the same task");
+
+        write(&vault, "notes/a.md", format!("---\npla_generated: true\n---\n{DENTIST}").as_bytes());
+        enqueue(&conn, "notes/a.md", at(T1)).unwrap();
+        process_queue(&vault, &mut conn, &mut x, &PipelineSettings::default(), at(T1)).unwrap();
+        assert_eq!(tasks(&conn)[0].2, 1, "marked pla_generated");
+    }
+
+    #[test]
+    fn a_known_note_moved_out_of_the_users_notes_is_queued_again() {
+        // architecture review M6: the catch-up finds it too, not only a deleted one
+        let tmp = tempfile::tempdir().unwrap();
+        let vault = open_vault(tmp.path()).unwrap();
+        let mut conn = open_databases(&tmp.path().join(".data")).unwrap().pla;
+        write(&vault, "notes/a.md", DENTIST.as_bytes());
+        run(&vault, &mut conn, &mut Scripted::new(&[(DENTIST, DENTIST_JSON)]), T1);
+        crate::fileops::move_note(&vault, &conn, "notes/a.md", "templates/a.md").unwrap();
+        enqueue_all(&vault, &conn, at(T1)).unwrap();
+        assert_eq!(queued_notes(&conn).unwrap(), vec!["templates/a.md".to_owned()]);
     }
 
     #[test]

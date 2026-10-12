@@ -87,6 +87,11 @@ fn move_note_with_links(state: &State<AppState>, session: &Session, from: &str, 
         }
     }
     fileops::move_note(&session.vault, &session.db.lock().expect("db lock"), from, to).map_err(code)?;
+    if pla_core::notes::is_excluded(to, &session.vault.config.folders) {
+        // into templates/ or reports/: its items lose their source (architecture review M6); the
+        // watcher stays quiet about PLA's own move, so the worker is told here
+        session.worker.send(crate::worker::Command::Enqueue(to.to_owned()));
+    }
     relink(state, &session.vault, &sources, from, to, by_name);
     if case_only {
         // the old name still opens the file, so a touch would keep it in the index: walk the disk
@@ -152,6 +157,9 @@ fn move_folder_quietly(state: &State<AppState>, session: &Session, from: &str, t
     }
     fileops::move_folder(&session.vault, &session.db.lock().expect("db lock"), from, to).map_err(code)?;
     session.indexer.send(IndexCommand::Rescan);
+    if pla_core::notes::is_excluded(&format!("{to}/x.md"), &session.vault.config.folders) {
+        session.worker.send(crate::worker::Command::Rescan); // as for a note moved there
+    }
     Ok(())
 }
 
