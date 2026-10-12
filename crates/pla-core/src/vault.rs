@@ -350,6 +350,14 @@ fn is_valid_folder(dir: &str) -> bool {
     first_visible && parts.all(|c| matches!(c, Component::Normal(_)))
 }
 
+/// Whether the vault path `rel` is `folder` or lies under it, compared as Windows does: letter
+/// case ignored, `/` or `\` separators (architecture review M1: `Templates/` is `templates`).
+pub fn is_under(rel: &str, folder: &str) -> bool {
+    let key = |s: &str| s.replace('\\', "/").trim_matches('/').to_lowercase();
+    let (rel, folder) = (key(rel), key(folder));
+    !folder.is_empty() && (rel == folder || rel.strip_prefix(&folder).is_some_and(|rest| rest.starts_with('/')))
+}
+
 fn is_network_path(path: &Path) -> bool {
     use std::path::Prefix;
     match path.components().next() {

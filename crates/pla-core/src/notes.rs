@@ -5,7 +5,7 @@ use std::path::Path;
 
 use chrono::NaiveDate;
 
-use crate::vault::{Folders, Vault};
+use crate::vault::{is_under, Folders, Vault};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Block {
@@ -111,8 +111,8 @@ pub fn is_generated(text: &str) -> bool {
 pub fn is_excluded(rel: &str, folders: &Folders) -> bool {
     let path = Path::new(rel);
     path.components().any(|c| c.as_os_str().to_string_lossy().starts_with('.'))
-        || path.starts_with(&folders.reports)
-        || path.starts_with(&folders.templates)
+        || is_under(rel, &folders.reports)
+        || is_under(rel, &folders.templates)
         || path.file_stem().is_some_and(|s| {
             let s = s.to_string_lossy();
             s.contains(crate::files::CONFLICT_SUFFIX) || s.contains(crate::files::OLD_CONFLICT_SUFFIX)
@@ -121,10 +121,10 @@ pub fn is_excluded(rel: &str, folders: &Folders) -> bool {
 
 /// `<daily>/…/YYYY-MM-DD.md` → that date (the reference date of a daily note, FR-EXT-009).
 pub fn daily_note_date(rel: &str, folders: &Folders) -> Option<NaiveDate> {
-    let path = Path::new(rel);
-    if !path.starts_with(&folders.daily) {
+    if !is_under(rel, &folders.daily) {
         return None;
     }
+    let path = Path::new(rel);
     NaiveDate::parse_from_str(path.file_stem()?.to_str()?, "%Y-%m-%d").ok()
 }
 
@@ -236,6 +236,17 @@ mod tests {
         assert_eq!(daily_note_date("daily/2026-10-06.md", &f), NaiveDate::from_ymd_opt(2026, 10, 6));
         assert_eq!(daily_note_date("notes/2026-10-06.md", &f), None);
         assert_eq!(daily_note_date("daily/2026/plan.md", &f), None);
+    }
+
+    #[test]
+    fn system_folders_match_whatever_their_letter_case() {
+        // architecture review M1: an Obsidian vault's `Templates/` is the configured `templates`,
+        // as Windows sees it
+        let f = Folders::default();
+        assert!(is_excluded("Templates/Günlük.md", &f));
+        assert!(is_excluded("REPORTS/weekly/2026-W40.md", &f));
+        assert!(!is_excluded("templatesx/a.md", &f));
+        assert_eq!(daily_note_date("Daily/2026/2026-10-06.md", &f), NaiveDate::from_ymd_opt(2026, 10, 6));
     }
 
     #[test]

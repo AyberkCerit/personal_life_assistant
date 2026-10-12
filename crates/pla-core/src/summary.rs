@@ -33,7 +33,7 @@ pub struct DaySources {
 }
 
 fn excluded(rel: &str, folders: &Folders) -> bool {
-    [&folders.reports, &folders.templates].iter().any(|f| rel.starts_with(&format!("{}/", f.trim_matches('/'))))
+    [&folders.reports, &folders.templates].iter().any(|f| crate::vault::is_under(rel, f))
 }
 
 /// The local day a modification time falls on.
@@ -381,6 +381,19 @@ mod tests {
         let before = day.signature.clone();
         index_note(&conn, "notes/Plan.md", "# Plan\n\nYeni karar.", noon(d("2026-10-06")), 1).unwrap();
         assert_ne!(sources(&conn, &f, d("2026-10-06")).unwrap().signature, before, "a change makes it stale");
+    }
+
+    #[test]
+    fn templates_and_reports_stay_out_whatever_their_letter_case() {
+        // architecture review M1: an Obsidian vault's `Templates/` is the configured `templates`
+        let (_t, conn) = cache();
+        let f = Folders::default();
+        index_note(&conn, "notes/Plan.md", "# Plan\n\nKarar.", noon(d("2026-10-06")), 1).unwrap();
+        index_note(&conn, "Templates/Günlük.md", "# {{date}}", noon(d("2026-10-06")), 1).unwrap();
+        index_note(&conn, "Reports/weekly/w41.md", "# Rapor", noon(d("2026-10-06")), 1).unwrap();
+        let day = sources(&conn, &f, d("2026-10-06")).unwrap();
+        let paths: Vec<&str> = day.notes.iter().map(|n| n.note_path.as_str()).collect();
+        assert_eq!(paths, ["notes/Plan.md"]);
     }
 
     #[test]

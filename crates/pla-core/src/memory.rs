@@ -323,7 +323,6 @@ pub fn hybrid(conn: &Connection, question: &str, query: Option<(&[f32], &str)>, 
             add(id, rank + 1);
         }
     }
-    let reports = format!("{}/", reports.trim_matches('/'));
     let mut hits: Vec<ChunkHit> = Vec::new();
     for (id, score) in scores {
         let hit = conn
@@ -335,7 +334,7 @@ pub fn hybrid(conn: &Connection, question: &str, query: Option<(&[f32], &str)>, 
             )
             .optional()?;
         if let Some(mut h) = hit {
-            if h.note_path.starts_with(&reports) {
+            if crate::vault::is_under(&h.note_path, reports) {
                 h.score /= 2.0;
             }
             hits.push(h);
@@ -440,6 +439,16 @@ mod tests {
         // vectors of another model are not compared (FR-MEM-013)
         assert!(hybrid(&conn, "xyz", Some((&q, "other-model")), "reports", 3).unwrap().is_empty());
         assert_eq!(pending(&conn, "other-model").unwrap(), total(&conn).unwrap(), "a new model embeds everything again");
+    }
+
+    #[test]
+    fn reports_count_half_whatever_their_letter_case() {
+        // architecture review M1: `Reports/` is the configured `reports` folder on Windows
+        let (_t, conn) = cache();
+        crate::index::index_note(&conn, "Reports/weekly/Fatura.md", "# Fatura\n\nFatura fatura ödendi.", 1, 1).unwrap();
+        crate::index::index_note(&conn, "notes/para.md", "# Para\n\nKira ve fatura ödemesi.", 1, 1).unwrap();
+        let hits = hybrid(&conn, "fatura", None, "reports", 3).unwrap();
+        assert_eq!(hits[0].note_path, "notes/para.md", "{hits:?}");
     }
 
     #[test]
