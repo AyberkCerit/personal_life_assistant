@@ -25,6 +25,8 @@ const ASK_REPORT_AGAIN_MINUTES: i64 = 30;
 /// A reminder older than this when it is first seen was missed (PLA closed, the PC asleep, a past
 /// time, a catch-up extraction): it joins one list instead of popping up (decision 2, FR-TSK-016).
 const LATE_AFTER_MINUTES: i64 = 5;
+/// A block missing this long, with nothing pointing at it, is deleted (owner decision 2026-10-13).
+const PRUNE_MISSING_AFTER_DAYS: i64 = 60;
 
 pub trait Notifier: Send {
     fn reminder(&self, reminder: &DueReminder);
@@ -176,6 +178,10 @@ impl Scheduler {
         match backup(&self.conn, &self.vault_root, now.date_naive()) {
             Ok(_) => {
                 let _ = record_success(&self.conn, DAILY, now);
+                // after the backup, so the night's copy still has what goes (owner decision 2026-10-13)
+                if let Err(e) = pla_core::pipeline::blocks::prune_missing(&self.conn, now, PRUNE_MISSING_AFTER_DAYS) {
+                    crate::applog::error(&format!("pruning missing blocks failed: {e}"));
+                }
             }
             Err(e) => {
                 let attempts = record_failure(&self.conn, DAILY, now, &e.to_string()).unwrap_or(MAX_ATTEMPTS_PER_DAY);
@@ -596,6 +602,27 @@ mod tests {
         std::fs::remove_file(&backup).unwrap();
         r.at("2026-10-06T22:01:30+03:00");
         assert!(!backup.exists(), "once a day");
+    }
+
+    #[test]
+    fn maintenance_prunes_long_missing_blocks_after_the_backup() {
+        // architecture review A10, owner decision 2026-10-13: 60 days, and the night's backup still has them
+        let mut r = rig("2026-12-10T22:00:00+03:00");
+        r.sched
+            .conn
+            .execute(
+                "INSERT INTO block (block_id, note_path, position, text, text_hash, first_seen_at, last_seen_at, missing, missing_since)
+                 VALUES ('old', 'notes/x.md', 0, 'eski', 'h', 't', 't', 1, '2026-10-01T10:00:00+03:00')",
+                [],
+            )
+            .unwrap();
+        *r.probe.lock().unwrap() = (600, true);
+        r.at("2026-12-10T22:00:00+03:00");
+        let left: i64 = r.sched.conn.query_row("SELECT count(*) FROM block", [], |x| x.get(0)).unwrap();
+        assert_eq!(left, 0);
+        let backup = rusqlite::Connection::open(r.vault.join(".pla/backup/pla-2026-12-10.db")).unwrap();
+        let kept: i64 = backup.query_row("SELECT count(*) FROM block", [], |x| x.get(0)).unwrap();
+        assert_eq!(kept, 1, "the backup is taken first");
     }
 
     #[test]

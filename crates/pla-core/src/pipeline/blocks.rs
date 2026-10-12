@@ -187,6 +187,32 @@ fn mark_missing(conn: &Connection, block_id: &str, now: &str) -> rusqlite::Resul
     set_source_missing(conn, block_id, true)
 }
 
+/// Daily maintenance (architecture review A10, owner decision 2026-10-13): a block missing for more
+/// than `days` days that no task, measurement, rejection or review item points at is deleted. It can
+/// no longer come back (that takes a day), and its text would otherwise stay in pla.db for ever.
+/// Returns how many went.
+pub fn prune_missing(conn: &Connection, now: DateTime<FixedOffset>, days: i64) -> rusqlite::Result<usize> {
+    let before = now - TimeDelta::days(days);
+    let candidates: Vec<(String, Option<String>)> = conn
+        .prepare(
+            "SELECT b.block_id, b.missing_since FROM block b WHERE b.missing = 1
+               AND NOT EXISTS (SELECT 1 FROM task t WHERE t.block_id = b.block_id)
+               AND NOT EXISTS (SELECT 1 FROM metric_record m WHERE m.block_id = b.block_id)
+               AND NOT EXISTS (SELECT 1 FROM rejection r WHERE r.block_id = b.block_id)
+               AND NOT EXISTS (SELECT 1 FROM review_item v WHERE v.block_id = b.block_id)",
+        )?
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
+        .collect::<rusqlite::Result<_>>()?;
+    let mut pruned = 0;
+    for (id, since) in candidates {
+        // compared as times, not text: the stamps may carry different offsets
+        if since.as_deref().and_then(|t| DateTime::parse_from_rfc3339(t).ok()).is_some_and(|t| t < before) {
+            pruned += conn.execute("DELETE FROM block WHERE block_id = ?1", [id])?;
+        }
+    }
+    Ok(pruned)
+}
+
 fn set_source_missing(conn: &Connection, block_id: &str, missing: bool) -> rusqlite::Result<()> {
     conn.execute("UPDATE task SET source_missing = ?1 WHERE block_id = ?2", params![missing, block_id])?;
     conn.execute("UPDATE metric_record SET source_missing = ?1 WHERE block_id = ?2", params![missing, block_id])?;
@@ -246,6 +272,31 @@ mod tests {
             [id, block_id],
         )
         .unwrap();
+    }
+
+    #[test]
+    fn long_missing_blocks_nothing_points_at_are_pruned() {
+        // architecture review A10, owner decision 2026-10-13: 60 days
+        let tmp = tempfile::tempdir().unwrap();
+        let dbs = open_databases(tmp.path()).unwrap();
+        let blocks = sync(&dbs.pla, "notes/x.md", "Bir.\n\nİki.\n\nÜç.\n\nDört.", None, T1);
+        let ids: Vec<String> = blocks.iter().map(|b| b.block_id.clone()).collect();
+        insert_task(&dbs.pla, "t", &ids[1]);
+        dbs.pla.execute("INSERT INTO rejection (rejection_id, block_id, item_signature, rejected_at) VALUES ('r', ?1, 'action:x', 'now')", [&ids[2]]).unwrap();
+        dbs.pla
+            .execute("INSERT INTO review_item (review_id, block_id, payload_json, reason, created_at) VALUES ('v', ?1, '{}', 'x', 'now')", [&ids[3]])
+            .unwrap();
+        mark_note_missing(&dbs.pla, "notes/x.md", at(T1)).unwrap(); // gone on 2026-10-06
+        let alive = sync(&dbs.pla, "notes/y.md", "Beş.", None, T1);
+        mark_note_missing(&dbs.pla, "notes/y.md", at("2026-11-01T10:00:00+03:00")).unwrap(); // gone later
+
+        assert_eq!(prune_missing(&dbs.pla, at("2026-12-04T10:00:00+03:00"), 60).unwrap(), 0, "59 days: kept");
+        assert_eq!(prune_missing(&dbs.pla, at("2026-12-06T10:00:00+03:00"), 60).unwrap(), 1, "only the unreferenced old one");
+        let left: Vec<String> = dbs.pla.prepare("SELECT block_id FROM block").unwrap().query_map([], |r| r.get(0)).unwrap().map(Result::unwrap).collect();
+        assert!(!left.contains(&ids[0]), "unreferenced, 61 days missing");
+        for kept in [&ids[1], &ids[2], &ids[3], &alive[0].block_id] {
+            assert!(left.contains(kept), "a task, a rejection, a review item or a later date keeps {kept}");
+        }
     }
 
     #[test]
