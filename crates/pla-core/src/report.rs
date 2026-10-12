@@ -363,7 +363,7 @@ pub fn render(week: Week, lang: &str, highlights: Result<&str, NoHighlights>, st
         let months = if en { MONTHS_EN } else { MONTHS_TR };
         for (date, time, title) in &stats.next_week {
             let when = NaiveDate::parse_from_str(date, "%Y-%m-%d")
-                .map(|d| format!("{} {} {}", d.day(), &months[d.month0() as usize], days[d.weekday().num_days_from_monday() as usize]))
+                .map(|d| format!("{} {} {}", d.day(), months[d.month0() as usize], days[d.weekday().num_days_from_monday() as usize]))
                 .unwrap_or_else(|_| date.clone());
             let at = time.as_deref().map(|t| format!(" {t}")).unwrap_or_default();
             s.push_str(&format!("- {when}{at} · {title}\n"));

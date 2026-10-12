@@ -243,7 +243,7 @@ pub fn default_app_root() -> Option<PathBuf> {
 /// PLA's own folders: `%APPDATA%\PLA` (settings, databases) and `%LOCALAPPDATA%\PLA` (models). The
 /// uninstaller may delete both (NFR-SEC-010), so neither may hold the vault.
 pub fn app_data_roots() -> Vec<PathBuf> {
-    ["APPDATA", "LOCALAPPDATA"].iter().filter_map(|k| std::env::var_os(k)).map(|p| PathBuf::from(p).join("PLA")).collect()
+    ["APPDATA", "LOCALAPPDATA"].iter().filter_map(std::env::var_os).map(|p| PathBuf::from(p).join("PLA")).collect()
 }
 
 /// Whether `path` is one of `roots` or inside one, compared as Windows does (case-insensitively),
@@ -545,7 +545,7 @@ notes = \"Notlar/Arşiv\"
         let link = tmp.path().join("kisayol");
         let ok = std::process::Command::new("cmd").args(["/C", "mklink", "/J"]).arg(&link).arg(&root).output().unwrap().status.success();
         assert!(ok, "mklink /J");
-        assert!(inside_app_data(&link.join("Notlar"), &[root.clone()]));
+        assert!(inside_app_data(&link.join("Notlar"), std::slice::from_ref(&root)));
         assert!(inside_app_data(&link.join("Yeni klasör"), &[root]), "a folder still to be made");
     }
 

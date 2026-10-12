@@ -25,7 +25,7 @@ pub fn available_ram_mb() -> Option<u64> {
     unsafe {
         let mut status: MEMORYSTATUSEX = std::mem::zeroed();
         status.dwLength = std::mem::size_of::<MEMORYSTATUSEX>() as u32;
-        (GlobalMemoryStatusEx(&mut status) != 0).then(|| status.ullAvailPhys / (1024 * 1024))
+        (GlobalMemoryStatusEx(&mut status) != 0).then_some(status.ullAvailPhys / (1024 * 1024))
     }
 }
 

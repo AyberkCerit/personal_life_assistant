@@ -858,7 +858,7 @@ mod tests {
         let last = model.bodies[1]["messages"].as_array().unwrap().last().unwrap()["content"].as_str().unwrap().to_owned();
         assert!(last.ends_with("Write it in Turkish."), "{last}");
         let offer = ToolRecord { tool: "suggest_note".into(), args: json!({}), ok: true, result: json!({}), error: None, undo: None };
-        assert!(write_instruction("tr", &[offer.clone()]).contains("press the \"Kaydet\" button"));
+        assert!(write_instruction("tr", std::slice::from_ref(&offer)).contains("press the \"Kaydet\" button"));
         assert!(write_instruction("en", &[offer]).contains("press the \"Save\" button"));
         assert!(!write_instruction("tr", &[]).contains("Save"));
     }
