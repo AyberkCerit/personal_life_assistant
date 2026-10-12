@@ -57,7 +57,8 @@ fn flush(current: &mut Vec<&str>, blocks: &mut Vec<Block>) {
     current.clear();
 }
 
-fn is_heading(trimmed: &str) -> bool {
+/// A Markdown heading: one to six `#` and a space (`#etiket` is a tag, not a heading).
+pub(crate) fn is_heading(trimmed: &str) -> bool {
     let hashes = trimmed.chars().take_while(|c| *c == '#').count();
     (1..=6).contains(&hashes) && trimmed[hashes..].starts_with(' ')
 }

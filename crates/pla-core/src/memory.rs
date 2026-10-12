@@ -115,7 +115,7 @@ pub fn chunk(body: &str) -> Vec<Chunk> {
     let mut under = String::new();
     for block in body.split("\n\n").map(str::trim).filter(|b| !b.is_empty()) {
         let mut text = block.to_owned();
-        if let Some(first) = block.lines().next().filter(|l| l.starts_with('#')) {
+        if let Some(first) = block.lines().next().filter(|l| crate::notes::is_heading(l)) {
             // a heading starts a new chunk once the current one is big enough
             if acc.size >= MIN_TOKENS {
                 acc.flush();
@@ -439,6 +439,16 @@ mod tests {
         // vectors of another model are not compared (FR-MEM-013)
         assert!(hybrid(&conn, "xyz", Some((&q, "other-model")), "reports", 3).unwrap().is_empty());
         assert_eq!(pending(&conn, "other-model").unwrap(), total(&conn).unwrap(), "a new model embeds everything again");
+    }
+
+    #[test]
+    fn a_line_of_tags_is_text_not_a_heading() {
+        // architecture review M7: the same heading rule as the blocks (`# ` with a space)
+        let chunks = chunk("#proje #fikir\nBugün toplantı yapıldı.");
+        assert_eq!(chunks.len(), 1);
+        assert_eq!(chunks[0].heading, "");
+        assert_eq!(chunks[0].text, "#proje #fikir\nBugün toplantı yapıldı.");
+        assert_eq!(chunk("## Plan\nMetin")[0].heading, "Plan");
     }
 
     #[test]
