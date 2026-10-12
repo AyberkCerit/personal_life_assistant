@@ -8,6 +8,7 @@ pub mod links_cmds;
 pub mod media_cmds;
 pub mod memory_cmds;
 pub mod metrics_cmds;
+pub mod model_cmds;
 pub mod model_download;
 pub mod model_paths;
 mod notify;
@@ -16,6 +17,7 @@ pub mod scheduler;
 pub mod settings_screen;
 pub mod summary_cmds;
 pub mod system;
+pub mod task_cmds;
 mod tray;
 pub mod watcher;
 mod webview_memory;
@@ -54,26 +56,26 @@ pub fn run() {
             commands::queue_note,
             commands::vault_info,
             commands::worker_status,
-            commands::list_tasks,
-            commands::add_task,
-            commands::edit_task,
-            commands::set_task_done,
-            commands::delete_task,
-            commands::undo_item,
-            commands::list_review,
-            commands::accept_review,
-            commands::reject_review,
-            commands::reminder_done,
-            commands::reminder_snooze,
+            task_cmds::list_tasks,
+            task_cmds::add_task,
+            task_cmds::edit_task,
+            task_cmds::set_task_done,
+            task_cmds::delete_task,
+            task_cmds::undo_item,
+            task_cmds::list_review,
+            task_cmds::accept_review,
+            task_cmds::reject_review,
+            task_cmds::reminder_done,
+            task_cmds::reminder_snooze,
             commands::backup_now,
             commands::set_paused,
-            commands::pending_reminders,
-            commands::dismiss_missed,
-            commands::model_status,
-            commands::model_download_start,
-            commands::model_download_pause,
-            commands::model_use_local,
-            commands::model_remove,
+            task_cmds::pending_reminders,
+            task_cmds::dismiss_missed,
+            model_cmds::model_status,
+            model_cmds::model_download_start,
+            model_cmds::model_download_pause,
+            model_cmds::model_use_local,
+            model_cmds::model_remove,
             commands::wizard_defaults,
             commands::inspect_vault_folder,
             commands::setup_vault,

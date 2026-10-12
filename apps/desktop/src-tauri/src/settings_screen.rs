@@ -226,7 +226,7 @@ pub struct About {
 pub fn about_info(app: AppHandle) -> Result<About, String> {
     let settings = pla_core::settings::load_settings(&app_root()?).map_err(|e| e.to_string())?.settings;
     let entry = settings.model_id.as_deref().and_then(pla_core::models::catalog::by_id);
-    let model = settings.model_path.as_deref().and_then(|p| crate::commands::describe_model(p, settings.model_id.as_deref())).map(|m| m.name);
+    let model = settings.model_path.as_deref().and_then(|p| crate::model_cmds::describe_model(p, settings.model_id.as_deref())).map(|m| m.name);
     Ok(About { version: app.package_info().version.to_string(), model_licence: model.as_ref().and(entry.map(|e| e.licence)), model, components: COMPONENTS })
 }
 

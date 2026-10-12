@@ -1,4 +1,6 @@
-//! Tauri commands: thin wrappers; all rules live in pla-core and the worker.
+//! The open vault's session (its threads and connections, `start_session`) and the commands for the
+//! vault, the first-run wizard, settings and notes. Tasks are in `task_cmds`, the model in
+//! `model_cmds`; the rules themselves live in pla-core and the worker.
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -10,13 +12,8 @@ use pla_core::db::connect;
 use pla_core::db::open_databases;
 use pla_core::files::{self, FileError, NoteFile, TreeEntry};
 use pla_core::llm::ModelHost;
-use pla_core::models::{self, catalog, download as dl, local};
-use pla_core::pipeline::items::{reject_item, ItemRef};
-use pla_core::pipeline::write_tx;
 use pla_core::pipeline::Extractor;
-use pla_core::reminders;
 use pla_core::settings::{load_settings, save_settings, AppSettings, Theme};
-use pla_core::tasks::{self, ReviewView, TaskInput, TaskList, TaskView};
 use pla_core::vault::{default_app_root, open_vault as open_vault_dir, resolve_data_dir, Vault};
 use rusqlite::Connection;
 
@@ -25,7 +22,7 @@ use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::notify::{show_info, strings, AppNotifier};
-use crate::scheduler::{Pending, PendingLists, SchedCommand, Scheduler, SchedulerHandle};
+use crate::scheduler::{Pending, SchedCommand, Scheduler, SchedulerHandle};
 use crate::system::WindowsProbe;
 use crate::watcher::{watch, SelfWrites, WatchHandle};
 use crate::worker::{Command, Worker, WorkerHandle};
@@ -70,7 +67,7 @@ pub struct AppState {
 }
 
 /// Load, change and save settings.json under `lock`.
-fn update_settings(root: &Path, lock: &Mutex<()>, change: impl FnOnce(&mut AppSettings)) -> Result<AppSettings, String> {
+pub(crate) fn update_settings(root: &Path, lock: &Mutex<()>, change: impl FnOnce(&mut AppSettings)) -> Result<AppSettings, String> {
     let _guard = lock.lock().expect("settings lock");
     let mut settings = load_settings(root).map_err(|e| e.to_string())?.settings;
     change(&mut settings);
@@ -567,30 +564,6 @@ pub fn queue_note(state: State<AppState>, path: String) -> Result<(), String> {
 /// Every command's "no vault is open" error, in the `<code>|<detail>|<reason>` form the UI reads.
 pub const NO_VAULT: &str = "no_vault||";
 
-/// A task error as a code the UI turns into a sentence in its language (architecture review A2).
-pub fn task_code(e: tasks::TaskError) -> String {
-    use tasks::TaskError;
-    match e {
-        TaskError::BadTitle => "bad_title||".into(),
-        TaskError::BadDate(d) => format!("bad_date|{d}|"),
-        TaskError::BadTime(t) => format!("bad_time|{t}|"),
-        TaskError::NotFound => "not_found||".into(),
-        TaskError::NotAnAction => "not_an_action||".into(),
-        TaskError::Db(e) => format!("io||{e}"),
-    }
-}
-
-fn with_db<T>(state: &State<AppState>, f: impl FnOnce(&mut Connection) -> Result<T, tasks::TaskError>) -> Result<T, String> {
-    let guard = state.session.lock().expect("session lock");
-    let session = guard.as_ref().ok_or(NO_VAULT)?;
-    let mut db = session.db.lock().expect("db lock");
-    f(&mut db).map_err(task_code)
-}
-
-fn now() -> chrono::DateTime<chrono::FixedOffset> {
-    Local::now().fixed_offset()
-}
-
 #[tauri::command]
 pub fn vault_info(state: State<AppState>) -> Result<VaultInfo, String> {
     let guard = state.session.lock().expect("session lock");
@@ -606,103 +579,9 @@ pub fn worker_status(state: State<AppState>) -> Result<WorkerStatus, String> {
 }
 
 #[tauri::command]
-pub fn list_tasks(state: State<AppState>, list: TaskList) -> Result<Vec<TaskView>, String> {
-    with_db(&state, |db| tasks::list_tasks(db, list, Local::now().date_naive()))
-}
-
-#[tauri::command]
-pub fn add_task(state: State<AppState>, input: TaskInput) -> Result<String, String> {
-    with_db(&state, |db| tasks::add_task(db, &input, now()))
-}
-
-#[tauri::command]
-pub fn edit_task(state: State<AppState>, id: String, input: TaskInput) -> Result<(), String> {
-    with_db(&state, |db| tasks::edit_task(db, &id, &input, now()))
-}
-
-#[tauri::command]
-pub fn set_task_done(state: State<AppState>, id: String, done: bool) -> Result<(), String> {
-    with_db(&state, |db| tasks::set_done(db, &id, done, now()))
-}
-
-#[tauri::command]
-pub fn delete_task(state: State<AppState>, id: String) -> Result<(), String> {
-    with_db(&state, |db| {
-        let tx = write_tx(db)?;
-        tasks::delete_task(&tx, &id, now())?;
-        tx.commit()?;
-        Ok(())
-    })
-}
-
-/// Undo of an automatic addition (FR-EXT-015): removed and remembered as rejected (FR-EXT-018).
-#[tauri::command]
-pub fn undo_item(state: State<AppState>, kind: String, id: String) -> Result<(), String> {
-    with_db(&state, |db| {
-        let item = if kind == "metric" { ItemRef::Metric(id.clone()) } else { ItemRef::Task(id.clone()) };
-        let tx = write_tx(db)?;
-        reject_item(&tx, &item, now())?;
-        tx.commit()?;
-        Ok(())
-    })
-}
-
-#[tauri::command]
-pub fn list_review(state: State<AppState>) -> Result<Vec<ReviewView>, String> {
-    with_db(&state, |db| tasks::list_review(db))
-}
-
-#[tauri::command]
-pub fn accept_review(state: State<AppState>, id: String, input: TaskInput) -> Result<String, String> {
-    with_db(&state, |db| {
-        let tx = write_tx(db)?;
-        let task_id = tasks::accept_review(&tx, &id, &input, now())?;
-        tx.commit()?;
-        Ok(task_id)
-    })
-}
-
-#[tauri::command]
-pub fn reject_review(state: State<AppState>, id: String) -> Result<(), String> {
-    with_db(&state, |db| tasks::reject_review(db, &id))
-}
-
-#[tauri::command]
-pub fn reminder_done(app: AppHandle, state: State<AppState>, id: String) -> Result<(), String> {
-    with_db(&state, |db| reminders::complete(db, &id, now()))?;
-    let _ = app.emit("tasks-changed", ());
-    Ok(())
-}
-
-#[tauri::command]
-pub fn reminder_snooze(app: AppHandle, state: State<AppState>, id: String) -> Result<(), String> {
-    with_db(&state, |db| reminders::snooze(db, &id, now()))?;
-    let _ = app.emit("tasks-changed", ());
-    Ok(())
-}
-
-#[tauri::command]
 pub fn backup_now(state: State<AppState>) -> Result<(), String> {
     let guard = state.session.lock().expect("session lock");
     guard.as_ref().ok_or(NO_VAULT)?.scheduler.send(SchedCommand::BackupNow);
-    Ok(())
-}
-
-/// Reminders shown but not answered yet, for the banner (FR-TSK-015/016).
-#[tauri::command]
-pub fn pending_reminders(state: State<AppState>) -> Result<PendingLists, String> {
-    let guard = state.session.lock().expect("session lock");
-    let Some(session) = guard.as_ref() else { return Ok(PendingLists::default()) };
-    let db = session.db.lock().expect("db lock");
-    Ok(session.pending.current(&db))
-}
-
-#[tauri::command]
-pub fn dismiss_missed(state: State<AppState>) -> Result<(), String> {
-    if let Some(session) = state.session.lock().expect("session lock").as_ref() {
-        let db = session.db.lock().expect("db lock");
-        session.pending.dismiss_missed(&db, now());
-    }
     Ok(())
 }
 
@@ -742,216 +621,9 @@ pub fn hide_to_tray(window: tauri::WebviewWindow, state: State<AppState>) -> Res
     Ok(())
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize)]
-pub struct InstalledModel {
-    pub name: String,
-    size: u64,
-    path: String,
-    local: bool,
-}
-
-#[derive(Serialize)]
-pub struct ModelStatus {
-    installed: Option<InstalledModel>,
-    recommended: &'static catalog::CatalogEntry,
-    download: Option<crate::model_download::DownloadState>,
-    models_dir: Option<String>,
-}
-
-pub(crate) fn describe_model(path: &Path, id: Option<&str>) -> Option<InstalledModel> {
-    let size = std::fs::metadata(path).ok().filter(|m| m.is_file())?.len();
-    let entry = id.and_then(catalog::by_id);
-    Some(InstalledModel {
-        name: entry.map_or_else(|| path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(), |e| e.name.to_owned()),
-        size,
-        path: path.to_string_lossy().into_owned(),
-        local: entry.is_none(),
-    })
-}
-
-/// FR-MDL-008: a checked GGUF file becomes the active model, used where it is.
-fn apply_local_model(settings: &mut AppSettings, path: &Path) -> Result<InstalledModel, String> {
-    let model = local::validate_gguf(path).map_err(|e| match e {
-        local::LocalModelError::NotFound(_) => "not_found".to_owned(),
-        local::LocalModelError::NotGguf(_) => "not_gguf".to_owned(),
-        local::LocalModelError::Incomplete { .. } => "incomplete".to_owned(),
-        local::LocalModelError::Io(e) => format!("io:{e}"),
-    })?;
-    settings.model_path = Some(model.path.clone());
-    settings.model_id = None;
-    describe_model(&model.path, None).ok_or_else(|| "not_found".to_owned())
-}
-
-/// Saves the model in the settings, hands it to the running worker and tells the UI.
-fn install_model(app: &AppHandle, model_path: &Path, model_id: Option<&str>, installed: &InstalledModel) -> Result<(), String> {
-    let state = app.state::<AppState>();
-    let settings = update_settings(&app_root()?, &state.settings_lock, |s| {
-        s.model_path = Some(model_path.to_path_buf());
-        s.model_id = model_id.map(str::to_owned);
-    })?;
-    if let Some(cfg) = crate::model_paths::server_config(&settings, &crate::model_paths::process_env, bundled_server(app)) {
-        if let Some(session) = app.state::<AppState>().session.lock().expect("session lock").as_ref() {
-            session.worker.send(Command::UseModel(cfg));
-        }
-    }
-    let _ = app.emit("model-changed", installed);
-    Ok(())
-}
-
-/// FR-MDL-019: stops the model, then deletes a model PLA downloaded or only forgets a file the
-/// user chose (settings Review Focus 2). AI features turn off; notes keep queueing.
-#[tauri::command(async)]
-pub fn model_remove(app: AppHandle, state: State<AppState>) -> Result<(), String> {
-    crate::qa_cmds::qa_stop(); // a question in progress would hold the model (final review)
-    let root = app_root()?;
-    let settings = load_settings(&root).map_err(|e| e.to_string())?.settings;
-    let models_dir = models::models_dir();
-    let Some(plan) = crate::model_paths::removal(&settings, models_dir.as_deref()) else { return Ok(()) };
-    let (ack, done) = std::sync::mpsc::channel();
-    let asked = state.session.lock().expect("session lock").as_ref().map(|s| s.worker.drop_model(ack)).is_some();
-    if asked {
-        // The run stops before its next model call and the call in flight within a second
-        // (Extractor::set_interrupt); only a model still starting can hold it, two tries of 30 s.
-        done.recv_timeout(Duration::from_secs(90)).map_err(|_| "model_busy".to_owned())?;
-    }
-    if let crate::model_paths::Removal::Delete(path) = &plan {
-        // llama-server may need a moment to release the file after it exits
-        let mut result = std::fs::remove_file(path);
-        for _ in 0..20 {
-            match &result {
-                Err(e) if e.kind() != std::io::ErrorKind::NotFound => {
-                    std::thread::sleep(Duration::from_millis(250));
-                    result = std::fs::remove_file(path);
-                }
-                _ => break,
-            }
-        }
-        match result {
-            Ok(()) => {}
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-            Err(e) => return Err(format!("not_removed|{}|{}", path.display(), crate::wizard::write_failure(&e))),
-        }
-    }
-    // A model chosen or downloaded meanwhile stays (settings final review M1).
-    update_settings(&root, &state.settings_lock, |s| {
-        if s.model_path == settings.model_path {
-            s.model_path = None;
-            s.model_id = None;
-        }
-    })?;
-    let _ = app.emit("model-removed", ());
-    Ok(())
-}
-
-#[tauri::command]
-pub fn model_status(state: State<AppState>) -> Result<ModelStatus, String> {
-    let settings = load_settings(&app_root()?).map_err(|e| e.to_string())?.settings;
-    let path = crate::model_paths::first_existing([settings.model_path.clone(), crate::model_paths::process_env("PLA_MODEL")]);
-    Ok(ModelStatus {
-        installed: path.as_deref().and_then(|p| describe_model(p, settings.model_id.as_deref())),
-        recommended: catalog::recommended(),
-        download: state.downloads.current().or_else(|| {
-            let (entry, dir) = (catalog::recommended(), models::models_dir()?);
-            crate::model_download::leftover(&dl::part_path(&dir, entry), entry.size)
-        }),
-        models_dir: models::models_dir().map(|d| d.to_string_lossy().into_owned()),
-    })
-}
-
-/// The download source: the catalogue on Hugging Face, or, in debug builds only, the file at
-/// `PLA_DEV_MODEL_URL` on this PC, so pause/resume/quit can be checked without 2.4 GB from the
-/// internet (final review I6). Release builds ignore the variable.
-fn download_source() -> (&'static catalog::CatalogEntry, Box<dyn models::policy::UrlPolicy>) {
-    #[cfg(debug_assertions)]
-    if let Ok(url) = std::env::var("PLA_DEV_MODEL_URL") {
-        let entry = catalog::CatalogEntry { url: Box::leak(url.into_boxed_str()), ..catalog::recommended().clone() };
-        return (Box::leak(Box::new(entry)), Box::new(DevLocal));
-    }
-    (catalog::recommended(), Box::new(models::policy::HuggingFace))
-}
-
-/// Debug builds: the production allow-list plus `127.0.0.1`.
-#[cfg(debug_assertions)]
-struct DevLocal;
-
-#[cfg(debug_assertions)]
-impl models::policy::UrlPolicy for DevLocal {
-    fn allows(&self, url: &str) -> Result<(), models::policy::PolicyError> {
-        match models::policy::scheme_and_host(url)? {
-            (_, host) if host == "127.0.0.1" => Ok(()),
-            _ => models::policy::HuggingFace.allows(url),
-        }
-    }
-}
-
-#[tauri::command]
-pub fn model_download_start(app: AppHandle, state: State<AppState>) -> Result<(), String> {
-    let dir = models::models_dir().ok_or("LOCALAPPDATA is not set; PLA cannot store the model.")?;
-    let (entry, policy) = download_source();
-    let (events, done_app) = (app.clone(), app.clone());
-    state
-        .downloads
-        .start(
-            move |cancel, report| {
-                let req = dl::Request {
-                    entry,
-                    dir: &dir,
-                    policy: policy.as_ref(),
-                    free_space: &dl::free_space,
-                    cancel,
-                    progress_every: Duration::from_secs(1),
-                    stall_after: Duration::from_secs(60),
-                };
-                dl::download(&req, report)
-            },
-            move |s| {
-                let _ = events.emit("model-download", s);
-            },
-            move |path| {
-                if let Some(installed) = describe_model(&path, Some(entry.id)) {
-                    let _ = install_model(&done_app, &path, Some(entry.id), &installed);
-                    crate::notify::model_ready(&done_app);
-                }
-                // owner decision A: the embedding model follows the language model
-                if crate::memory_cmds::model_file().is_none() {
-                    let _ = crate::memory_cmds::start_download(&done_app);
-                }
-            },
-        )
-        .map_err(|_| "download_running".to_owned())
-}
-
-#[tauri::command]
-pub fn model_download_pause(state: State<AppState>) {
-    state.downloads.pause();
-}
-
-#[tauri::command]
-pub fn model_use_local(app: AppHandle, path: String) -> Result<InstalledModel, String> {
-    // Checked first, so a wrong file changes nothing (Review Focus 5).
-    let mut checked = AppSettings::default();
-    let installed = apply_local_model(&mut checked, Path::new(&path))?;
-    let model_path = checked.model_path.expect("set by apply_local_model");
-    install_model(&app, &model_path, None, &installed)?;
-    Ok(installed)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn task_errors_are_codes_the_ui_translates() {
-        // architecture review A2: the task panel showed these as English sentences
-        use pla_core::tasks::TaskError;
-        assert_eq!(task_code(TaskError::BadTitle), "bad_title||");
-        assert_eq!(task_code(TaskError::BadDate("31.02".into())), "bad_date|31.02|");
-        assert_eq!(task_code(TaskError::BadTime("25:00".into())), "bad_time|25:00|");
-        assert_eq!(task_code(TaskError::NotFound), "not_found||");
-        assert_eq!(task_code(TaskError::NotAnAction), "not_an_action||");
-        assert!(task_code(TaskError::Db(rusqlite::Error::InvalidQuery)).starts_with("io||"));
-        assert_eq!(NO_VAULT, "no_vault||", "one spelling in every command module");
-    }
 
     #[test]
     fn the_settings_screen_can_change_only_known_values() {
@@ -976,31 +648,6 @@ mod tests {
     }
 
     #[test]
-    fn using_a_non_gguf_file_changes_nothing() {
-        // Review Focus 5
-        let tmp = tempfile::tempdir().unwrap();
-        let txt = tmp.path().join("notes.gguf");
-        std::fs::write(&txt, "not a model").unwrap();
-        let mut settings = AppSettings::default();
-        assert!(apply_local_model(&mut settings, &txt).is_err());
-        assert_eq!(settings, AppSettings::default());
-    }
-
-    #[test]
-    fn a_valid_local_file_becomes_the_active_model() {
-        let tmp = tempfile::tempdir().unwrap();
-        let p = tmp.path().join("m.gguf");
-        let mut bytes = b"GGUF".to_vec();
-        bytes.extend_from_slice(&3u32.to_le_bytes());
-        std::fs::write(&p, &bytes).unwrap();
-        let mut settings = AppSettings { model_id: Some("gemma-4-e2b-it-q3km".into()), ..AppSettings::default() };
-        let installed = apply_local_model(&mut settings, &p).unwrap();
-        assert_eq!((settings.model_path.as_deref(), settings.model_id.as_deref()), (Some(p.as_path()), None));
-        assert!(installed.local);
-        assert_eq!(installed.size, 8);
-    }
-
-    #[test]
     fn settings_written_from_two_places_keep_both_changes() {
         // Final review I5: a vault switch and a finished download must not overwrite each other
         let tmp = tempfile::tempdir().unwrap();
@@ -1019,16 +666,6 @@ mod tests {
         });
         let s = load_settings(tmp.path()).unwrap().settings;
         assert_eq!((s.vault_path, s.model_path), (Some("C:/v29".into()), Some("C:/m29.gguf".into())));
-    }
-
-    #[test]
-    fn the_debug_download_hook_reaches_only_this_pc() {
-        // Final review I6: lets the end-to-end checks use a local server instead of 2.4 GB from HF
-        use pla_core::models::policy::{PolicyError, UrlPolicy};
-        assert_eq!(DevLocal.allows("http://127.0.0.1:8765/model.gguf"), Ok(()));
-        assert_eq!(DevLocal.allows("https://huggingface.co/x"), Ok(()));
-        assert_eq!(DevLocal.allows("http://example.com/x"), Err(PolicyError::NotHttps));
-        assert!(matches!(DevLocal.allows("https://evil.com/x"), Err(PolicyError::HostNotAllowed(_))));
     }
 
     #[test]
