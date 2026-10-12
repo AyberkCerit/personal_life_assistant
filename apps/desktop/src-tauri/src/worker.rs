@@ -108,10 +108,7 @@ pub enum QaEvent {
 /// waits for the thread, and so drops the model host, which ends llama-server (FR-MDL-017).
 pub struct WorkerHandle {
     tx: Sender<Command>,
-    cancel: Arc<AtomicBool>,
-    pause: Arc<AtomicBool>,
-    dropping: Arc<AtomicBool>,
-    asking: Arc<AtomicUsize>,
+    stops: Stops,
     /// Stops a running summary request: a question, a model removal or closing comes first.
     interrupt: Arc<AtomicBool>,
     /// The Stop switch of the question being answered: closing the session flips it (final review C2).
@@ -126,7 +123,7 @@ impl WorkerHandle {
 
     /// Pauses at once, also in the middle of a run (between two model calls), then tells the thread.
     pub fn set_paused(&self, paused: bool) {
-        self.pause.store(paused, Ordering::SeqCst);
+        self.stops.pause.store(paused, Ordering::SeqCst);
         if paused {
             self.interrupt.store(true, Ordering::SeqCst); // a running summary or report stops (final review I3)
         }
@@ -136,7 +133,7 @@ impl WorkerHandle {
     /// FR-MDL-019: stops the current run between two model calls (not after the whole queue), then
     /// drops the model; `done` hears when llama-server is gone (settings final review I1).
     pub fn drop_model(&self, done: Sender<()>) {
-        self.dropping.store(true, Ordering::SeqCst);
+        self.stops.dropping.store(true, Ordering::SeqCst);
         self.interrupt.store(true, Ordering::SeqCst);
         self.send(Command::DropModel(done));
     }
@@ -144,7 +141,7 @@ impl WorkerHandle {
     /// FR-QA-003: a question goes before the queue: a running extraction stops between two notes
     /// (the rest stays queued, as with a pause) and goes on after the answer.
     pub fn ask(&self, job: AskJob) {
-        self.asking.fetch_add(1, Ordering::SeqCst);
+        self.stops.asking.fetch_add(1, Ordering::SeqCst);
         self.interrupt.store(true, Ordering::SeqCst);
         *self.ask_cancel.lock().expect("ask lock") = Some(Arc::clone(&job.cancel));
         self.send(Command::Ask(job));
@@ -157,7 +154,7 @@ impl WorkerHandle {
     pub fn shutdown(self) {}
 
     fn stop(&mut self) {
-        self.cancel.store(true, Ordering::SeqCst);
+        self.stops.cancel.store(true, Ordering::SeqCst);
         self.interrupt.store(true, Ordering::SeqCst);
         if let Some(c) = self.ask_cancel.lock().expect("ask lock").as_ref() {
             c.store(true, Ordering::SeqCst); // a question must not hold up a vault switch or quitting
@@ -175,29 +172,53 @@ impl Drop for WorkerHandle {
     }
 }
 
-/// Lets a closing session interrupt a long run: once cancelled, the next model call fails like an
+/// The lasting switches that make the model wait: closing, pause, removing the model, a question.
+/// Clones share them (worker, handle, report and summary loops read the same four).
+#[derive(Debug, Clone, Default)]
+struct Stops {
+    cancel: Arc<AtomicBool>,
+    pause: Arc<AtomicBool>,
+    dropping: Arc<AtomicBool>,
+    asking: Arc<AtomicUsize>,
+}
+
+impl Stops {
+    /// Why the model must not be called now, first reason first; `None` when it may.
+    fn reason(&self) -> Option<&'static str> {
+        if self.cancel.load(Ordering::SeqCst) {
+            Some("PLA is closing")
+        } else if self.pause.load(Ordering::SeqCst) {
+            Some("background AI is paused")
+        } else if self.dropping.load(Ordering::SeqCst) {
+            Some("the model is being removed")
+        } else if self.asking.load(Ordering::SeqCst) > 0 {
+            Some("answering a question first")
+        } else {
+            None
+        }
+    }
+
+    /// Whether a long job (summaries, the report) must stop; a pause counts when `count_pause`
+    /// (a day the user asked for goes on while background AI is paused).
+    fn any(&self, count_pause: bool) -> bool {
+        self.cancel.load(Ordering::SeqCst)
+            || self.dropping.load(Ordering::SeqCst)
+            || self.asking.load(Ordering::SeqCst) > 0
+            || (count_pause && self.pause.load(Ordering::SeqCst))
+    }
+}
+
+/// Lets a closing session interrupt a long run: once stopped, the next model call fails like an
 /// outage, so the pipeline stops and keeps the rest queued (FR-EXT-022).
 struct Cancellable<'a> {
     inner: &'a mut (dyn Extractor + Send),
-    cancel: &'a AtomicBool,
-    pause: &'a AtomicBool,
-    dropping: &'a AtomicBool,
-    asking: &'a AtomicUsize,
+    stops: &'a Stops,
 }
 
 impl Extractor for Cancellable<'_> {
     fn extract_raw(&mut self, reference: NaiveDate, text: &str) -> Result<String, LlmError> {
-        if self.cancel.load(Ordering::SeqCst) {
-            return Err(LlmError::Http("PLA is closing".into()));
-        }
-        if self.pause.load(Ordering::SeqCst) {
-            return Err(LlmError::Http("background AI is paused".into()));
-        }
-        if self.dropping.load(Ordering::SeqCst) {
-            return Err(LlmError::Http("the model is being removed".into()));
-        }
-        if self.asking.load(Ordering::SeqCst) > 0 {
-            return Err(LlmError::Http("answering a question first".into()));
+        if let Some(why) = self.stops.reason() {
+            return Err(LlmError::Http(why.into()));
         }
         self.inner.extract_raw(reference, text)
     }
@@ -262,10 +283,7 @@ pub struct Worker {
     external_delay: Duration,
     later: HashMap<String, Instant>,
     status: WorkerStatus,
-    cancel: Arc<AtomicBool>,
-    pause: Arc<AtomicBool>,
-    dropping: Arc<AtomicBool>,
-    asking: Arc<AtomicUsize>,
+    stops: Stops,
     interrupt: Arc<AtomicBool>,
     on_added: Option<AddedListener>,
     /// Hears each day summarised (the note's box refreshes).
@@ -293,10 +311,7 @@ impl Worker {
             clock: Box::new(|| Local::now().fixed_offset()),
             external_delay: EXTERNAL_DELAY,
             later: HashMap::new(),
-            cancel: Arc::new(AtomicBool::new(false)),
-            pause: Arc::new(AtomicBool::new(false)),
-            dropping: Arc::new(AtomicBool::new(false)),
-            asking: Arc::new(AtomicUsize::new(0)),
+            stops: Stops::default(),
             interrupt,
             on_added: None,
             on_summary: None,
@@ -338,10 +353,9 @@ impl Worker {
 
     pub fn spawn(self) -> WorkerHandle {
         let (tx, rx) = mpsc::channel();
-        let (cancel, pause, dropping, asking, interrupt) =
-            (Arc::clone(&self.cancel), Arc::clone(&self.pause), Arc::clone(&self.dropping), Arc::clone(&self.asking), Arc::clone(&self.interrupt));
+        let (stops, interrupt) = (self.stops.clone(), Arc::clone(&self.interrupt));
         let join = std::thread::Builder::new().name("pla-worker".into()).spawn(move || self.run(rx)).expect("spawn worker");
-        WorkerHandle { tx, cancel, pause, dropping, asking, interrupt, ask_cancel: Arc::new(Mutex::new(None)), join: Some(join) }
+        WorkerHandle { tx, stops, interrupt, ask_cancel: Arc::new(Mutex::new(None)), join: Some(join) }
     }
 
     fn run(mut self, rx: Receiver<Command>) {
@@ -362,7 +376,7 @@ impl Worker {
                     self.later.insert(note, Instant::now());
                 }
                 Ok(Command::Pause(paused)) => {
-                    self.pause.store(paused, Ordering::SeqCst);
+                    self.stops.pause.store(paused, Ordering::SeqCst);
                     self.status.paused = paused;
                     if !paused {
                         self.process();
@@ -380,7 +394,7 @@ impl Worker {
                 }
                 Ok(Command::DropModel(done)) => {
                     self.extractor = None; // dropping the host ends llama-server
-                    self.dropping.store(false, Ordering::SeqCst);
+                    self.stops.dropping.store(false, Ordering::SeqCst);
                     self.status.model = self.model_state();
                     self.status.last_error = None; // the interrupted run's "being removed" is no error
                     self.publish();
@@ -388,7 +402,7 @@ impl Worker {
                 }
                 Ok(Command::Ask(job)) => {
                     self.ask(job);
-                    self.asking.fetch_sub(1, Ordering::SeqCst);
+                    self.stops.asking.fetch_sub(1, Ordering::SeqCst);
                     self.process(); // what the question interrupted
                 }
                 Ok(Command::Summarize { only, cache_path }) => {
@@ -460,8 +474,7 @@ impl Worker {
             self.status.queued = queued_notes(&self.conn).map_or(0, |q| q.len());
             (self.notify)(&self.status); // field borrows: the extractor stays borrowed
             let now = (self.clock)();
-            let mut guarded =
-                Cancellable { inner: extractor.as_mut(), cancel: &self.cancel, pause: &self.pause, dropping: &self.dropping, asking: &self.asking };
+            let mut guarded = Cancellable { inner: extractor.as_mut(), stops: &self.stops };
             let (reader, listener, added) = (&self.reader, &self.on_added, &mut self.status.added);
             // Each note's additions are reported as soon as it is done (FR-EXT-015), not at the end of a long run.
             let mut on_note = |_: &str, outcomes: &[Outcome]| {
@@ -481,11 +494,11 @@ impl Worker {
                 Ok(report) => self.status.last_error = report.model_error,
                 Err(e) => self.status.last_error = Some(e.to_string()),
             }
-            if self.pause.load(Ordering::SeqCst) {
+            if self.stops.pause.load(Ordering::SeqCst) {
                 self.status.paused = true; // stopped by a pause, not by a failure
                 self.status.last_error = None;
             }
-            if self.asking.load(Ordering::SeqCst) > 0 {
+            if self.stops.asking.load(Ordering::SeqCst) > 0 {
                 self.status.last_error = None; // stopped for a question; it goes on afterwards
             }
             self.status.busy = false;
@@ -503,7 +516,7 @@ impl Worker {
         if report::report_exists(&self.vault, week) {
             return ReportOutcome::Exists;
         }
-        if self.status.paused || self.pause.load(Ordering::SeqCst) {
+        if self.status.paused || self.stops.pause.load(Ordering::SeqCst) {
             return ReportOutcome::Busy; // background AI paused (FR-SCH-014): later
         }
         let now = (self.clock)();
@@ -520,9 +533,8 @@ impl Worker {
         (self.notify)(&self.status);
         let folders = self.vault.config.folders.clone();
         // a question, a pause, a model removal or closing: later (final review I3)
-        let (cancel, dropping, asking, pause) = (Arc::clone(&self.cancel), Arc::clone(&self.dropping), Arc::clone(&self.asking), Arc::clone(&self.pause));
-        let interrupted =
-            move || cancel.load(Ordering::SeqCst) || dropping.load(Ordering::SeqCst) || asking.load(Ordering::SeqCst) > 0 || pause.load(Ordering::SeqCst);
+        let stops = self.stops.clone(); // read while the model borrows the extractor
+        let interrupted = move || stops.any(true);
         let mut highlights: Result<String, NoHighlights> = Err(NoHighlights::NoModel);
         let mut busy = false;
         let mut model_error: Option<String> = None;
@@ -648,11 +660,7 @@ impl Worker {
             None => pla_core::summary::plan(&cache, &folders, today).unwrap_or_default(),
         };
         for day in days {
-            let interrupted = self.cancel.load(Ordering::SeqCst)
-                || self.dropping.load(Ordering::SeqCst)
-                || self.asking.load(Ordering::SeqCst) > 0
-                || (self.pause.load(Ordering::SeqCst) && only.is_none());
-            if interrupted {
+            if self.stops.any(only.is_none()) {
                 tell(&self.on_summary, "busy");
                 break;
             }
@@ -789,6 +797,24 @@ mod tests {
     use pla_core::vault::open_vault;
     use std::sync::{Arc, Mutex};
     use std::time::Instant;
+
+    #[test]
+    fn stops_say_why_the_model_waits() {
+        // architecture review A4/A5: one place reads the four switches, in one order
+        let s = Stops::default();
+        assert_eq!(s.reason(), None);
+        assert!(!s.any(true));
+        s.pause.store(true, Ordering::SeqCst);
+        assert_eq!(s.reason(), Some("background AI is paused"));
+        assert!(s.any(true) && !s.any(false), "a day the user asks for still goes while paused");
+        s.asking.fetch_add(1, Ordering::SeqCst);
+        assert!(s.any(false));
+        s.cancel.store(true, Ordering::SeqCst);
+        assert_eq!(s.reason(), Some("PLA is closing"), "closing comes first");
+        let copy = s.clone();
+        s.dropping.store(true, Ordering::SeqCst);
+        assert!(copy.dropping.load(Ordering::SeqCst), "copies share the switches");
+    }
 
     struct Fixed(&'static str);
     impl Extractor for Fixed {
