@@ -32,7 +32,7 @@ pub fn note_meta(text: String) -> FrontMatter {
 /// The open vault, copied out so no file work happens under the session lock (final review I2).
 fn vault_of(state: &State<AppState>) -> Result<Vault, String> {
     let guard = state.session.lock().expect("session lock");
-    Ok(guard.as_ref().ok_or("no_vault||")?.vault.clone())
+    Ok(guard.as_ref().ok_or(crate::commands::NO_VAULT)?.vault.clone())
 }
 
 /// The vault's images, walked at most every few seconds: a note with many embeds asks at once.

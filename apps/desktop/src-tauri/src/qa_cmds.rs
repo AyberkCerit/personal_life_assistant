@@ -50,7 +50,7 @@ pub fn qa_ask(app: AppHandle, state: State<AppState>, question: String, new_topi
         return Err("bad_question||".into());
     }
     let guard = state.session.lock().expect("session lock");
-    let session = guard.as_ref().ok_or("no_vault||")?;
+    let session = guard.as_ref().ok_or(crate::commands::NO_VAULT)?;
     let mut current = CURRENT.lock().expect("qa lock");
     if current.is_some() {
         return Err("busy||".into());
@@ -106,7 +106,7 @@ pub fn qa_stop() {
 #[tauri::command]
 pub fn qa_history(state: State<AppState>) -> Result<Vec<Turn>, String> {
     let guard = state.session.lock().expect("session lock");
-    let session = guard.as_ref().ok_or("no_vault||")?;
+    let session = guard.as_ref().ok_or(crate::commands::NO_VAULT)?;
     let db = session.db.lock().expect("db lock");
     let turns = qa::history(&db, 100).map_err(|e| format!("io||{e}"));
     turns
@@ -119,7 +119,7 @@ pub fn qa_clear(state: State<AppState>) -> Result<(), String> {
         return Err("busy||".into());
     }
     let guard = state.session.lock().expect("session lock");
-    let session = guard.as_ref().ok_or("no_vault||")?;
+    let session = guard.as_ref().ok_or(crate::commands::NO_VAULT)?;
     let db = session.db.lock().expect("db lock");
     let cleared = qa::clear_history(&db).map(|_| ()).map_err(|e| format!("io||{e}"));
     cleared
@@ -129,7 +129,7 @@ pub fn qa_clear(state: State<AppState>) -> Result<(), String> {
 #[tauri::command]
 pub fn qa_save_suggestion(app: AppHandle, state: State<AppState>, turn_id: String, index: usize) -> Result<String, String> {
     let guard = state.session.lock().expect("session lock");
-    let session = guard.as_ref().ok_or("no_vault||")?;
+    let session = guard.as_ref().ok_or(crate::commands::NO_VAULT)?;
     let db = session.db.lock().expect("db lock");
     let rel = qa::save_suggestion(&db, &session.vault, &turn_id, index).map_err(|e| format!("io||{e}"))?.ok_or("missing||")?;
     let _ = app.emit("tree-changed", ());
@@ -140,7 +140,7 @@ pub fn qa_save_suggestion(app: AppHandle, state: State<AppState>, turn_id: Strin
 #[tauri::command]
 pub fn qa_undo(app: AppHandle, state: State<AppState>, turn_id: String, index: usize) -> Result<(), String> {
     let guard = state.session.lock().expect("session lock");
-    let session = guard.as_ref().ok_or("no_vault||")?;
+    let session = guard.as_ref().ok_or(crate::commands::NO_VAULT)?;
     let db = session.db.lock().expect("db lock");
     let undo = qa::take_undo(&db, &turn_id, index).map_err(|e| format!("io||{e}"))?.ok_or("missing||")?;
     let done = if undo.kind == "note" {

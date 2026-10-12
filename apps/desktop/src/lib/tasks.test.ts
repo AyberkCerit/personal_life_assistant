@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { aiMark, dayLabel, filterByOrigin, groupTasks, isOverdue, isReminder, msUntilNextDay, revealRange, todayIso, type Labels, type Task } from "./tasks";
+import { aiMark, taskError, dayLabel, filterByOrigin, groupTasks, isOverdue, isReminder, msUntilNextDay, revealRange, todayIso, type Labels, type Task } from "./tasks";
 
 const L: Labels = { today: "Bugün", tomorrow: "Yarın", noDate: "Tarihsiz", overdue: "Gecikmiş" };
 const TODAY = "2026-10-06";
@@ -70,5 +70,16 @@ describe("tasks", () => {
   it("knows a reminder by its notification time", () => {
     expect(isReminder(task("a", TODAY, { notify_at: "2026-10-06T09:00" }))).toBe(true);
     expect(isReminder(task("b", TODAY))).toBe(false);
+  });
+});
+
+describe("task errors", () => {
+  it("turns the commands' codes into the UI's own sentences", () => {
+    // architecture review A2: the panel showed the backend's English sentence
+    expect(taskError("bad_title||")).toEqual({ key: "tasks.error.bad_title", detail: "" });
+    expect(taskError("bad_date|31.02.2026|")).toEqual({ key: "tasks.error.bad_date", detail: "31.02.2026" });
+    expect(taskError("no_vault||")).toEqual({ key: "tasks.error.no_vault", detail: "" });
+    expect(taskError("io||disk full")).toEqual({ key: "tasks.error.other", detail: "disk full" });
+    expect(taskError("something new")).toEqual({ key: "tasks.error.other", detail: "something new" });
   });
 });

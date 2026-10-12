@@ -149,7 +149,7 @@ pub struct BackupStatus {
 #[tauri::command]
 pub fn backup_status(state: State<AppState>) -> Result<BackupStatus, String> {
     let guard = state.session.lock().expect("session lock");
-    let session = guard.as_ref().ok_or("no_vault")?;
+    let session = guard.as_ref().ok_or(crate::commands::NO_VAULT)?;
     let job = pla_core::jobs::status(&session.db.lock().expect("db lock"), pla_core::jobs::DAILY).map_err(|e| e.to_string())?;
     Ok(BackupStatus { job, backups: pla_core::jobs::backups(&session.vault.root) })
 }
@@ -164,7 +164,7 @@ pub fn export_data(state: State<AppState>, dir: String, lang: String) -> Result<
     let style = region_style();
     let (tasks, metrics) = {
         let guard = state.session.lock().expect("session lock");
-        let session = guard.as_ref().ok_or("no_vault")?;
+        let session = guard.as_ref().ok_or(crate::commands::NO_VAULT)?;
         let db = session.db.lock().expect("db lock");
         let tasks = pla_core::export::tasks_csv(&db, &lang, style).map_err(|e| e.to_string())?;
         (tasks, pla_core::export::metrics_csv(&db, &lang, style).map_err(|e| e.to_string())?)

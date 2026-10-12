@@ -44,7 +44,7 @@ fn join(folder: &str, name: &str) -> String {
 
 fn with_session<T>(state: &State<AppState>, f: impl FnOnce(&Session) -> Result<T, String>) -> Result<T, String> {
     let guard = state.session.lock().expect("session lock");
-    f(guard.as_ref().ok_or("no_vault||")?)
+    f(guard.as_ref().ok_or(crate::commands::NO_VAULT)?)
 }
 
 /// Notes (other than `rel`) with a link to it, by the index.

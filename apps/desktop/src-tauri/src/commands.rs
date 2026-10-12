@@ -234,7 +234,7 @@ fn start_session(app: &AppHandle, root: &Path, settings: &AppSettings, own: Arc<
 
 fn with_vault<T>(state: &State<AppState>, f: impl FnOnce(&Vault) -> Result<T, FileError>) -> Result<T, String> {
     let guard = state.session.lock().expect("session lock");
-    let session = guard.as_ref().ok_or("No vault is open.")?;
+    let session = guard.as_ref().ok_or(NO_VAULT)?;
     f(&session.vault).map_err(|e| e.to_string())
 }
 
@@ -558,17 +558,33 @@ pub fn create_note(state: State<AppState>, folder: String, title: String) -> Res
 #[tauri::command]
 pub fn queue_note(state: State<AppState>, path: String) -> Result<(), String> {
     let guard = state.session.lock().expect("session lock");
-    let session = guard.as_ref().ok_or("No vault is open.")?;
+    let session = guard.as_ref().ok_or(NO_VAULT)?;
     files::resolve(&session.vault, &path).map_err(|e| e.to_string())?;
     session.worker.send(Command::Enqueue(path));
     Ok(())
 }
 
+/// Every command's "no vault is open" error, in the `<code>|<detail>|<reason>` form the UI reads.
+pub const NO_VAULT: &str = "no_vault||";
+
+/// A task error as a code the UI turns into a sentence in its language (architecture review A2).
+pub fn task_code(e: tasks::TaskError) -> String {
+    use tasks::TaskError;
+    match e {
+        TaskError::BadTitle => "bad_title||".into(),
+        TaskError::BadDate(d) => format!("bad_date|{d}|"),
+        TaskError::BadTime(t) => format!("bad_time|{t}|"),
+        TaskError::NotFound => "not_found||".into(),
+        TaskError::NotAnAction => "not_an_action||".into(),
+        TaskError::Db(e) => format!("io||{e}"),
+    }
+}
+
 fn with_db<T>(state: &State<AppState>, f: impl FnOnce(&mut Connection) -> Result<T, tasks::TaskError>) -> Result<T, String> {
     let guard = state.session.lock().expect("session lock");
-    let session = guard.as_ref().ok_or("No vault is open.")?;
+    let session = guard.as_ref().ok_or(NO_VAULT)?;
     let mut db = session.db.lock().expect("db lock");
-    f(&mut db).map_err(|e| e.to_string())
+    f(&mut db).map_err(task_code)
 }
 
 fn now() -> chrono::DateTime<chrono::FixedOffset> {
@@ -578,13 +594,13 @@ fn now() -> chrono::DateTime<chrono::FixedOffset> {
 #[tauri::command]
 pub fn vault_info(state: State<AppState>) -> Result<VaultInfo, String> {
     let guard = state.session.lock().expect("session lock");
-    guard.as_ref().map(|s| vault_info_of(&s.vault)).ok_or_else(|| "No vault is open.".to_owned())
+    guard.as_ref().map(|s| vault_info_of(&s.vault)).ok_or_else(|| NO_VAULT.to_owned())
 }
 
 #[tauri::command]
 pub fn worker_status(state: State<AppState>) -> Result<WorkerStatus, String> {
     let guard = state.session.lock().expect("session lock");
-    let session = guard.as_ref().ok_or("No vault is open.")?;
+    let session = guard.as_ref().ok_or(NO_VAULT)?;
     let status = session.status.lock().expect("status lock").clone();
     Ok(status)
 }
@@ -668,7 +684,7 @@ pub fn reminder_snooze(app: AppHandle, state: State<AppState>, id: String) -> Re
 #[tauri::command]
 pub fn backup_now(state: State<AppState>) -> Result<(), String> {
     let guard = state.session.lock().expect("session lock");
-    guard.as_ref().ok_or("No vault is open.")?.scheduler.send(SchedCommand::BackupNow);
+    guard.as_ref().ok_or(NO_VAULT)?.scheduler.send(SchedCommand::BackupNow);
     Ok(())
 }
 
@@ -923,6 +939,19 @@ pub fn model_use_local(app: AppHandle, path: String) -> Result<InstalledModel, S
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn task_errors_are_codes_the_ui_translates() {
+        // architecture review A2: the task panel showed these as English sentences
+        use pla_core::tasks::TaskError;
+        assert_eq!(task_code(TaskError::BadTitle), "bad_title||");
+        assert_eq!(task_code(TaskError::BadDate("31.02".into())), "bad_date|31.02|");
+        assert_eq!(task_code(TaskError::BadTime("25:00".into())), "bad_time|25:00|");
+        assert_eq!(task_code(TaskError::NotFound), "not_found||");
+        assert_eq!(task_code(TaskError::NotAnAction), "not_an_action||");
+        assert!(task_code(TaskError::Db(rusqlite::Error::InvalidQuery)).starts_with("io||"));
+        assert_eq!(NO_VAULT, "no_vault||", "one spelling in every command module");
+    }
 
     #[test]
     fn the_settings_screen_can_change_only_known_values() {
