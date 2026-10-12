@@ -23,7 +23,7 @@ pub fn descriptions() -> &'static str {
      - add_task {title, date?: YYYY-MM-DD, time?: HH:MM, remind?: true|false}: add one task; with a time it is a reminder unless remind is false.\n\
      - complete_task {task_id}: mark one open task done (take the task_id from query_tasks).\n\
      - log_metric {kind, date: YYYY-MM-DD, value, unit?: h|min|ml|l|glass|kg|lb|count, exercise?}: record one measurement.\n\
-     - create_note {title, body (at most 600 characters)}: write one new note to the user's notes. Choose a short title yourself; never ask for one.
+     - create_note {title, body (at most 600 characters)}: write one new note to the user's notes. Choose a short title yourself; never ask for one.\n\
      - suggest_note {title, body}: offer to keep what the user just told you as a note; nothing is written unless they press Save."
 }
 
@@ -334,6 +334,16 @@ mod tests {
 
     fn now() -> DateTime<FixedOffset> {
         DateTime::parse_from_rfc3339("2026-10-06T09:00:00+03:00").unwrap()
+    }
+
+    #[test]
+    fn every_tool_is_described_on_a_line_of_its_own() {
+        // architecture review M9: a missing `\n\` sent suggest_note indented
+        let lines: Vec<&str> = descriptions().lines().collect();
+        assert_eq!(lines.len(), TOOLS.len());
+        for (line, tool) in lines.iter().zip(TOOLS) {
+            assert!(line.starts_with(&format!("- {tool} ")), "{line:?}");
+        }
     }
 
     #[test]
