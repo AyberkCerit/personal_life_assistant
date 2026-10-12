@@ -6,7 +6,7 @@ use std::path::Path;
 use chrono::NaiveDate;
 
 use crate::markdown::{frontmatter_end, is_heading, list_item_body, Fences};
-use crate::vault::{is_under, Folders, Vault};
+use crate::vault::{is_note_name, is_under, walk_vault, Folders, Vault};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Block {
@@ -92,34 +92,12 @@ pub fn daily_note_date(rel: &str, folders: &Folders) -> Option<NaiveDate> {
 
 /// All user notes of the vault, as sorted vault-relative paths with `/` separators.
 pub fn list_user_notes(vault: &Vault) -> std::io::Result<Vec<String>> {
-    let mut out = Vec::new();
-    walk(&vault.root, &vault.root, &vault.config.folders, &mut out)?;
+    std::fs::read_dir(&vault.root)?; // a vault that cannot be read is an error, not an empty one
+    let folders = &vault.config.folders;
+    let notes = walk_vault(&vault.root).filter(|e| !e.is_dir && is_note_name(&e.rel) && !is_excluded(&e.rel, folders));
+    let mut out: Vec<String> = notes.map(|e| e.rel).collect();
     out.sort();
     Ok(out)
-}
-
-fn walk(root: &Path, dir: &Path, folders: &Folders, out: &mut Vec<String>) -> std::io::Result<()> {
-    for entry in std::fs::read_dir(dir)? {
-        let entry = entry?;
-        let kind = entry.file_type()?;
-        let path = entry.path();
-        let rel = path
-            .strip_prefix(root)
-            .expect("walked path is under the vault root")
-            .components()
-            .map(|c| c.as_os_str().to_string_lossy())
-            .collect::<Vec<_>>()
-            .join("/");
-        if is_excluded(&rel, folders) || kind.is_symlink() {
-            continue;
-        }
-        if kind.is_dir() {
-            walk(root, &path, folders, out)?;
-        } else if path.extension().is_some_and(|e| e.eq_ignore_ascii_case("md")) {
-            out.push(rel);
-        }
-    }
-    Ok(())
 }
 
 #[cfg(test)]

@@ -240,25 +240,8 @@ fn is_hidden(rel: &str) -> bool {
 /// Every `.md` file of the vault outside hidden folders, as `/`-separated relative paths. Links and
 /// junctions are not followed.
 fn markdown_files(root: &Path) -> Vec<String> {
-    let mut out = Vec::new();
-    let mut stack = vec![root.to_path_buf()];
-    while let Some(dir) = stack.pop() {
-        let Ok(entries) = std::fs::read_dir(&dir) else { continue };
-        for e in entries.flatten() {
-            let name = e.file_name().to_string_lossy().into_owned();
-            let Ok(kind) = e.file_type() else { continue };
-            if name.starts_with('.') || kind.is_symlink() {
-                continue;
-            }
-            if kind.is_dir() {
-                stack.push(e.path());
-            } else if name.to_ascii_lowercase().ends_with(".md") {
-                if let Ok(rel) = e.path().strip_prefix(root) {
-                    out.push(rel.components().map(|c| c.as_os_str().to_string_lossy()).collect::<Vec<_>>().join("/"));
-                }
-            }
-        }
-    }
+    let notes = crate::vault::walk_vault(root).filter(|e| !e.is_dir && crate::vault::is_note_name(&e.rel));
+    let mut out: Vec<String> = notes.map(|e| e.rel).collect();
     out.sort();
     out
 }

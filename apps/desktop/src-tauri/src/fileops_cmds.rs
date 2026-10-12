@@ -143,19 +143,11 @@ pub fn move_entry(app: AppHandle, state: State<AppState>, path: String, folder: 
 fn move_folder_quietly(state: &State<AppState>, session: &Session, from: &str, to: &str) -> Result<(), String> {
     let root = files::resolve(&session.vault, from).map_err(code)?;
     let case_only = fileops::same_ignoring_case(from, to);
-    let mut dirs = vec![(root, String::new())];
-    while let Some((dir, prefix)) = dirs.pop() {
-        for entry in std::fs::read_dir(&dir).into_iter().flatten().flatten() {
-            let inner = format!("{prefix}{}", entry.file_name().to_string_lossy());
-            if entry.file_type().is_ok_and(|t| t.is_dir()) {
-                dirs.push((entry.path(), format!("{inner}/")));
-            } else if inner.to_lowercase().ends_with(".md") {
-                if let Ok(text) = std::fs::read_to_string(entry.path()) {
-                    state.self_writes.record_text(&format!("{to}/{inner}"), &text);
-                    if case_only {
-                        state.self_writes.record_text(&format!("{from}/{inner}"), &text);
-                    }
-                }
+    for note in pla_core::vault::walk_vault(&root).filter(|e| !e.is_dir && pla_core::vault::is_note_name(&e.rel)) {
+        if let Ok(text) = std::fs::read_to_string(&note.path) {
+            state.self_writes.record_text(&format!("{to}/{}", note.rel), &text);
+            if case_only {
+                state.self_writes.record_text(&format!("{from}/{}", note.rel), &text);
             }
         }
     }

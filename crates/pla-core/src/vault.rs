@@ -198,29 +198,58 @@ fn is_hidden(entry: &std::fs::DirEntry) -> bool {
     false
 }
 
-/// Counts `.md` files up to `limit`, looking at no more than `max_entries` entries and never following
-/// links or junctions. Returns the count and whether a limit cut it short.
-fn count_notes(dir: &Path, limit: usize, max_entries: usize) -> (usize, bool) {
-    let (mut count, mut seen) = (0, 0);
-    let mut stack = vec![dir.to_path_buf()];
-    while let Some(d) = stack.pop() {
-        let Ok(entries) = std::fs::read_dir(&d) else { continue };
-        for e in entries.flatten() {
-            seen += 1;
-            if seen > max_entries {
-                return (count, true);
-            }
+/// One file or folder the vault walk found.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WalkEntry {
+    /// Vault-relative, `/` separators.
+    pub rel: String,
+    pub path: PathBuf,
+    pub is_dir: bool,
+}
+
+/// Every visible file and folder under `root`, in no particular order (architecture review 5.2: the
+/// one walk the tree, the index, the extraction, images and the wizard share). Hidden places (a dot
+/// name, or Windows' hidden/system mark) and links or junctions are skipped, never followed; a
+/// folder that cannot be read is left out.
+pub fn walk_vault(root: &Path) -> impl Iterator<Item = WalkEntry> {
+    let mut stack: Vec<(PathBuf, String)> = vec![(root.to_path_buf(), String::new())];
+    let mut pending: std::vec::IntoIter<std::fs::DirEntry> = Vec::new().into_iter();
+    let mut prefix = String::new();
+    std::iter::from_fn(move || loop {
+        if let Some(e) = pending.next() {
             let Ok(kind) = e.file_type() else { continue };
             if kind.is_symlink() || is_hidden(&e) {
                 continue;
             }
+            let rel = format!("{prefix}{}", e.file_name().to_string_lossy());
             if kind.is_dir() {
-                stack.push(e.path());
-            } else if e.file_name().to_string_lossy().to_ascii_lowercase().ends_with(".md") {
-                count += 1;
-                if count >= limit {
-                    return (count, true);
-                }
+                stack.push((e.path(), format!("{rel}/")));
+            }
+            return Some(WalkEntry { rel, path: e.path(), is_dir: kind.is_dir() });
+        }
+        let (dir, next_prefix) = stack.pop()?;
+        prefix = next_prefix;
+        pending = std::fs::read_dir(&dir).map(|it| it.flatten().collect::<Vec<_>>()).unwrap_or_default().into_iter();
+    })
+}
+
+/// Whether `name` is a Markdown note's file name.
+pub fn is_note_name(name: &str) -> bool {
+    Path::new(name).extension().is_some_and(|e| e.eq_ignore_ascii_case("md"))
+}
+
+/// Counts `.md` files up to `limit`, looking at no more than `max_entries` entries. Returns the
+/// count and whether a limit cut it short.
+fn count_notes(dir: &Path, limit: usize, max_entries: usize) -> (usize, bool) {
+    let mut count = 0;
+    for (seen, e) in walk_vault(dir).enumerate() {
+        if seen >= max_entries {
+            return (count, true);
+        }
+        if !e.is_dir && is_note_name(&e.rel) {
+            count += 1;
+            if count >= limit {
+                return (count, true);
             }
         }
     }
@@ -619,6 +648,34 @@ notes = \"Notlar/Arşiv\"
         for p in ["Notlar", r"C:Notlar", "", r"\Notlar"] {
             assert_eq!(inspect_folder(Path::new(p)).state, FolderState::Relative, "{p:?}");
         }
+    }
+
+    #[test]
+    fn the_vault_walk_skips_hidden_places_and_links() {
+        // architecture review 5.2: one walk, one rule for every caller
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().join("kasa");
+        for (rel, body) in [("notes/a.md", "x"), (".obsidian/w.md", "x"), ("notes/.gizli/b.md", "x"), ("c.png", "x"), ("Boş/", "")] {
+            let p = root.join(rel);
+            if rel.ends_with('/') {
+                std::fs::create_dir_all(p).unwrap();
+            } else {
+                std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+                std::fs::write(p, body).unwrap();
+            }
+        }
+        #[cfg(windows)]
+        {
+            std::fs::write(root.join("notes/gizli.md"), "x").unwrap();
+            let ok = std::process::Command::new("attrib").arg("+H").arg(root.join("notes/gizli.md")).output().unwrap().status.success();
+            assert!(ok, "attrib +H");
+            let ok =
+                std::process::Command::new("cmd").args(["/C", "mklink", "/J"]).arg(root.join("bağ")).arg(root.join("notes")).output().unwrap().status.success();
+            assert!(ok, "mklink /J");
+        }
+        let mut seen: Vec<(String, bool)> = walk_vault(&root).map(|e| (e.rel, e.is_dir)).collect();
+        seen.sort();
+        assert_eq!(seen, [("Boş".to_owned(), true), ("c.png".to_owned(), false), ("notes".to_owned(), true), ("notes/a.md".to_owned(), false)]);
     }
 
     #[test]

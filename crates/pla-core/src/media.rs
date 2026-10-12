@@ -154,23 +154,7 @@ pub fn is_image_name(name: &str) -> bool {
 
 /// Every image file in the vault (vault-relative, `/`), hidden places left out.
 pub fn images_in(vault: &Vault) -> Vec<String> {
-    let mut out = Vec::new();
-    let mut dirs = vec![(vault.root.clone(), String::new())];
-    while let Some((dir, prefix)) = dirs.pop() {
-        for entry in std::fs::read_dir(&dir).into_iter().flatten().flatten() {
-            let name = entry.file_name().to_string_lossy().into_owned();
-            if name.starts_with('.') {
-                continue;
-            }
-            let rel = format!("{prefix}{name}");
-            match entry.file_type() {
-                Ok(t) if t.is_dir() => dirs.push((entry.path(), format!("{rel}/"))),
-                Ok(t) if t.is_file() && is_image_name(&name) => out.push(rel),
-                _ => {}
-            }
-        }
-    }
-    out
+    crate::vault::walk_vault(&vault.root).filter(|e| !e.is_dir && is_image_name(&e.rel)).map(|e| e.rel).collect()
 }
 
 /// FR-EDT-016: the image an embed target (`x.png`, `img/x.png`, `x.png|300`) shows, like Obsidian:
