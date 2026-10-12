@@ -523,17 +523,20 @@ pub fn cited(text: &str) -> Vec<String> {
     out
 }
 
-/// FR-QA-003…016 for one question. `turns` are the follow-ups (oldest first).
-pub fn answer(
-    model: &mut dyn ChatModel,
-    env: &ToolEnv<'_>,
-    question: &str,
-    turns: &[Turn],
-    memory: context::Memory<'_>,
-    ui_lang: &str,
-    cancel: &AtomicBool,
-    on: &mut dyn FnMut(Progress),
-) -> Result<Answer, QaError> {
+/// One question as the panel asks it.
+pub struct Question<'a> {
+    pub text: &'a str,
+    /// The follow-ups the model sees again, oldest first.
+    pub turns: &'a [Turn],
+    /// The question's vector, when semantic memory has one (FR-MEM-005).
+    pub memory: context::Memory<'a>,
+    /// PLA's own language, the last say on the answer's (FR-QA-012).
+    pub ui_lang: &'a str,
+}
+
+/// FR-QA-003…016 for one question.
+pub fn answer(model: &mut dyn ChatModel, env: &ToolEnv<'_>, q: &Question<'_>, cancel: &AtomicBool, on: &mut dyn FnMut(Progress)) -> Result<Answer, QaError> {
+    let Question { text: question, turns, memory, ui_lang } = *q;
     let ctx = context::build(env.cache, question, turns, env.now, memory, &env.vault.config.folders.reports)?;
     let lang = super::lang::answer_language(question, turns.last().map(|t| t.question.as_str()), ui_lang);
     let mut calls: Vec<ToolRecord> = Vec::new(); // as the model sees them
@@ -704,9 +707,13 @@ mod tests {
             "Yarın 10:00 için hatırlatıcı ekledim.",
         );
         let mut events = Vec::new();
-        let a = answer(&mut model, &tool_env, "Yarın saat 10'da doktor randevum var, hatırlat", &[], None, "tr", &AtomicBool::new(false), &mut |p| {
-            events.push(p)
-        })
+        let a = answer(
+            &mut model,
+            &tool_env,
+            &Question { text: "Yarın saat 10'da doktor randevum var, hatırlat", turns: &[], memory: None, ui_lang: "tr" },
+            &AtomicBool::new(false),
+            &mut |p| events.push(p),
+        )
         .unwrap();
         assert_eq!(a.tools.len(), 1);
         assert_eq!(a.tools[0].undo.as_ref().unwrap().kind, "task");
@@ -729,10 +736,24 @@ mod tests {
         let tool_env = ToolEnv { vault: &e.vault, pla: &e.pla, cache: &e.cache, now: now(), validation: ValidationSettings::default() };
         let call = "{\"tool\":\"add_task\",\"args\":{\"title\":\"Annemi ara\",\"date\":\"2026-10-09\",\"time\":\"10:00\",\"remind\":true}}";
         let mut model = scripted(&[call], "Tamam.");
-        let a = answer(&mut model, &tool_env, "Cuma günü annemi aramam lazım", &[], None, "tr", &AtomicBool::new(false), &mut |_| {}).unwrap();
+        let a = answer(
+            &mut model,
+            &tool_env,
+            &Question { text: "Cuma günü annemi aramam lazım", turns: &[], memory: None, ui_lang: "tr" },
+            &AtomicBool::new(false),
+            &mut |_| {},
+        )
+        .unwrap();
         assert_eq!((a.tools[0].result["time"].clone(), a.tools[0].result["remind"].clone()), (Value::Null, Value::Bool(false)));
         let mut model = scripted(&[call], "Tamam.");
-        let a = answer(&mut model, &tool_env, "Cuma 10'da annemi ara", &[], None, "tr", &AtomicBool::new(false), &mut |_| {}).unwrap();
+        let a = answer(
+            &mut model,
+            &tool_env,
+            &Question { text: "Cuma 10'da annemi ara", turns: &[], memory: None, ui_lang: "tr" },
+            &AtomicBool::new(false),
+            &mut |_| {},
+        )
+        .unwrap();
         assert_eq!(a.tools[0].result["time"], "10:00", "said, so kept");
     }
 
@@ -752,7 +773,9 @@ mod tests {
         // final review C1: the task stays, so its undo must too
         let e = env();
         let tool_env = ToolEnv { vault: &e.vault, pla: &e.pla, cache: &e.cache, now: now(), validation: ValidationSettings::default() };
-        let err = answer(&mut Breaks, &tool_env, "Yarın doktor", &[], None, "tr", &AtomicBool::new(false), &mut |_| {}).unwrap_err();
+        let err =
+            answer(&mut Breaks, &tool_env, &Question { text: "Yarın doktor", turns: &[], memory: None, ui_lang: "tr" }, &AtomicBool::new(false), &mut |_| {})
+                .unwrap_err();
         let QaError::Model { tools, .. } = err else { panic!("expected a model error") };
         assert_eq!(tools.len(), 1);
         assert!(tools[0].undo.is_some());
@@ -764,7 +787,7 @@ mod tests {
         let tool_env = ToolEnv { vault: &e.vault, pla: &e.pla, cache: &e.cache, now: now(), validation: ValidationSettings::default() };
         let cancel = AtomicBool::new(false);
         let mut model = scripted(&["{\"tool\":\"add_task\",\"args\":{\"title\":\"x\",\"date\":\"2026-10-07\"}}"], "");
-        let err = answer(&mut model, &tool_env, "x ekle", &[], None, "tr", &cancel, &mut |p| {
+        let err = answer(&mut model, &tool_env, &Question { text: "x ekle", turns: &[], memory: None, ui_lang: "tr" }, &cancel, &mut |p| {
             if matches!(p, Progress::Working(None)) {
                 cancel.store(true, Ordering::SeqCst); // Stop lands while the model decides
             }
@@ -781,7 +804,14 @@ mod tests {
         let call = "{\"tool\":\"add_task\",\"args\":{\"title\":\"Market alışverişi\",\"date\":\"2026-10-10\"}}";
         let again = "{\"tool\":\"add_task\",\"args\":{\"title\":\"market ALIŞVERİŞİ\",\"date\":\"2026-10-10\"}}";
         let mut model = scripted(&[call, again, call], "Ekledim.");
-        let a = answer(&mut model, &tool_env, "Cumartesi markete gitmem gerekiyor", &[], None, "tr", &AtomicBool::new(false), &mut |_| {}).unwrap();
+        let a = answer(
+            &mut model,
+            &tool_env,
+            &Question { text: "Cumartesi markete gitmem gerekiyor", turns: &[], memory: None, ui_lang: "tr" },
+            &AtomicBool::new(false),
+            &mut |_| {},
+        )
+        .unwrap();
         assert_eq!(a.tools.len(), 1);
         let n: i64 = e.pla.query_row("SELECT count(*) FROM task", [], |r| r.get(0)).unwrap();
         assert_eq!(n, 1);
@@ -794,7 +824,8 @@ mod tests {
         let tool_env = ToolEnv { vault: &e.vault, pla: &e.pla, cache: &e.cache, now: now(), validation: ValidationSettings::default() };
         let bad = "{\"tool\":\"add_task\",\"args\":{\"title\":\"x\",\"date\":\"yarın\"}}";
         let mut model = scripted(&[bad, bad], "Ekleyemedim.");
-        let a = answer(&mut model, &tool_env, "x ekle", &[], None, "tr", &AtomicBool::new(false), &mut |_| {}).unwrap();
+        let a =
+            answer(&mut model, &tool_env, &Question { text: "x ekle", turns: &[], memory: None, ui_lang: "tr" }, &AtomicBool::new(false), &mut |_| {}).unwrap();
         assert_eq!(a.tools.len(), 1, "only the second refusal reaches the user");
         assert!(a.tools[0].error.as_deref().unwrap().contains("not a date"));
         let second = model.bodies[1]["messages"].as_array().unwrap();
@@ -808,7 +839,8 @@ mod tests {
         let q = |list: &str| format!("{{\"tool\":\"query_tasks\",\"args\":{{\"list\":\"{list}\"}}}}");
         let calls = [q("today"), q("upcoming"), q("completed"), q("all"), q("today")];
         let mut model = scripted(&calls.iter().map(String::as_str).collect::<Vec<_>>(), "Tamam.");
-        let a = answer(&mut model, &tool_env, "görevlerim", &[], None, "tr", &AtomicBool::new(false), &mut |_| {}).unwrap();
+        let a = answer(&mut model, &tool_env, &Question { text: "görevlerim", turns: &[], memory: None, ui_lang: "tr" }, &AtomicBool::new(false), &mut |_| {})
+            .unwrap();
         assert_eq!(a.tools.len(), MAX_CALLS);
     }
 
@@ -820,7 +852,7 @@ mod tests {
         let cancel = AtomicBool::new(false);
         let mut model = scripted(&[], "bir iki üç dört beş");
         let mut seen = 0;
-        let err = answer(&mut model, &tool_env, "say", &[], None, "tr", &cancel, &mut |p| {
+        let err = answer(&mut model, &tool_env, &Question { text: "say", turns: &[], memory: None, ui_lang: "tr" }, &cancel, &mut |p| {
             if matches!(p, Progress::Token(_)) {
                 seen += 1;
                 if seen == 2 {
@@ -840,10 +872,24 @@ mod tests {
         crate::index::index_note(&e.cache, "notes/PLA.md", "# PLA\n\nKarar: Tauri kullanılacak.", 0, 1).unwrap();
         let tool_env = ToolEnv { vault: &e.vault, pla: &e.pla, cache: &e.cache, now: now(), validation: ValidationSettings::default() };
         let mut model = scripted(&[], "Tauri seçildi ([[PLA]]).");
-        let a = answer(&mut model, &tool_env, "PLA kararları neler", &[], None, "tr", &AtomicBool::new(false), &mut |_| {}).unwrap();
+        let a = answer(
+            &mut model,
+            &tool_env,
+            &Question { text: "PLA kararları neler", turns: &[], memory: None, ui_lang: "tr" },
+            &AtomicBool::new(false),
+            &mut |_| {},
+        )
+        .unwrap();
         assert_eq!(a.sources, ["notes/PLA.md"]);
         let mut model = scripted(&[], "Tauri seçildi.");
-        let a = answer(&mut model, &tool_env, "PLA kararları neler", &[], None, "tr", &AtomicBool::new(false), &mut |_| {}).unwrap();
+        let a = answer(
+            &mut model,
+            &tool_env,
+            &Question { text: "PLA kararları neler", turns: &[], memory: None, ui_lang: "tr" },
+            &AtomicBool::new(false),
+            &mut |_| {},
+        )
+        .unwrap();
         assert_eq!(a.sources, ["notes/PLA.md"], "uncited: the notes its context came from");
         assert_eq!(cited("[[A|x]] ve [[B#h]] ve [[A]]"), ["A", "B"]);
     }
@@ -854,7 +900,7 @@ mod tests {
         let e = env();
         let tool_env = ToolEnv { vault: &e.vault, pla: &e.pla, cache: &e.cache, now: now(), validation: ValidationSettings::default() };
         let mut model = scripted(&[], "Selam!");
-        answer(&mut model, &tool_env, "selam", &[], None, "en", &AtomicBool::new(false), &mut |_| {}).unwrap();
+        answer(&mut model, &tool_env, &Question { text: "selam", turns: &[], memory: None, ui_lang: "en" }, &AtomicBool::new(false), &mut |_| {}).unwrap();
         let last = model.bodies[1]["messages"].as_array().unwrap().last().unwrap()["content"].as_str().unwrap().to_owned();
         assert!(last.ends_with("Write it in Turkish."), "{last}");
         let offer = ToolRecord { tool: "suggest_note".into(), args: json!({}), ok: true, result: json!({}), error: None, undo: None };
@@ -940,7 +986,14 @@ mod tests {
         }
         let tool_env = ToolEnv { vault: &e.vault, pla: &e.pla, cache: &e.cache, now: now(), validation: ValidationSettings::default() };
         let mut model = scripted(&["{\"tool\":\"query_tasks\",\"args\":{\"list\":\"all\"}}"], "Tamam.");
-        let a = answer(&mut model, &tool_env, "annemi aradım, o görevi tamamla", &[], None, "tr", &AtomicBool::new(false), &mut |_| {}).unwrap();
+        let a = answer(
+            &mut model,
+            &tool_env,
+            &Question { text: "annemi aradım, o görevi tamamla", turns: &[], memory: None, ui_lang: "tr" },
+            &AtomicBool::new(false),
+            &mut |_| {},
+        )
+        .unwrap();
         let done = a.tools.iter().find(|t| t.tool == "complete_task" && t.ok).expect("completed");
         assert_eq!(done.result["title"], "Annemi aramak");
     }
@@ -959,7 +1012,14 @@ mod tests {
         let tool_env = ToolEnv { vault: &e.vault, pla: &e.pla, cache: &e.cache, now: now(), validation: ValidationSettings::default() };
         let query = "{\"tool\":\"query_tasks\",\"args\":{\"list\":\"all\",\"text\":\"elektrikçiyi aradım\"}}";
         let mut model = scripted(&[query, query], "Tamamlandı.");
-        let a = answer(&mut model, &tool_env, "elektrikçiyi aradım", &[], None, "tr", &AtomicBool::new(false), &mut |_| {}).unwrap();
+        let a = answer(
+            &mut model,
+            &tool_env,
+            &Question { text: "elektrikçiyi aradım", turns: &[], memory: None, ui_lang: "tr" },
+            &AtomicBool::new(false),
+            &mut |_| {},
+        )
+        .unwrap();
         assert!(a.tools.iter().any(|t| t.tool == "complete_task" && t.ok), "{:?}", a.tools);
     }
 
@@ -976,7 +1036,14 @@ mod tests {
         let tool_env = ToolEnv { vault: &e.vault, pla: &e.pla, cache: &e.cache, now: now(), validation: ValidationSettings::default() };
         let query = "{\"tool\":\"query_tasks\",\"args\":{\"list\":\"upcoming\"}}";
         let mut model = scripted(&[query], "Yarın annemi arayacaksın.");
-        let a = answer(&mut model, &tool_env, "yarın ne işim var, unuttum", &[], None, "tr", &AtomicBool::new(false), &mut |_| {}).unwrap();
+        let a = answer(
+            &mut model,
+            &tool_env,
+            &Question { text: "yarın ne işim var, unuttum", turns: &[], memory: None, ui_lang: "tr" },
+            &AtomicBool::new(false),
+            &mut |_| {},
+        )
+        .unwrap();
         assert!(!a.tools.iter().any(|t| t.tool == "complete_task"), "{:?}", a.tools);
         let decide = model.bodies[1]["messages"].as_array().unwrap();
         assert!(!decide.iter().any(|m| m["content"].as_str().unwrap_or_default().contains("call complete_task with task_id")), "no nudge either");
@@ -989,8 +1056,14 @@ mod tests {
         let tool_env = ToolEnv { vault: &e.vault, pla: &e.pla, cache: &e.cache, now: now(), validation: ValidationSettings::default() };
         let add = "{\"tool\":\"add_task\",\"args\":{\"title\":\"Toplantı\",\"date\":\"2026-10-07\",\"time\":\"14:00\"}}";
         let mut model = scripted(&[add], "Ekledim.");
-        let a = answer(&mut model, &tool_env, "sen karar ver", &[turn("yarın öğleden sonra toplantı ekle")], None, "tr", &AtomicBool::new(false), &mut |_| {})
-            .unwrap();
+        let a = answer(
+            &mut model,
+            &tool_env,
+            &Question { text: "sen karar ver", turns: &[turn("yarın öğleden sonra toplantı ekle")], memory: None, ui_lang: "tr" },
+            &AtomicBool::new(false),
+            &mut |_| {},
+        )
+        .unwrap();
         assert_eq!(a.tools.iter().map(|t| t.tool.as_str()).collect::<Vec<_>>(), ["add_task"]);
         assert!(!delegates("karar verdim, yarın başlıyorum"));
     }
@@ -1044,7 +1117,14 @@ mod tests {
         }];
         let call = "{\"tool\":\"create_note\",\"args\":{\"title\":\"Ders\",\"body\":\"İşletim sistemleri chapter 1\"}}";
         let mut model = scripted(&[call, call], "Zaten kayıtlı.");
-        let a = answer(&mut model, &tool_env, "notlarıma ekle bunu", &[told], None, "tr", &AtomicBool::new(false), &mut |_| {}).unwrap();
+        let a = answer(
+            &mut model,
+            &tool_env,
+            &Question { text: "notlarıma ekle bunu", turns: &[told], memory: None, ui_lang: "tr" },
+            &AtomicBool::new(false),
+            &mut |_| {},
+        )
+        .unwrap();
         assert!(!a.tools.iter().any(|t| t.tool == "create_note" && t.ok), "{:?}", a.tools);
         assert!(!e.vault.root.join("notes").exists() || std::fs::read_dir(e.vault.root.join("notes")).unwrap().next().is_none());
         let heard = model.bodies[1]["messages"].as_array().unwrap().iter().any(|m| m["content"].as_str().unwrap_or_default().contains("notes/Ders.md"));
@@ -1071,7 +1151,8 @@ mod tests {
             ],
             "Tamam.",
         );
-        answer(&mut model, &tool_env, "cuma kargoyu al", &[], None, "tr", &AtomicBool::new(false), &mut |_| {}).unwrap();
+        answer(&mut model, &tool_env, &Question { text: "cuma kargoyu al", turns: &[], memory: None, ui_lang: "tr" }, &AtomicBool::new(false), &mut |_| {})
+            .unwrap();
         let open: i64 = e.pla.query_row("SELECT count(*) FROM task WHERE status = 'open'", [], |r| r.get(0)).unwrap();
         assert_eq!(open, 1);
     }
@@ -1089,10 +1170,19 @@ mod tests {
         .unwrap();
         let tool_env = ToolEnv { vault: &e.vault, pla: &e.pla, cache: &e.cache, now: now(), validation: ValidationSettings::default() };
         let mut model = scripted(&["{\"tool\":\"query_tasks\",\"args\":{\"list\":\"all\",\"text\":\"faturayı ödedim\"}}"], "Tamam.");
-        let a = answer(&mut model, &tool_env, "faturayı ödedim", &[], None, "tr", &AtomicBool::new(false), &mut |_| {}).unwrap();
+        let a =
+            answer(&mut model, &tool_env, &Question { text: "faturayı ödedim", turns: &[], memory: None, ui_lang: "tr" }, &AtomicBool::new(false), &mut |_| {})
+                .unwrap();
         assert!(a.tools.iter().any(|t| t.tool == "complete_task" && t.ok && t.undo.is_some()), "{:?}", a.tools);
         let mut model = scripted(&["{\"tool\":\"query_tasks\",\"args\":{\"list\":\"all\",\"text\":\"fatura\"}}"], "Evet.");
-        let asked = answer(&mut model, &tool_env, "faturayı ödedim mi?", &[], None, "tr", &AtomicBool::new(false), &mut |_| {}).unwrap();
+        let asked = answer(
+            &mut model,
+            &tool_env,
+            &Question { text: "faturayı ödedim mi?", turns: &[], memory: None, ui_lang: "tr" },
+            &AtomicBool::new(false),
+            &mut |_| {},
+        )
+        .unwrap();
         assert!(!asked.tools.iter().any(|t| t.tool == "complete_task"), "a question completes nothing");
     }
 
@@ -1105,12 +1195,25 @@ mod tests {
         let turns = [turn(said), turn("notlarıma ekle bunu")];
         // the real model offered a note instead, which a short reply is not worth (eval v4)
         let mut model = scripted(&["{\"tool\":\"suggest_note\",\"args\":{\"title\":\"x\",\"body\":\"y\"}}"], "Kaydettim.");
-        let a = answer(&mut model, &tool_env, "sen karar ver", &turns, None, "tr", &AtomicBool::new(false), &mut |_| {}).unwrap();
+        let a = answer(
+            &mut model,
+            &tool_env,
+            &Question { text: "sen karar ver", turns: &turns, memory: None, ui_lang: "tr" },
+            &AtomicBool::new(false),
+            &mut |_| {},
+        )
+        .unwrap();
         let note = a.tools.iter().find(|t| t.tool == "create_note").expect("a note");
         assert!(std::fs::read_to_string(e.vault.root.join(note.result["note"].as_str().unwrap())).unwrap().contains("işletim sistemleri"));
         let mut model = scripted(&[], "Tamam.");
-        let chat =
-            answer(&mut model, &tool_env, "sen karar ver", &[turn("akşam ne yesek bilemedim")], None, "tr", &AtomicBool::new(false), &mut |_| {}).unwrap();
+        let chat = answer(
+            &mut model,
+            &tool_env,
+            &Question { text: "sen karar ver", turns: &[turn("akşam ne yesek bilemedim")], memory: None, ui_lang: "tr" },
+            &AtomicBool::new(false),
+            &mut |_| {},
+        )
+        .unwrap();
         assert!(chat.tools.is_empty(), "no note was asked for");
     }
 
@@ -1137,7 +1240,14 @@ mod tests {
             new_topic: false,
         };
         let mut model = scripted(&[], "Cuma boş.");
-        answer(&mut model, &tool_env, "Peki ya cuma?", &[earlier], None, "tr", &AtomicBool::new(false), &mut |_| {}).unwrap();
+        answer(
+            &mut model,
+            &tool_env,
+            &Question { text: "Peki ya cuma?", turns: &[earlier], memory: None, ui_lang: "tr" },
+            &AtomicBool::new(false),
+            &mut |_| {},
+        )
+        .unwrap();
         let msgs = model.bodies[1]["messages"].as_array().unwrap();
         assert_eq!(msgs[1]["content"], "Yarın ne işim var?");
         assert_eq!(msgs[2]["content"], "Dişçi.");

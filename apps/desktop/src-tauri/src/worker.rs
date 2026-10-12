@@ -735,14 +735,20 @@ impl Worker {
         let memory_arg = vector.as_ref().map(|(v, m)| (v.as_slice(), m.as_str()));
         let now = (self.clock)();
         let env = ToolEnv { vault: &self.vault, pla: &self.conn, cache: &cache, now, validation: PipelineSettings::default().validation };
-        let result = engine::answer(model, &env, &question, &turns, memory_arg, crate::notify::ui_lang(), &cancel, &mut |p| {
-            let event = match p {
-                Progress::Working(tool) => QaEvent::Working { turn_id: turn_id.clone(), tool },
-                Progress::Tool(record) => QaEvent::Tool { turn_id: turn_id.clone(), record },
-                Progress::Token(text) => QaEvent::Token { turn_id: turn_id.clone(), text },
-            };
-            on(event);
-        });
+        let result = engine::answer(
+            model,
+            &env,
+            &engine::Question { text: &question, turns: &turns, memory: memory_arg, ui_lang: crate::notify::ui_lang() },
+            &cancel,
+            &mut |p| {
+                let event = match p {
+                    Progress::Working(tool) => QaEvent::Working { turn_id: turn_id.clone(), tool },
+                    Progress::Tool(record) => QaEvent::Tool { turn_id: turn_id.clone(), record },
+                    Progress::Token(text) => QaEvent::Token { turn_id: turn_id.clone(), text },
+                };
+                on(event);
+            },
+        );
         let turn = |answer: String, tools: Vec<ToolRecord>, status: &str| Turn {
             turn_id: turn_id.clone(),
             question: question.clone(),
