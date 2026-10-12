@@ -308,21 +308,12 @@ impl LlamaServer {
         &self.base_url
     }
 
-    /// The model's raw JSON answer for one block of text.
-    pub fn extract_raw(&self, reference: NaiveDate, text: &str) -> Result<String, LlmError> {
+    /// The model's raw JSON answer for one block of text; `LlmError::Cancelled` soon after `cancel`
+    /// is set (removing the model must not wait out a slow request, architecture review M5).
+    pub fn extract_raw(&self, reference: NaiveDate, text: &str, cancel: &AtomicBool) -> Result<String, LlmError> {
         self.settle();
-        let mut response = self
-            .agent
-            .post(format!("{}/v1/chat/completions", self.base_url))
-            .header("Authorization", &format!("Bearer {}", self.api_key))
-            .send_json(request_body(reference, text))
-            .map_err(|e| match e {
-                ureq::Error::StatusCode(code) => LlmError::Status(code),
-                ureq::Error::Timeout(_) => LlmError::Timeout,
-                other => LlmError::Http(other.to_string()),
-            })?;
-        let body: Value = response.body_mut().read_json().map_err(|e| LlmError::Http(e.to_string()))?;
-        body["choices"][0]["message"]["content"].as_str().map(str::to_owned).ok_or(LlmError::BadResponse)
+        let url = format!("{}/v1/chat/completions", self.base_url);
+        post(self.agent.clone(), url, self.api_key.clone(), request_body(reference, text), cancel, None, &self.in_flight)
     }
 
     /// FR-MEM-004: one vector per text (L2-normalised by the server).
@@ -345,7 +336,7 @@ impl LlamaServer {
     }
 
     pub fn extract(&self, reference: NaiveDate, text: &str) -> Result<RawExtraction, LlmError> {
-        Ok(parse_extraction(&self.extract_raw(reference, text)?)?)
+        Ok(parse_extraction(&self.extract_raw(reference, text, &AtomicBool::new(false))?)?)
     }
 }
 
@@ -372,74 +363,87 @@ impl LlamaServer {
         }
     }
 
-    /// FR-QA-003/013: runs one chat request on its own thread and waits for it, looking at `cancel`
-    /// every 100 ms, so Stop answers within a second even while the model still reads the prompt.
-    /// When stopped, the request thread finds no one listening and drops the connection, which
-    /// ends the generation in llama-server. With `on_token`, the answer is streamed.
-    fn chat(&self, body: &Value, cancel: &AtomicBool, mut on_token: Option<&mut dyn FnMut(&str)>) -> Result<String, LlmError> {
-        let (tx, rx) = std::sync::mpsc::channel::<Piece>();
-        let stream = on_token.is_some();
-        let mut body = body.clone();
-        body["stream"] = Value::Bool(stream);
+    /// FR-QA-003/013: one chat request, stopped within a second once `cancel` is set (see `post`).
+    fn chat(&self, body: &Value, cancel: &AtomicBool, on_token: Option<&mut dyn FnMut(&str)>) -> Result<String, LlmError> {
         self.settle();
-        let (agent, url, key) = (chat_agent(), format!("{}/v1/chat/completions", self.base_url), self.api_key.clone());
-        let handle = std::thread::spawn(move || {
-            let response = agent.post(url).header("Authorization", &format!("Bearer {key}")).send_json(&body);
-            let mut response = match response {
-                Ok(r) => r,
-                Err(e) => {
-                    let _ = tx.send(Piece::Failed(http_error(e)));
-                    return;
-                }
-            };
-            if !stream {
-                let piece = match response.body_mut().read_json::<Value>() {
-                    Ok(v) => v["choices"][0]["message"]["content"].as_str().map_or(Piece::Failed(LlmError::BadResponse), |s| Piece::Done(s.to_owned())),
-                    Err(e) => Piece::Failed(LlmError::Http(e.to_string())),
-                };
-                let _ = tx.send(piece);
+        let url = format!("{}/v1/chat/completions", self.base_url);
+        post(chat_agent(), url, self.api_key.clone(), body.clone(), cancel, on_token, &self.in_flight)
+    }
+}
+
+/// Runs one request on its own thread and waits for it, looking at `cancel` every 100 ms, so Stop
+/// (or removing the model) answers within a second even while the model still reads the prompt.
+/// When stopped, the request thread finds no one listening and drops the connection, which ends
+/// the generation in llama-server; it is left in `in_flight` for the next request to wait for
+/// (`-np 1`). With `on_token`, the answer is streamed.
+fn post(
+    agent: ureq::Agent,
+    url: String,
+    key: String,
+    mut body: Value,
+    cancel: &AtomicBool,
+    mut on_token: Option<&mut dyn FnMut(&str)>,
+    in_flight: &Mutex<Option<JoinHandle<()>>>,
+) -> Result<String, LlmError> {
+    let (tx, rx) = std::sync::mpsc::channel::<Piece>();
+    let stream = on_token.is_some();
+    body["stream"] = Value::Bool(stream);
+    let handle = std::thread::spawn(move || {
+        let response = agent.post(url).header("Authorization", &format!("Bearer {key}")).send_json(&body);
+        let mut response = match response {
+            Ok(r) => r,
+            Err(e) => {
+                let _ = tx.send(Piece::Failed(http_error(e)));
                 return;
             }
-            let reader = BufReader::new(response.body_mut().as_reader());
-            let mut whole = String::new();
-            let mut finished = false;
-            for line in reader.lines() {
-                let Ok(line) = line else {
-                    let _ = tx.send(Piece::Failed(LlmError::Http("the answer stream broke off".into())));
-                    return;
-                };
-                let Some(data) = line.strip_prefix("data:").map(str::trim) else { continue };
-                if data == "[DONE]" {
-                    finished = true;
-                    break;
-                }
-                let Ok(chunk) = serde_json::from_str::<Value>(data) else { continue };
-                if let Some(token) = chunk["choices"][0]["delta"]["content"].as_str().filter(|t| !t.is_empty()) {
-                    whole.push_str(token);
-                    if tx.send(Piece::Token(token.to_owned())).is_err() {
-                        return; // stopped: dropping the response closes the connection
-                    }
+        };
+        if !stream {
+            let piece = match response.body_mut().read_json::<Value>() {
+                Ok(v) => v["choices"][0]["message"]["content"].as_str().map_or(Piece::Failed(LlmError::BadResponse), |s| Piece::Done(s.to_owned())),
+                Err(e) => Piece::Failed(LlmError::Http(e.to_string())),
+            };
+            let _ = tx.send(piece);
+            return;
+        }
+        let reader = BufReader::new(response.body_mut().as_reader());
+        let mut whole = String::new();
+        let mut finished = false;
+        for line in reader.lines() {
+            let Ok(line) = line else {
+                let _ = tx.send(Piece::Failed(LlmError::Http("the answer stream broke off".into())));
+                return;
+            };
+            let Some(data) = line.strip_prefix("data:").map(str::trim) else { continue };
+            if data == "[DONE]" {
+                finished = true;
+                break;
+            }
+            let Ok(chunk) = serde_json::from_str::<Value>(data) else { continue };
+            if let Some(token) = chunk["choices"][0]["delta"]["content"].as_str().filter(|t| !t.is_empty()) {
+                whole.push_str(token);
+                if tx.send(Piece::Token(token.to_owned())).is_err() {
+                    return; // stopped: dropping the response closes the connection
                 }
             }
-            // a stream that ends without [DONE] was cut off (the server died): not a whole answer
-            let _ = tx.send(if finished { Piece::Done(whole) } else { Piece::Failed(LlmError::Http("the answer stream broke off".into())) });
-        });
-        loop {
-            if cancel.load(Ordering::SeqCst) {
-                *self.in_flight.lock().expect("in-flight lock") = Some(handle);
-                return Err(LlmError::Cancelled);
-            }
-            match rx.recv_timeout(Duration::from_millis(100)) {
-                Ok(Piece::Token(t)) => {
-                    if let Some(f) = on_token.as_mut() {
-                        f(&t);
-                    }
+        }
+        // a stream that ends without [DONE] was cut off (the server died): not a whole answer
+        let _ = tx.send(if finished { Piece::Done(whole) } else { Piece::Failed(LlmError::Http("the answer stream broke off".into())) });
+    });
+    loop {
+        if cancel.load(Ordering::SeqCst) {
+            *in_flight.lock().expect("in-flight lock") = Some(handle);
+            return Err(LlmError::Cancelled);
+        }
+        match rx.recv_timeout(Duration::from_millis(100)) {
+            Ok(Piece::Token(t)) => {
+                if let Some(f) = on_token.as_mut() {
+                    f(&t);
                 }
-                Ok(Piece::Done(text)) => return Ok(text),
-                Ok(Piece::Failed(e)) => return Err(e),
-                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
-                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => return Err(LlmError::BadResponse),
             }
+            Ok(Piece::Done(text)) => return Ok(text),
+            Ok(Piece::Failed(e)) => return Err(e),
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => return Err(LlmError::BadResponse),
         }
     }
 }
@@ -463,7 +467,7 @@ impl Drop for LlamaServer {
 
 impl crate::pipeline::Extractor for LlamaServer {
     fn extract_raw(&mut self, reference: NaiveDate, text: &str) -> Result<String, LlmError> {
-        LlamaServer::extract_raw(self, reference, text)
+        LlamaServer::extract_raw(self, reference, text, &AtomicBool::new(false))
     }
 }
 
@@ -480,6 +484,8 @@ pub struct ModelHost {
     /// When the embedding server last failed to start: it is not tried again for a while, so a
     /// question is not held up and the indexer does not spawn it every 2 s (final review I2).
     failed_at: Option<Instant>,
+    /// Stops an extraction in flight (`Extractor::set_interrupt`).
+    interrupt: Arc<AtomicBool>,
 }
 
 /// How long a failed embedding server is left alone.
@@ -488,7 +494,7 @@ const EMBED_RETRY_AFTER: Duration = Duration::from_secs(300);
 impl ModelHost {
     pub fn new(cfg: ServerConfig, idle_after: Duration) -> Self {
         let model_id = cfg.model.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-        Self { cfg, idle_after, server: None, last_used: Instant::now(), start_attempts: 0, model_id, failed_at: None }
+        Self { cfg, idle_after, server: None, last_used: Instant::now(), start_attempts: 0, model_id, failed_at: None, interrupt: Arc::default() }
     }
 
     pub fn is_running(&self) -> bool {
@@ -582,7 +588,8 @@ impl crate::qa::ChatModel for ModelHost {
 
 impl crate::pipeline::Extractor for ModelHost {
     fn extract_raw(&mut self, reference: NaiveDate, text: &str) -> Result<String, LlmError> {
-        let answer = self.server()?.extract_raw(reference, text);
+        let interrupt = Arc::clone(&self.interrupt);
+        let answer = self.server()?.extract_raw(reference, text, &interrupt);
         self.last_used = Instant::now();
         answer
     }
@@ -593,6 +600,10 @@ impl crate::pipeline::Extractor for ModelHost {
 
     fn is_running(&self) -> bool {
         ModelHost::is_running(self)
+    }
+
+    fn set_interrupt(&mut self, flag: Arc<AtomicBool>) {
+        self.interrupt = flag;
     }
 
     fn chat_model(&mut self) -> Option<&mut dyn crate::qa::ChatModel> {
@@ -661,6 +672,31 @@ mod tests {
         let _ = child.kill();
         assert!(matches!(result, Err(LlmError::StartupTimeout(_))));
         assert!(started.elapsed() < Duration::from_secs(6), "took {:?}", started.elapsed());
+    }
+
+    #[test]
+    fn a_request_stops_soon_after_it_is_cancelled() {
+        // architecture review M5: removing the model must not wait out a 120 s extraction
+        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let url = format!("http://127.0.0.1:{}/v1/chat/completions", listener.local_addr().unwrap().port());
+        std::thread::spawn(move || {
+            let mut held = Vec::new();
+            for conn in listener.incoming() {
+                held.push(conn); // reads nothing, answers nothing
+            }
+        });
+        let cancel = Arc::new(AtomicBool::new(false));
+        let flag = Arc::clone(&cancel);
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(300));
+            flag.store(true, Ordering::SeqCst);
+        });
+        let in_flight = Mutex::new(None);
+        let started = Instant::now();
+        let result = post(http_agent(), url, "key".into(), serde_json::json!({}), &cancel, None, &in_flight);
+        assert!(matches!(result, Err(LlmError::Cancelled)), "{result:?}");
+        assert!(started.elapsed() < Duration::from_secs(2), "took {:?}", started.elapsed());
+        assert!(in_flight.lock().unwrap().is_some(), "the next request waits for this one to leave");
     }
 
     #[test]

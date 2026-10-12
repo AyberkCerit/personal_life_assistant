@@ -23,7 +23,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("model ready in {:.1}s", t.elapsed().as_secs_f64());
 
     let t = Instant::now();
-    let raw = server.extract_raw(reference, &text)?;
+    let raw = server.extract_raw(reference, &text, &std::sync::atomic::AtomicBool::new(false))?;
     println!("raw ({:.1}s): {raw}", t.elapsed().as_secs_f64());
     for item in pla_core::extraction::parse_extraction(&raw)?.items {
         println!("{:?}", validate(&item, reference, &ValidationSettings::default()));

@@ -26,6 +26,9 @@ pub trait Extractor {
     fn is_running(&self) -> bool {
         false
     }
+    /// A switch that stops the call in flight (removing the model, a question, pause, closing):
+    /// once set, `extract_raw` returns `LlmError::Cancelled` within about a second.
+    fn set_interrupt(&mut self, _flag: std::sync::Arc<std::sync::atomic::AtomicBool>) {}
     /// The same model for the Q&A panel (FR-QA-003), when this extractor has one.
     fn chat_model(&mut self) -> Option<&mut dyn crate::qa::ChatModel> {
         None

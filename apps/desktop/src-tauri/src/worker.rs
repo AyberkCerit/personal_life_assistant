@@ -253,9 +253,13 @@ pub struct Worker {
 }
 
 impl Worker {
-    pub fn new(vault: Vault, conn: Connection, extractor: Option<Box<dyn Extractor + Send>>, notify: Notify) -> Self {
+    pub fn new(vault: Vault, conn: Connection, mut extractor: Option<Box<dyn Extractor + Send>>, notify: Notify) -> Self {
         let model = if extractor.is_some() { ModelState::Off } else { ModelState::NotInstalled };
         let reader = conn.path().and_then(|p| Connection::open(p).ok());
+        let interrupt = Arc::new(AtomicBool::new(false));
+        if let Some(x) = extractor.as_mut() {
+            x.set_interrupt(Arc::clone(&interrupt));
+        }
         Self {
             vault,
             conn,
@@ -269,7 +273,7 @@ impl Worker {
             pause: Arc::new(AtomicBool::new(false)),
             dropping: Arc::new(AtomicBool::new(false)),
             asking: Arc::new(AtomicUsize::new(0)),
-            interrupt: Arc::new(AtomicBool::new(false)),
+            interrupt,
             on_added: None,
             on_summary: None,
             on_report: None,
@@ -343,7 +347,9 @@ impl Worker {
                     }
                 }
                 Ok(Command::UseModel(cfg)) => {
-                    self.extractor = Some((self.make_extractor)(cfg));
+                    let mut extractor = (self.make_extractor)(cfg);
+                    extractor.set_interrupt(Arc::clone(&self.interrupt));
+                    self.extractor = Some(extractor);
                     self.status.model = self.model_state();
                     self.status.last_error = None;
                     self.process();
@@ -424,6 +430,9 @@ impl Worker {
             return; // FR-EXT-026: keep queuing, do not process
         }
         if let Some(extractor) = self.extractor.as_mut() {
+            // A new run: an earlier stop is spent. Whoever stops this one sets a lasting flag too
+            // (pause, dropping, asking, cancel), which `Cancellable` reads before every call.
+            self.interrupt.store(false, Ordering::SeqCst);
             self.status.busy = true;
             self.status.queued = queued_notes(&self.conn).map_or(0, |q| q.len());
             (self.notify)(&self.status); // field borrows: the extractor stays borrowed
@@ -1328,6 +1337,40 @@ mod tests {
         done.recv_timeout(Duration::from_secs(5)).expect("answered between two model calls");
         assert!(asked.elapsed() < Duration::from_secs(2), "took {:?}", asked.elapsed());
         assert!(calls.load(Ordering::SeqCst) < 20, "the rest of the queue was not run first");
+        let s = wait_for(&statuses, |s| s.model == ModelState::NotInstalled && !s.busy);
+        assert_eq!(s.last_error, None, "removing is not an error");
+        handle.shutdown();
+    }
+
+    /// One model call that takes as long as a slow CPU's (30 s) unless the worker interrupts it.
+    struct Interruptible(Option<Arc<AtomicBool>>);
+    impl Extractor for Interruptible {
+        fn extract_raw(&mut self, _: NaiveDate, _: &str) -> Result<String, LlmError> {
+            let start = Instant::now();
+            while start.elapsed() < Duration::from_secs(30) {
+                if self.0.as_ref().is_some_and(|f| f.load(Ordering::SeqCst)) {
+                    return Err(LlmError::Cancelled);
+                }
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            Ok(TASK.to_owned())
+        }
+        fn set_interrupt(&mut self, flag: Arc<AtomicBool>) {
+            self.0 = Some(flag);
+        }
+    }
+
+    #[test]
+    fn removing_the_model_interrupts_the_call_in_flight() {
+        // architecture review M5: the removal waited out a whole extraction request (up to 120 s)
+        let (_tmp, handle, statuses, _data) = setup(Some(Box::new(Interruptible(None))));
+        wait_for(&statuses, |s| s.busy);
+        std::thread::sleep(Duration::from_millis(200)); // the call is running now
+        let (ack, done) = std::sync::mpsc::channel();
+        let asked = Instant::now();
+        handle.drop_model(ack);
+        done.recv_timeout(Duration::from_secs(10)).expect("the model was dropped");
+        assert!(asked.elapsed() < Duration::from_secs(2), "took {:?}", asked.elapsed());
         let s = wait_for(&statuses, |s| s.model == ModelState::NotInstalled && !s.busy);
         assert_eq!(s.last_error, None, "removing is not an error");
         handle.shutdown();

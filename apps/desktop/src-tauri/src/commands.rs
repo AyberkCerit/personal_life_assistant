@@ -775,8 +775,8 @@ pub fn model_remove(app: AppHandle, state: State<AppState>) -> Result<(), String
     let (ack, done) = std::sync::mpsc::channel();
     let asked = state.session.lock().expect("session lock").as_ref().map(|s| s.worker.drop_model(ack)).is_some();
     if asked {
-        // The run stops before its next model call; one call in flight can take up to the host's
-        // request timeout (60 s).
+        // The run stops before its next model call and the call in flight within a second
+        // (Extractor::set_interrupt); only a model still starting can hold it, two tries of 30 s.
         done.recv_timeout(Duration::from_secs(90)).map_err(|_| "model_busy".to_owned())?;
     }
     if let crate::model_paths::Removal::Delete(path) = &plan {
