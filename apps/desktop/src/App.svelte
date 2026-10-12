@@ -402,6 +402,8 @@
     const unAdded = api.onItemsAdded((items) => {
       if (items.some((i) => i.kind === "metric")) metricsVersion++;
     });
+    // FR-SCH-015: Windows shows it as a notification; the window says it too (architecture review M9)
+    const unProblem = api.onBackgroundProblem((message) => (error = tf("background.problem", { reason: message })));
     const shortcut = (e: KeyboardEvent) => {
       if (e.ctrlKey && e.key === ",") {
         e.preventDefault();
@@ -453,6 +455,7 @@
       void unOpen.then((f) => f());
       void unQuick.then((f) => f());
       void unAdded.then((f) => f());
+      void unProblem.then((f) => f());
       window.removeEventListener("keydown", shortcut);
       window.removeEventListener("dragover", noFileDrop);
       window.removeEventListener("drop", noFileDrop);

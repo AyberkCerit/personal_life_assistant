@@ -258,4 +258,6 @@ export const api = {
   onTasksChanged: (cb: () => void) => on<unknown>("tasks-changed", () => cb()),
   onNewNote: (cb: () => void) => on<unknown>("new-note", () => cb()),
   onPausedChanged: (cb: (paused: boolean) => void) => on<boolean>("paused-changed", cb),
+  /** A background job (backup, weekly report) failed for the second time today (FR-SCH-015). */
+  onBackgroundProblem: (cb: (message: string) => void) => on<string>("background-problem", cb),
 };
