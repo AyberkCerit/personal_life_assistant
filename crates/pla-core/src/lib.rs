@@ -9,6 +9,7 @@ pub mod fs_atomic;
 pub mod index;
 pub mod jobs;
 pub mod llm;
+pub mod markdown;
 pub mod media;
 pub mod memory;
 pub mod metrics;

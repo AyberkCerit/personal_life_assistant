@@ -5,6 +5,7 @@ use std::path::Path;
 
 use chrono::NaiveDate;
 
+use crate::markdown::{frontmatter_end, is_heading, list_item_body, Fences};
 use crate::vault::{is_under, Folders, Vault};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -19,26 +20,19 @@ pub fn split_blocks(text: &str) -> Vec<Block> {
     let lines: Vec<&str> = text.lines().collect();
     let mut blocks = Vec::new();
     let mut current: Vec<&str> = Vec::new();
-    let mut fence: Option<&str> = None;
+    let mut fences = Fences::default();
 
-    for line in &lines[frontmatter_end(&lines)..] {
+    for line in &lines[frontmatter_end(&lines).unwrap_or(0)..] {
         let trimmed = line.trim_start();
-        if let Some(marker) = fence {
-            if trimmed.starts_with(marker) {
-                fence = None;
-            }
-            continue;
-        }
-        if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
-            flush(&mut current, &mut blocks);
-            fence = Some(&trimmed[..3]);
+        if fences.is_code(line) {
+            flush(&mut current, &mut blocks); // code ends the block before it and is no block itself
         } else if trimmed.is_empty() {
             flush(&mut current, &mut blocks);
         } else if is_heading(trimmed) {
             flush(&mut current, &mut blocks);
             current.push(line);
             flush(&mut current, &mut blocks);
-        } else if is_list_item(trimmed) {
+        } else if list_item_body(trimmed).is_some() {
             flush(&mut current, &mut blocks);
             current.push(line);
         } else {
@@ -57,49 +51,22 @@ fn flush(current: &mut Vec<&str>, blocks: &mut Vec<Block>) {
     current.clear();
 }
 
-/// A Markdown heading: one to six `#` and a space (`#etiket` is a tag, not a heading).
-pub(crate) fn is_heading(trimmed: &str) -> bool {
-    let hashes = trimmed.chars().take_while(|c| *c == '#').count();
-    (1..=6).contains(&hashes) && trimmed[hashes..].starts_with(' ')
-}
-
-fn is_list_item(trimmed: &str) -> bool {
-    if ["- ", "* ", "+ "].iter().any(|m| trimmed.starts_with(m)) {
-        return true;
-    }
-    let digits = trimmed.chars().take_while(char::is_ascii_digit).count();
-    digits > 0 && (trimmed[digits..].starts_with(". ") || trimmed[digits..].starts_with(") "))
-}
-
 /// Decision 2026-10-02 (FR-EDT-019): a checked list item is done and never produces items.
 pub fn is_checked_item(text: &str) -> bool {
-    let t = text.trim_start();
-    let after_marker = ["- ", "* ", "+ "].iter().find_map(|m| t.strip_prefix(m)).or_else(|| {
-        let digits = t.chars().take_while(char::is_ascii_digit).count();
-        (digits > 0).then(|| &t[digits..]).and_then(|r| r.strip_prefix(". ").or_else(|| r.strip_prefix(") ")))
-    });
-    after_marker.is_some_and(|r| r.starts_with("[x]") || r.starts_with("[X]"))
-}
-
-/// Index of the first body line: after a `---` … `---`/`...` frontmatter, or 0 when there is none.
-fn frontmatter_end(lines: &[&str]) -> usize {
-    if lines.first().map(|l| l.trim_end()) != Some("---") {
-        return 0;
-    }
-    lines.iter().enumerate().skip(1).find(|(_, l)| matches!(l.trim_end(), "---" | "...")).map_or(0, |(i, _)| i + 1)
+    list_item_body(text.trim_start()).is_some_and(|r| r.starts_with("[x]") || r.starts_with("[X]"))
 }
 
 /// FR-EXT-001: notes written by PLA itself carry `pla_generated: true` and are never extracted.
 pub fn is_generated(text: &str) -> bool {
     let text = text.strip_prefix('\u{feff}').unwrap_or(text);
     let lines: Vec<&str> = text.lines().collect();
-    let end = frontmatter_end(&lines);
-    end > 0
-        && lines[1..end - 1].iter().any(|line| {
+    frontmatter_end(&lines).is_some_and(|end| {
+        lines[1..end - 1].iter().any(|line| {
             line.split_once(':').is_some_and(|(key, value)| {
                 key.trim().eq_ignore_ascii_case("pla_generated") && value.trim().trim_matches(|c| c == '"' || c == '\'').eq_ignore_ascii_case("true")
             })
         })
+    })
 }
 
 /// Hidden paths and the reports/templates folders are never extracted (FR-EXT-001, FR-VLT-017).

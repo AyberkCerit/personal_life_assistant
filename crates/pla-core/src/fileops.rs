@@ -119,16 +119,9 @@ pub fn rewrite_links(text: &str, old_rel: &str, new_rel: &str, by_name: bool) ->
     let (new_path, new_title) = (strip_md(new_rel).to_owned(), stem(new_rel));
     let mut out = String::with_capacity(text.len());
     let mut changed = false;
-    let mut fence: Option<&str> = None;
+    let mut fences = crate::markdown::Fences::default();
     for line in text.split_inclusive('\n') {
-        let trimmed = line.trim_start();
-        let marker = ["```", "~~~"].into_iter().find(|m| trimmed.starts_with(m));
-        match (fence, marker) {
-            (None, Some(m)) => fence = Some(m),
-            (Some(open), Some(m)) if open == m => fence = None,
-            _ => {}
-        }
-        if fence.is_some() || marker.is_some() {
+        if fences.is_code(line) {
             out.push_str(line);
             continue;
         }

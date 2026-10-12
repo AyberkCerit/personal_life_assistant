@@ -74,16 +74,6 @@ pub fn strip_md(name: &str) -> &str {
     }
 }
 
-/// The frontmatter's lines (without the `---` fences) and the index of the first body line, or
-/// `None` when there is no frontmatter or it never closes (FR-EDT-007: then there is none).
-fn split_frontmatter<'a>(lines: &[&'a str]) -> Option<(Vec<&'a str>, usize)> {
-    if lines.first().map(|l| l.trim_end()) != Some("---") {
-        return None;
-    }
-    let end = lines.iter().enumerate().skip(1).find(|(_, l)| matches!(l.trim_end(), "---" | "..."))?.0;
-    Some((lines[1..end].to_vec(), end + 1))
-}
-
 fn push_unique(list: &mut Vec<String>, item: String) {
     if !list.contains(&item) {
         list.push(item);
@@ -166,7 +156,7 @@ pub fn parse_note(rel: &str, text: &str) -> ParsedNote {
     let text = text.strip_prefix('\u{feff}').unwrap_or(text);
     let lines: Vec<&str> = text.lines().collect();
     let title = std::path::Path::new(rel).file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
-    let body_start = split_frontmatter(&lines).map_or(0, |(_, start)| start);
+    let body_start = crate::markdown::frontmatter_end(&lines).unwrap_or(0);
     // FR-EDT-006/007: the same reading as the properties strip; invalid YAML gives none (its lines
     // are still not the body)
     let front = crate::media::read_frontmatter(text);
@@ -176,21 +166,10 @@ pub fn parse_note(rel: &str, text: &str) -> ParsedNote {
         push_unique(&mut tags, fold(&t));
     }
     let mut links = Vec::new();
-    let mut fence: Option<&str> = None; // the marker that opened the code block
+    let mut fences = crate::markdown::Fences::default();
     for (i, line) in lines.iter().enumerate().skip(body_start) {
-        let trimmed = line.trim_start();
-        let marker = ["```", "~~~"].into_iter().find(|m| trimmed.starts_with(m));
-        match (fence, marker) {
-            (None, Some(m)) => {
-                fence = Some(m);
-                continue;
-            }
-            (Some(open), Some(m)) if open == m => {
-                fence = None;
-                continue;
-            }
-            (Some(_), _) => continue,
-            (None, None) => {}
+        if fences.is_code(line) {
+            continue;
         }
         let plain = without_inline_code(line);
         tags_in(&plain, &mut tags);

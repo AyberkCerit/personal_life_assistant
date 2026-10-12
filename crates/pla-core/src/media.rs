@@ -32,11 +32,8 @@ pub struct FrontMatter {
 fn split(text: &str) -> Option<(Vec<&str>, usize)> {
     let text = text.strip_prefix('\u{feff}').unwrap_or(text);
     let lines: Vec<&str> = text.lines().collect();
-    if lines.first().map(|l| l.trim_end()) != Some("---") {
-        return None;
-    }
-    let end = lines.iter().enumerate().skip(1).find(|(_, l)| matches!(l.trim_end(), "---" | "..."))?.0;
-    Some((lines[1..end].to_vec(), end + 1))
+    let end = crate::markdown::frontmatter_end(&lines)?;
+    Some((lines[1..end - 1].to_vec(), end))
 }
 
 /// A YAML value as a list of strings: a list, or one string split at commas (Obsidian accepts both).

@@ -119,7 +119,7 @@ pub fn chunk(body: &str) -> Vec<Chunk> {
     let mut under = String::new();
     for block in body.split("\n\n").map(str::trim).filter(|b| !b.is_empty()) {
         let mut text = block.to_owned();
-        if let Some(first) = block.lines().next().filter(|l| crate::notes::is_heading(l)) {
+        if let Some(first) = block.lines().next().filter(|l| crate::markdown::is_heading(l)) {
             // a heading starts a new chunk once the current one is big enough
             if acc.size >= MIN_TOKENS {
                 acc.flush();
