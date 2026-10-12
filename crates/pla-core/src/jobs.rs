@@ -1,5 +1,5 @@
 //! Daily maintenance bookkeeping (FR-SCH-004, -011, -012, -015) and `pla.db` backups (FR-BKP-001/002).
-//! For now the daily job is the backup; summaries and embeddings join it with the memory slice.
+//! The daily job is the backup, then pruning old missing blocks; the worker summarises the days.
 
 use std::path::{Path, PathBuf};
 

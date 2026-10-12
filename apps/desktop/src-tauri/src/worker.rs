@@ -1,4 +1,5 @@
-//! The background worker: the only owner of pla.db. It queues notes, runs the extraction pipeline
+//! The background worker: the model's owner and pla.db's main writer (the task panel and the
+//! scheduler write there too, through `write_tx` and the busy timeout). It queues notes, runs the extraction pipeline
 //! in one model session (FR-EXT-008), keeps work queued when there is no model (FR-EXT-022) and lets
 //! the model host stop an idle model (FR-MDL-013). The UI learns everything through `WorkerStatus`.
 

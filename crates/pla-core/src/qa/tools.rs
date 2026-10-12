@@ -84,7 +84,7 @@ pub fn parse_decision(raw: &str) -> Result<Decision, String> {
     Ok(Decision::Call { tool: tool.to_owned(), args })
 }
 
-/// What a tool can reach: the vault, pla.db (as the worker, its only writer), cache.db for search.
+/// What a tool can reach: the vault, pla.db (the worker's connection), cache.db for search.
 pub struct ToolEnv<'a> {
     pub vault: &'a Vault,
     pub pla: &'a Connection,
