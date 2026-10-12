@@ -67,15 +67,6 @@ pub fn canonical_value(m: &RawMetric, s: &ValidationSettings) -> Option<f64> {
     })
 }
 
-fn canonical_unit(kind: MetricKind) -> Unit {
-    match kind {
-        MetricKind::Sleep => Unit::H,
-        MetricKind::Water => Unit::Ml,
-        MetricKind::Steps => Unit::Count,
-        MetricKind::Weight | MetricKind::Workout => Unit::Kg,
-    }
-}
-
 /// E-D8 plausible ranges, inclusive, in canonical units.
 pub(crate) fn plausible_range(kind: MetricKind) -> (f64, f64) {
     match kind {
@@ -131,7 +122,7 @@ pub fn validate(item: &RawItem, reference: NaiveDate, s: &ValidationSettings) ->
                 kind,
                 date: date.unwrap_or(reference),
                 value,
-                unit: value.map(|_| canonical_unit(kind)),
+                unit: value.map(|_| kind.canonical_unit()),
                 exercise: m.exercise.clone(),
                 sets: m.sets,
                 reps: m.reps,

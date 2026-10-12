@@ -109,6 +109,62 @@ pub enum Unit {
     Lb,
 }
 
+impl MetricKind {
+    /// In the schema's order.
+    pub const ALL: [Self; 5] = [Self::Sleep, Self::Water, Self::Steps, Self::Weight, Self::Workout];
+
+    /// The name the schema, the database (`metric_record.type`) and the tools use.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Sleep => "sleep",
+            Self::Water => "water",
+            Self::Steps => "steps",
+            Self::Weight => "weight",
+            Self::Workout => "workout",
+        }
+    }
+
+    /// E-D7: the unit a value of this kind is stored in.
+    pub fn canonical_unit(self) -> Unit {
+        match self {
+            Self::Sleep => Unit::H,
+            Self::Water => Unit::Ml,
+            Self::Steps => Unit::Count,
+            Self::Weight | Self::Workout => Unit::Kg,
+        }
+    }
+}
+
+/// A kind or unit name that is not one of PLA's.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("unknown name {0:?}")]
+pub struct UnknownName(pub String);
+
+impl std::str::FromStr for MetricKind {
+    type Err = UnknownName;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Self::ALL.into_iter().find(|k| k.as_str() == s).ok_or_else(|| UnknownName(s.to_owned()))
+    }
+}
+
+impl Unit {
+    pub const ALL: [Self; 8] = [Self::H, Self::Min, Self::Ml, Self::L, Self::Glass, Self::Count, Self::Kg, Self::Lb];
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::H => "h",
+            Self::Min => "min",
+            Self::Ml => "ml",
+            Self::L => "l",
+            Self::Glass => "glass",
+            Self::Count => "count",
+            Self::Kg => "kg",
+            Self::Lb => "lb",
+        }
+    }
+}
+
 /// Parses the model's JSON answer. Grammar-constrained output is always
 /// well-formed, but an answer cut off at `max_tokens` is not, so this can fail.
 pub fn parse_extraction(raw: &str) -> Result<RawExtraction, serde_json::Error> {
@@ -142,6 +198,29 @@ mod tests {
         assert_eq!(w.weekday, Some(Weekday::Sun));
         assert_eq!(Weekday::Sun.num_days_from_monday(), 6);
         assert_eq!(w.which, Some(Which::Next));
+    }
+
+    #[test]
+    fn kinds_and_units_have_one_name_each() {
+        // architecture review 5.4: the names the database, the schema and the tools use are serde's
+        let serde_name = |v: serde_json::Value| v.as_str().unwrap().to_owned();
+        for kind in MetricKind::ALL {
+            assert_eq!(kind.as_str(), serde_name(serde_json::to_value(kind).unwrap()));
+            assert_eq!(kind.as_str().parse::<MetricKind>().unwrap(), kind);
+        }
+        for unit in Unit::ALL {
+            assert_eq!(unit.as_str(), serde_name(serde_json::to_value(unit).unwrap()));
+        }
+        assert!("steps ".parse::<MetricKind>().is_err());
+        assert_eq!(MetricKind::ALL.map(MetricKind::as_str), ["sleep", "water", "steps", "weight", "workout"]);
+        assert_eq!(Unit::ALL.len(), 8);
+    }
+
+    #[test]
+    fn each_kind_is_stored_in_its_canonical_unit() {
+        // E-D7: sleep h, water ml, steps count, weight and workout kg
+        let units = MetricKind::ALL.map(|k| k.canonical_unit().as_str());
+        assert_eq!(units, ["h", "ml", "count", "kg", "kg"]);
     }
 
     #[test]

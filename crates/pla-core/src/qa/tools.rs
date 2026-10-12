@@ -12,8 +12,13 @@ use crate::tasks::{self, TaskInput, TaskList};
 use crate::vault::Vault;
 
 pub const TOOLS: [&str; 8] = ["search_notes", "query_tasks", "query_metrics", "add_task", "complete_task", "log_metric", "create_note", "suggest_note"];
-const KINDS: [&str; 5] = ["sleep", "water", "steps", "weight", "workout"];
-const UNITS: [&str; 8] = ["h", "min", "ml", "l", "glass", "kg", "lb", "count"];
+fn kind_names() -> Vec<&'static str> {
+    MetricKind::ALL.map(MetricKind::as_str).to_vec()
+}
+
+fn unit_names() -> Vec<&'static str> {
+    Unit::ALL.map(Unit::as_str).to_vec()
+}
 
 /// What the model reads about each tool (in the system prompt).
 pub fn descriptions() -> &'static str {
@@ -46,10 +51,10 @@ pub fn decision_schema() -> Value {
         obj("answer", json!({}), &[]),
         obj("search_notes", json!({ "query": { "type": "string", "minLength": 1, "maxLength": 100 } }), &["query"]),
         obj("query_tasks", json!({ "list": { "enum": ["today", "upcoming", "completed", "all"] }, "text": { "type": "string", "maxLength": 100 } }), &["list"]),
-        obj("query_metrics", json!({ "kind": { "enum": KINDS }, "days": { "type": "integer", "minimum": 1, "maximum": 365 } }), &["kind", "days"]),
+        obj("query_metrics", json!({ "kind": { "enum": kind_names() }, "days": { "type": "integer", "minimum": 1, "maximum": 365 } }), &["kind", "days"]),
         obj("add_task", json!({ "title": { "type": "string", "minLength": 1, "maxLength": 200 }, "date": date, "time": time, "remind": { "type": "boolean" } }), &["title"]),
         obj("complete_task", json!({ "task_id": { "type": "string", "minLength": 1, "maxLength": 64 } }), &["task_id"]),
-        obj("log_metric", json!({ "kind": { "enum": KINDS }, "date": date, "value": { "type": "number" }, "unit": { "enum": UNITS }, "exercise": { "type": "string", "maxLength": 100 } }), &["kind", "date", "value"]),
+        obj("log_metric", json!({ "kind": { "enum": kind_names() }, "date": date, "value": { "type": "number" }, "unit": { "enum": unit_names() }, "exercise": { "type": "string", "maxLength": 100 } }), &["kind", "date", "value"]),
         obj("create_note", json!({ "title": { "type": "string", "minLength": 1, "maxLength": 120 }, "body": { "type": "string", "maxLength": 600 } }), &["title", "body"]),
         obj("suggest_note", json!({ "title": { "type": "string", "minLength": 1, "maxLength": 120 }, "body": { "type": "string", "maxLength": 600 } }), &["title", "body"]),
     ]})
@@ -174,7 +179,7 @@ pub fn note_title(title: &str, body: &str, today: NaiveDate) -> String {
 }
 
 fn kind(args: &Value) -> Result<MetricKind, String> {
-    serde_json::from_value(args["kind"].clone()).map_err(|_| format!("kind must be one of {}", KINDS.join(", ")))
+    serde_json::from_value(args["kind"].clone()).map_err(|_| format!("kind must be one of {}", kind_names().join(", ")))
 }
 
 fn unknown_keys(args: &Value, allowed: &[&str]) -> Result<(), String> {
@@ -234,12 +239,7 @@ pub fn run(env: &ToolEnv<'_>, tool: &str, args: &Value) -> Result<ToolRecord, St
             let days = args["days"].as_i64().filter(|d| (1..=365).contains(d)).ok_or("days must be a whole number from 1 to 365")?;
             let s = metrics::summary(env.pla, kind, days, today).map_err(|e| e.to_string())?;
             let total: f64 = s.days.iter().map(|d| d.value).sum();
-            let unit = match kind {
-                MetricKind::Sleep => "h",
-                MetricKind::Water => "ml",
-                MetricKind::Steps => "count",
-                MetricKind::Weight | MetricKind::Workout => "kg",
-            };
+            let unit = kind.canonical_unit().as_str();
             let values: Vec<Value> = s.days.iter().map(|d| json!({ "date": d.date, "value": d.value })).collect();
             Ok(done(
                 json!({ "kind": args["kind"], "unit": unit, "from": (today - Duration::days(days - 1)).to_string(), "to": today.to_string(),
@@ -290,7 +290,7 @@ pub fn run(env: &ToolEnv<'_>, tool: &str, args: &Value) -> Result<ToolRecord, St
             let value = args["value"].as_f64().ok_or("value must be a number")?;
             let unit: Option<Unit> = match &args["unit"] {
                 Value::Null => None,
-                u => Some(serde_json::from_value(u.clone()).map_err(|_| format!("unit must be one of {}", UNITS.join(", ")))?),
+                u => Some(serde_json::from_value(u.clone()).map_err(|_| format!("unit must be one of {}", unit_names().join(", ")))?),
             };
             let exercise = text(args, "exercise", 100)?;
             let input = MetricInput { kind, date: date.clone(), value: Some(value), unit, exercise, sets: None, reps: None, confirmed: false };

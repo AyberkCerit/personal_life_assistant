@@ -34,29 +34,6 @@ struct Existing {
     claimed: bool,
 }
 
-pub fn metric_kind_name(kind: MetricKind) -> &'static str {
-    match kind {
-        MetricKind::Sleep => "sleep",
-        MetricKind::Water => "water",
-        MetricKind::Steps => "steps",
-        MetricKind::Weight => "weight",
-        MetricKind::Workout => "workout",
-    }
-}
-
-fn unit_name(unit: Unit) -> &'static str {
-    match unit {
-        Unit::H => "h",
-        Unit::Min => "min",
-        Unit::Ml => "ml",
-        Unit::L => "l",
-        Unit::Glass => "glass",
-        Unit::Count => "count",
-        Unit::Kg => "kg",
-        Unit::Lb => "lb",
-    }
-}
-
 fn normalize(s: &str) -> String {
     s.split_whitespace().collect::<Vec<_>>().join(" ").to_lowercase()
 }
@@ -77,7 +54,7 @@ pub fn item_signature(item: &ValidItem) -> String {
         }
         // Water adds up: two amounts on one day are two items too.
         ValidItem::Metric { kind: MetricKind::Water, date, value, .. } => format!("metric:water:{date}:{}", value.unwrap_or_default()),
-        ValidItem::Metric { kind, date, .. } => format!("metric:{}:{date}", metric_kind_name(*kind)),
+        ValidItem::Metric { kind, date, .. } => format!("metric:{}:{date}", kind.as_str()),
     }
 }
 
@@ -336,9 +313,9 @@ fn insert_item(conn: &Connection, block_id: &str, item: &ValidItem, signature: &
                  VALUES (?1, ?2, ?3, ?4, ?5, 'extracted', ?6, ?7, ?8)",
                 params![
                     id,
-                    metric_kind_name(*kind),
+                    kind.as_str(),
                     metric_value_json(*value, exercise, *sets, *reps),
-                    unit.map(unit_name),
+                    unit.map(Unit::as_str),
                     date.format("%Y-%m-%d").to_string(),
                     block_id,
                     signature,
@@ -363,9 +340,9 @@ fn update_item(conn: &Connection, target: &ItemRef, block_id: &str, item: &Valid
             conn.execute(
                 "UPDATE metric_record SET type = ?1, value_json = ?2, unit = ?3, date = ?4, item_signature = ?5, source_missing = 0, block_id = ?7 WHERE metric_id = ?6",
                 params![
-                    metric_kind_name(*kind),
+                    kind.as_str(),
                     metric_value_json(*value, exercise, *sets, *reps),
-                    unit.map(unit_name),
+                    unit.map(Unit::as_str),
                     date.format("%Y-%m-%d").to_string(),
                     signature,
                     id,

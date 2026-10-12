@@ -6,7 +6,7 @@ use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 
 use crate::extraction::{canonical_value, MetricKind, RawMetric, Unit, ValidationSettings};
-use crate::pipeline::items::{metric_kind_name, reject_item, ItemRef};
+use crate::pipeline::items::{reject_item, ItemRef};
 
 /// The order of the overview cards.
 pub const KINDS: [MetricKind; 5] = [MetricKind::Sleep, MetricKind::Weight, MetricKind::Steps, MetricKind::Water, MetricKind::Workout];
@@ -110,26 +110,6 @@ pub struct MetricInput {
 
 const DATE: &str = "%Y-%m-%d";
 
-fn kind_of(name: &str) -> MetricKind {
-    match name {
-        "weight" => MetricKind::Weight,
-        "steps" => MetricKind::Steps,
-        "water" => MetricKind::Water,
-        "workout" => MetricKind::Workout,
-        _ => MetricKind::Sleep,
-    }
-}
-
-/// The unit a kind is stored in (E-D7): sleep h, water ml, steps count, weight and workout kg.
-fn canonical_unit_name(kind: MetricKind) -> &'static str {
-    match kind {
-        MetricKind::Sleep => "h",
-        MetricKind::Water => "ml",
-        MetricKind::Steps => "count",
-        MetricKind::Weight | MetricKind::Workout => "kg",
-    }
-}
-
 pub fn records(conn: &Connection, kind: MetricKind, from: NaiveDate, to: NaiveDate) -> Result<Vec<MetricRecord>, MetricError> {
     let rows = conn
         .prepare(
@@ -138,11 +118,12 @@ pub fn records(conn: &Connection, kind: MetricKind, from: NaiveDate, to: NaiveDa
              WHERE m.type = ?1 AND m.date BETWEEN ?2 AND ?3
              ORDER BY m.date DESC, m.created_at DESC, m.rowid DESC",
         )?
-        .query_map(params![metric_kind_name(kind), from.format(DATE).to_string(), to.format(DATE).to_string()], |r| {
+        .query_map(params![kind.as_str(), from.format(DATE).to_string(), to.format(DATE).to_string()], |r| {
             let json: serde_json::Value = serde_json::from_str(&r.get::<_, String>(3)?).unwrap_or_default();
             Ok(MetricRecord {
                 metric_id: r.get(0)?,
-                kind: kind_of(&r.get::<_, String>(1)?),
+                // the table's CHECK allows only PLA's kinds; anything else is an error, not sleep
+                kind: r.get::<_, String>(1)?.parse().map_err(|e| rusqlite::Error::FromSqlConversionFailure(1, rusqlite::types::Type::Text, Box::new(e)))?,
                 date: r.get(2)?,
                 value: json.get("value").and_then(|v| v.as_f64()),
                 unit: r.get(4)?,
@@ -271,11 +252,10 @@ pub fn overview(conn: &Connection, today: NaiveDate) -> Result<Vec<Card>, Metric
 
 /// The latest day with a record before `before`, for a card whose last two weeks are empty.
 fn last_older_day(conn: &Connection, kind: MetricKind, before: NaiveDate) -> Result<Option<DayValue>, MetricError> {
-    let date: Option<String> = conn.query_row(
-        "SELECT max(date) FROM metric_record WHERE type = ?1 AND date < ?2",
-        params![metric_kind_name(kind), before.format(DATE).to_string()],
-        |r| r.get(0),
-    )?;
+    let date: Option<String> =
+        conn.query_row("SELECT max(date) FROM metric_record WHERE type = ?1 AND date < ?2", params![kind.as_str(), before.format(DATE).to_string()], |r| {
+            r.get(0)
+        })?;
     let Some(date) = date.and_then(|d| NaiveDate::parse_from_str(&d, DATE).ok()) else { return Ok(None) };
     Ok(daily_values(conn, kind, date, date)?.pop())
 }
@@ -339,9 +319,9 @@ pub fn log_metric_as(
         "INSERT INTO metric_record (metric_id, type, value_json, unit, date, origin, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?7, ?6)",
         params![
             id,
-            metric_kind_name(input.kind),
+            input.kind.as_str(),
             crate::pipeline::items::metric_value_json(value, &exercise, sets, reps),
-            canonical_unit_name(input.kind),
+            input.kind.canonical_unit().as_str(),
             date.format(DATE).to_string(),
             now.to_rfc3339(),
             origin
@@ -356,9 +336,9 @@ pub fn edit_metric(conn: &Connection, id: &str, input: &MetricInput, settings: &
     let changed = conn.execute(
         "UPDATE metric_record SET type = ?1, value_json = ?2, unit = ?3, date = ?4, user_modified = 1 WHERE metric_id = ?5",
         params![
-            metric_kind_name(input.kind),
+            input.kind.as_str(),
             crate::pipeline::items::metric_value_json(value, &exercise, sets, reps),
-            canonical_unit_name(input.kind),
+            input.kind.canonical_unit().as_str(),
             date.format(DATE).to_string(),
             id
         ],
