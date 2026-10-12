@@ -8,7 +8,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::Serialize;
 
-use crate::pipeline::blocks::content_hash;
+use crate::util::content_hash;
 
 /// A wikilink as written in a note: its normalised target and where it stands.
 #[derive(Debug, Clone, PartialEq, Eq)]

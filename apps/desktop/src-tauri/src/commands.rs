@@ -1012,7 +1012,7 @@ mod tests {
         assert_eq!(rel, "inbox/Hoş geldin.md");
         let text = std::fs::read_to_string(tmp.path().join("inbox/Hoş geldin.md")).unwrap();
         assert!(text.contains("# PLA'ya hoş geldin"));
-        assert!(own.is_own(&rel, &pla_core::pipeline::blocks::content_hash(text.as_bytes())));
+        assert!(own.is_own(&rel, &pla_core::util::content_hash(text.as_bytes())));
         assert_eq!(write_welcome_note(&vault, &own, "en").unwrap(), "inbox/Welcome.md");
     }
 }

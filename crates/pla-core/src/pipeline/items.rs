@@ -6,6 +6,7 @@ use rusqlite::{params, Connection, OptionalExtension};
 use serde_json::{Map, Value};
 
 use crate::extraction::{validate, MetricKind, RawExtraction, RawItem, Unit, ValidItem, ValidationSettings};
+use crate::util::new_id;
 
 const MAX_TITLE_CHARS: usize = 200;
 const DEFAULT_REMINDER_TIME: (u32, u32) = (9, 0);
@@ -190,10 +191,6 @@ pub fn reject_item(conn: &Connection, item: &ItemRef, now: DateTime<FixedOffset>
     }
     conn.execute(&format!("DELETE FROM {table} WHERE {key} = ?1"), [id])?;
     Ok(true)
-}
-
-fn new_id() -> String {
-    uuid::Uuid::new_v4().simple().to_string()
 }
 
 fn load_rejections(conn: &Connection, block_id: &str) -> rusqlite::Result<Vec<String>> {

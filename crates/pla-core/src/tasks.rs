@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::extraction::{ItemType, RawItem};
 use crate::pipeline::items::{action_signature, reject_item, ItemRef};
+use crate::util::new_id;
 
 const MAX_TITLE_CHARS: usize = 200;
 const COMPLETED_LIMIT: i64 = 200;
@@ -105,10 +106,6 @@ fn clean(input: &TaskInput) -> Result<Clean, TaskError> {
 /// Reminder time for a date and optional time (F3 rule: 09:00 when there is no time).
 fn notify_for(date: &Option<String>, time: &Option<String>) -> Option<String> {
     date.as_ref().map(|d| format!("{d}T{}", time.as_deref().unwrap_or(DEFAULT_REMINDER_TIME)))
-}
-
-fn new_id() -> String {
-    uuid::Uuid::new_v4().simple().to_string()
 }
 
 const SELECT: &str = "SELECT t.task_id, t.title, t.details, t.date, t.time, t.notify_at, t.status, t.origin,

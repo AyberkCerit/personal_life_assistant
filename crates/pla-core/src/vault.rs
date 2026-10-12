@@ -330,7 +330,7 @@ fn belongs_to(root: &Path, vault_id: &str) -> bool {
 }
 
 fn new_vault_id() -> String {
-    uuid::Uuid::new_v4().simple().to_string()
+    crate::util::new_id()
 }
 
 fn save_config(root: &Path, config: &VaultConfig) -> Result<(), VaultError> {

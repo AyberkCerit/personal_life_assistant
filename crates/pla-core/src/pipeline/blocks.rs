@@ -26,18 +26,9 @@ struct Stored {
     missing: bool,
 }
 
-/// FNV-1a 64-bit — only answers "did this change?" (FR-EXT-007, FR-VLT-012), not a security hash.
-pub fn content_hash(bytes: &[u8]) -> String {
-    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
-    for byte in bytes {
-        h ^= u64::from(*byte);
-        h = h.wrapping_mul(0x0000_0100_0000_01b3);
-    }
-    format!("{h:016x}")
-}
-
+/// A block's text, hashed to tell whether it changed since extraction (FR-EXT-007).
 pub fn text_hash(text: &str) -> String {
-    content_hash(text.as_bytes())
+    crate::util::content_hash(text.as_bytes())
 }
 
 /// `note_written` is the note file's modification time: when PLA sees a note for the first time,
@@ -95,7 +86,7 @@ pub fn sync_note_blocks(
                 continue;
             }
         }
-        let id = uuid::Uuid::new_v4().simple().to_string();
+        let id = crate::util::new_id();
         let first_seen = inherited_first_seen(&b.text, &vanished).unwrap_or(new_first_seen);
         conn.execute(
             "INSERT INTO block (block_id, note_path, position, text, text_hash, first_seen_at, last_seen_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",

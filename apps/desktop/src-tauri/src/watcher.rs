@@ -11,7 +11,7 @@ use std::time::Duration;
 use notify_debouncer_full::notify::{RecommendedWatcher, RecursiveMode};
 use notify_debouncer_full::{new_debouncer, DebounceEventResult, Debouncer, RecommendedCache};
 use pla_core::notes::is_excluded;
-use pla_core::pipeline::blocks::content_hash;
+use pla_core::util::content_hash;
 use pla_core::vault::Vault;
 use tauri::{AppHandle, Emitter};
 

@@ -7,6 +7,7 @@ use rusqlite::Connection;
 
 use super::Turn;
 use crate::index::{self, NoteText};
+use crate::util::tokens;
 
 /// The model's window (`ServerConfig::ctx_size`).
 pub const WINDOW: usize = 8192;
@@ -14,13 +15,6 @@ pub const WINDOW: usize = 8192;
 /// wrappers and the 900-token answer (final review I5: 2 048 was too thin).
 pub const RESERVED: usize = 3000;
 pub const ANSWER_TOKENS: usize = 900;
-
-/// A cautious token count: about 3 characters a token for words, one token for each digit (the
-/// tokenizer splits numbers, and tool results are full of dates and ids).
-pub fn tokens(s: &str) -> usize {
-    let digits = s.chars().filter(char::is_ascii_digit).count();
-    (s.chars().count() - digits).div_ceil(3) + digits
-}
 
 /// `s` cut to about `budget` tokens, at a line end when there is one near.
 fn cut(s: &str, budget: usize) -> String {

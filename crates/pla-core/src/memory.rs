@@ -7,7 +7,7 @@ use std::time::Instant;
 use rusqlite::{params, Connection, OptionalExtension};
 
 use crate::llm::LlmError;
-use crate::qa::context::tokens;
+use crate::util::tokens;
 
 /// The vector size of EmbeddingGemma (FR-MEM-004).
 pub const DIMENSIONS: usize = 768;

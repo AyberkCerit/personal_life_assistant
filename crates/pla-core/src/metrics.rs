@@ -314,7 +314,7 @@ pub fn log_metric_as(
     now: DateTime<FixedOffset>,
 ) -> Result<String, MetricError> {
     let (date, (value, exercise, sets, reps)) = check(input, settings, now.date_naive())?;
-    let id = uuid::Uuid::new_v4().simple().to_string();
+    let id = crate::util::new_id();
     conn.execute(
         "INSERT INTO metric_record (metric_id, type, value_json, unit, date, origin, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?7, ?6)",
         params![

@@ -217,7 +217,7 @@ fn answer_body(ctx: &Context, question: &str, calls: &[ToolRecord], now: DateTim
 fn trimmed(rec: &ToolRecord, left: &mut usize) -> ToolRecord {
     let mut rec = rec.clone();
     let text = rec.result.to_string();
-    let cost = context::tokens(&text) + 30; // with the call and the "Tool result:" wrapper
+    let cost = crate::util::tokens(&text) + 30; // with the call and the "Tool result:" wrapper
     if cost > *left {
         let keep: String = text.chars().take(*left * 2).collect();
         rec.result = Value::String(format!("{keep}… (cut: too long)"));

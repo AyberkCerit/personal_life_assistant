@@ -21,4 +21,5 @@ pub mod report;
 pub mod settings;
 pub mod summary;
 pub mod tasks;
+pub mod util;
 pub mod vault;

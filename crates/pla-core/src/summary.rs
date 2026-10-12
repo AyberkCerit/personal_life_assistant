@@ -14,8 +14,8 @@ use crate::index::NoteText;
 use crate::llm::LlmError;
 use crate::memory::{self, Embedder};
 use crate::notes::daily_note_date;
-use crate::qa::context::tokens;
 use crate::qa::ChatModel;
+use crate::util::tokens;
 use crate::vault::Folders;
 
 /// Owner decision A: the first maintenance summarises the last 30 days, each later one at most 20.

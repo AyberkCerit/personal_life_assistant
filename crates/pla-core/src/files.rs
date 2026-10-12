@@ -6,7 +6,7 @@ use std::path::{Component, Path, PathBuf};
 use serde::Serialize;
 
 use crate::fs_atomic::write_atomic;
-use crate::pipeline::blocks::content_hash;
+use crate::util::content_hash;
 use crate::vault::Vault;
 
 pub(crate) const FORBIDDEN: [char; 11] = ['[', ']', '#', '^', '|', '\\', '/', ':', '*', '"', '?'];
