@@ -10,7 +10,7 @@ const LB_TO_KG: f64 = 0.453_592_37;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ValidationSettings {
-    /// E-D7: size of one glass of water, user-configurable.
+    /// E-D7: size of one glass of water (250 ml; no setting changes it yet).
     pub glass_ml: f64,
 }
 

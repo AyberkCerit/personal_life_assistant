@@ -51,7 +51,7 @@ pub fn metric_records(state: State<AppState>, kind: MetricKind, days: i64) -> Re
     with_db(&state, |db| metrics::records(db, kind, to - chrono::Duration::days(days - 1), to))
 }
 
-/// FR-MET-003: errors are `out_of_range|<value>` (ask to confirm), `missing_value`, `empty_workout`
+/// FR-MET-003: errors are `out_of_range|<field>|<value>` (ask to confirm), `missing_value`, `empty_workout`
 /// or `invalid_date`.
 #[tauri::command]
 pub fn metric_log(app: AppHandle, state: State<AppState>, input: MetricInput) -> Result<String, String> {

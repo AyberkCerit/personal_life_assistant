@@ -395,7 +395,6 @@ fn i_variants(word: &str) -> Vec<String> {
 const IN_FOLDER: &str = "(?2 IS NULL OR substr(n.note_path, 1, length(?2) + 1) = ?2 || '/')";
 const HAS_TAG: &str = "(?3 IS NULL OR EXISTS (SELECT 1 FROM json_each(n.tag_keys) WHERE value = ?3 OR substr(value, 1, length(?3) + 1) = ?3 || '/'))";
 
-/// FR-EDT-014/015: ranked full-text results; `folder` and `tag` narrow them. A tag alone lists its notes.
 /// A note's text for the assistant's context (FR-MEM-009).
 #[derive(Debug, Clone, PartialEq)]
 pub struct NoteText {
@@ -465,6 +464,7 @@ pub fn recent(conn: &Connection, since_ms: i64, limit: usize) -> rusqlite::Resul
     .collect()
 }
 
+/// FR-EDT-014/015: ranked full-text results; `folder` and `tag` narrow them. A tag alone lists its notes.
 pub fn search(conn: &Connection, text: &str, folder: Option<&str>, tag: Option<&str>, limit: usize) -> rusqlite::Result<Vec<SearchHit>> {
     let folder = folder.map(|f| f.trim_matches('/').to_owned()).filter(|f| !f.is_empty());
     let tag = tag.map(|t| key(t.trim().trim_start_matches('#'))).filter(|t| !t.is_empty());
@@ -502,7 +502,6 @@ pub fn search(conn: &Connection, text: &str, folder: Option<&str>, tag: Option<&
         .collect())
 }
 
-/// Every note's path, title and aliases: what links resolve against and quick open searches.
 /// A note as links and quick open see it: path, title, aliases, last change.
 type Name = (String, String, Vec<String>, i64);
 
