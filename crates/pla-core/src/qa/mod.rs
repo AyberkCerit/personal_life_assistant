@@ -103,8 +103,7 @@ pub fn follow_up(conn: &Connection, asking_new_topic: bool) -> rusqlite::Result<
     if asking_new_topic {
         return Ok(Vec::new());
     }
-    let start: Option<String> =
-        conn.query_row("SELECT max(created_at) FROM qa_turn WHERE new_topic = 1", [], |r| r.get(0)).optional()?.flatten();
+    let start: Option<String> = conn.query_row("SELECT max(created_at) FROM qa_turn WHERE new_topic = 1", [], |r| r.get(0)).optional()?.flatten();
     let mut turns: Vec<Turn> = conn
         .prepare(&format!("{TURN} WHERE status = 'done' AND created_at >= ?1 ORDER BY created_at DESC, rowid DESC LIMIT 3"))?
         .query_map([start.unwrap_or_default()], turn_from_row)?
@@ -149,7 +148,8 @@ pub fn save_suggestion(conn: &Connection, vault: &crate::vault::Vault, turn_id: 
     let rel = tools::write_note(vault, &title, &body)?;
     record.result["saved"] = Value::String(rel.clone());
     record.undo = Some(Undo { kind: "note".into(), id: rel.clone() });
-    conn.execute("UPDATE qa_turn SET tool_calls_json = ?2 WHERE turn_id = ?1", params![turn_id, serde_json::to_string(&turn.tools).unwrap_or_default()]).map_err(db)?;
+    conn.execute("UPDATE qa_turn SET tool_calls_json = ?2 WHERE turn_id = ?1", params![turn_id, serde_json::to_string(&turn.tools).unwrap_or_default()])
+        .map_err(db)?;
     Ok(Some(rel))
 }
 

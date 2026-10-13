@@ -32,11 +32,8 @@ pub struct FrontMatter {
 fn split(text: &str) -> Option<(Vec<&str>, usize)> {
     let text = text.strip_prefix('\u{feff}').unwrap_or(text);
     let lines: Vec<&str> = text.lines().collect();
-    if lines.first().map(|l| l.trim_end()) != Some("---") {
-        return None;
-    }
-    let end = lines.iter().enumerate().skip(1).find(|(_, l)| matches!(l.trim_end(), "---" | "..."))?.0;
-    Some((lines[1..end].to_vec(), end + 1))
+    let end = crate::markdown::frontmatter_end(&lines)?;
+    Some((lines[1..end - 1].to_vec(), end))
 }
 
 /// A YAML value as a list of strings: a list, or one string split at commas (Obsidian accepts both).
@@ -157,23 +154,7 @@ pub fn is_image_name(name: &str) -> bool {
 
 /// Every image file in the vault (vault-relative, `/`), hidden places left out.
 pub fn images_in(vault: &Vault) -> Vec<String> {
-    let mut out = Vec::new();
-    let mut dirs = vec![(vault.root.clone(), String::new())];
-    while let Some((dir, prefix)) = dirs.pop() {
-        for entry in std::fs::read_dir(&dir).into_iter().flatten().flatten() {
-            let name = entry.file_name().to_string_lossy().into_owned();
-            if name.starts_with('.') {
-                continue;
-            }
-            let rel = format!("{prefix}{name}");
-            match entry.file_type() {
-                Ok(t) if t.is_dir() => dirs.push((entry.path(), format!("{rel}/"))),
-                Ok(t) if t.is_file() && is_image_name(&name) => out.push(rel),
-                _ => {}
-            }
-        }
-    }
-    out
+    crate::vault::walk_vault(&vault.root).filter(|e| !e.is_dir && is_image_name(&e.rel)).map(|e| e.rel).collect()
 }
 
 /// FR-EDT-016: the image an embed target (`x.png`, `img/x.png`, `x.png|300`) shows, like Obsidian:
@@ -218,7 +199,11 @@ fn clean_stem(name: &str) -> String {
     let cleaned: String = cleaned.trim().trim_start_matches('.').chars().take(100).collect();
     let cleaned = cleaned.trim_end_matches(['.', ' ']).to_owned();
     // a Windows device name (`con.png` dragged from a browser) would not be a file
-    if cleaned.is_empty() || crate::fileops::check_name(&cleaned).is_err() { "image".to_owned() } else { cleaned }
+    if cleaned.is_empty() || crate::fileops::check_name(&cleaned).is_err() {
+        "image".to_owned()
+    } else {
+        cleaned
+    }
 }
 
 /// FR-EDT-017: stores a pasted (`name` = `None`) or dropped image in `attachments/` and returns its
@@ -261,7 +246,11 @@ pub fn save_attachment(vault: &Vault, bytes: &[u8], name: Option<&str>, now: Dat
 /// What goes inside `![[…]]` for `rel`: the file name when that finds it, else the whole path.
 pub fn embed_target(vault: &Vault, rel: &str) -> String {
     let name = rel.rsplit('/').next().unwrap_or(rel);
-    if resolve_image(vault, name).as_deref() == Some(rel) { name.to_owned() } else { rel.to_owned() }
+    if resolve_image(vault, name).as_deref() == Some(rel) {
+        name.to_owned()
+    } else {
+        rel.to_owned()
+    }
 }
 
 #[cfg(test)]

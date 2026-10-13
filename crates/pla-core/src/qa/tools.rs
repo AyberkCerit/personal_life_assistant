@@ -12,8 +12,13 @@ use crate::tasks::{self, TaskInput, TaskList};
 use crate::vault::Vault;
 
 pub const TOOLS: [&str; 8] = ["search_notes", "query_tasks", "query_metrics", "add_task", "complete_task", "log_metric", "create_note", "suggest_note"];
-const KINDS: [&str; 5] = ["sleep", "water", "steps", "weight", "workout"];
-const UNITS: [&str; 8] = ["h", "min", "ml", "l", "glass", "kg", "lb", "count"];
+fn kind_names() -> Vec<&'static str> {
+    MetricKind::ALL.map(MetricKind::as_str).to_vec()
+}
+
+fn unit_names() -> Vec<&'static str> {
+    Unit::ALL.map(Unit::as_str).to_vec()
+}
 
 /// What the model reads about each tool (in the system prompt).
 pub fn descriptions() -> &'static str {
@@ -23,7 +28,7 @@ pub fn descriptions() -> &'static str {
      - add_task {title, date?: YYYY-MM-DD, time?: HH:MM, remind?: true|false}: add one task; with a time it is a reminder unless remind is false.\n\
      - complete_task {task_id}: mark one open task done (take the task_id from query_tasks).\n\
      - log_metric {kind, date: YYYY-MM-DD, value, unit?: h|min|ml|l|glass|kg|lb|count, exercise?}: record one measurement.\n\
-     - create_note {title, body (at most 600 characters)}: write one new note to the user's notes. Choose a short title yourself; never ask for one.
+     - create_note {title, body (at most 600 characters)}: write one new note to the user's notes. Choose a short title yourself; never ask for one.\n\
      - suggest_note {title, body}: offer to keep what the user just told you as a note; nothing is written unless they press Save."
 }
 
@@ -46,10 +51,10 @@ pub fn decision_schema() -> Value {
         obj("answer", json!({}), &[]),
         obj("search_notes", json!({ "query": { "type": "string", "minLength": 1, "maxLength": 100 } }), &["query"]),
         obj("query_tasks", json!({ "list": { "enum": ["today", "upcoming", "completed", "all"] }, "text": { "type": "string", "maxLength": 100 } }), &["list"]),
-        obj("query_metrics", json!({ "kind": { "enum": KINDS }, "days": { "type": "integer", "minimum": 1, "maximum": 365 } }), &["kind", "days"]),
+        obj("query_metrics", json!({ "kind": { "enum": kind_names() }, "days": { "type": "integer", "minimum": 1, "maximum": 365 } }), &["kind", "days"]),
         obj("add_task", json!({ "title": { "type": "string", "minLength": 1, "maxLength": 200 }, "date": date, "time": time, "remind": { "type": "boolean" } }), &["title"]),
         obj("complete_task", json!({ "task_id": { "type": "string", "minLength": 1, "maxLength": 64 } }), &["task_id"]),
-        obj("log_metric", json!({ "kind": { "enum": KINDS }, "date": date, "value": { "type": "number" }, "unit": { "enum": UNITS }, "exercise": { "type": "string", "maxLength": 100 } }), &["kind", "date", "value"]),
+        obj("log_metric", json!({ "kind": { "enum": kind_names() }, "date": date, "value": { "type": "number" }, "unit": { "enum": unit_names() }, "exercise": { "type": "string", "maxLength": 100 } }), &["kind", "date", "value"]),
         obj("create_note", json!({ "title": { "type": "string", "minLength": 1, "maxLength": 120 }, "body": { "type": "string", "maxLength": 600 } }), &["title", "body"]),
         obj("suggest_note", json!({ "title": { "type": "string", "minLength": 1, "maxLength": 120 }, "body": { "type": "string", "maxLength": 600 } }), &["title", "body"]),
     ]})
@@ -79,7 +84,7 @@ pub fn parse_decision(raw: &str) -> Result<Decision, String> {
     Ok(Decision::Call { tool: tool.to_owned(), args })
 }
 
-/// What a tool can reach: the vault, pla.db (as the worker, its only writer), cache.db for search.
+/// What a tool can reach: the vault, pla.db (the worker's connection), cache.db for search.
 pub struct ToolEnv<'a> {
     pub vault: &'a Vault,
     pub pla: &'a Connection,
@@ -174,7 +179,7 @@ pub fn note_title(title: &str, body: &str, today: NaiveDate) -> String {
 }
 
 fn kind(args: &Value) -> Result<MetricKind, String> {
-    serde_json::from_value(args["kind"].clone()).map_err(|_| format!("kind must be one of {}", KINDS.join(", ")))
+    serde_json::from_value(args["kind"].clone()).map_err(|_| format!("kind must be one of {}", kind_names().join(", ")))
 }
 
 fn unknown_keys(args: &Value, allowed: &[&str]) -> Result<(), String> {
@@ -234,12 +239,7 @@ pub fn run(env: &ToolEnv<'_>, tool: &str, args: &Value) -> Result<ToolRecord, St
             let days = args["days"].as_i64().filter(|d| (1..=365).contains(d)).ok_or("days must be a whole number from 1 to 365")?;
             let s = metrics::summary(env.pla, kind, days, today).map_err(|e| e.to_string())?;
             let total: f64 = s.days.iter().map(|d| d.value).sum();
-            let unit = match kind {
-                MetricKind::Sleep => "h",
-                MetricKind::Water => "ml",
-                MetricKind::Steps => "count",
-                MetricKind::Weight | MetricKind::Workout => "kg",
-            };
+            let unit = kind.canonical_unit().as_str();
             let values: Vec<Value> = s.days.iter().map(|d| json!({ "date": d.date, "value": d.value })).collect();
             Ok(done(
                 json!({ "kind": args["kind"], "unit": unit, "from": (today - Duration::days(days - 1)).to_string(), "to": today.to_string(),
@@ -274,10 +274,8 @@ pub fn run(env: &ToolEnv<'_>, tool: &str, args: &Value) -> Result<ToolRecord, St
         "complete_task" => {
             unknown_keys(args, &["task_id"])?;
             let id = required(args, "task_id", 64)?;
-            let found: Option<(String, String)> = env
-                .pla
-                .query_row("SELECT title, status FROM task WHERE task_id = ?1", [&id], |r| Ok((r.get(0)?, r.get(1)?)))
-                .ok();
+            let found: Option<(String, String)> =
+                env.pla.query_row("SELECT title, status FROM task WHERE task_id = ?1", [&id], |r| Ok((r.get(0)?, r.get(1)?))).ok();
             let Some((title, status)) = found else { return Err(format!("there is no task {id:?}; take the task_id from query_tasks")) };
             if status != "open" {
                 return Err(format!("task {title:?} is not open"));
@@ -292,12 +290,15 @@ pub fn run(env: &ToolEnv<'_>, tool: &str, args: &Value) -> Result<ToolRecord, St
             let value = args["value"].as_f64().ok_or("value must be a number")?;
             let unit: Option<Unit> = match &args["unit"] {
                 Value::Null => None,
-                u => Some(serde_json::from_value(u.clone()).map_err(|_| format!("unit must be one of {}", UNITS.join(", ")))?),
+                u => Some(serde_json::from_value(u.clone()).map_err(|_| format!("unit must be one of {}", unit_names().join(", ")))?),
             };
             let exercise = text(args, "exercise", 100)?;
             let input = MetricInput { kind, date: date.clone(), value: Some(value), unit, exercise, sets: None, reps: None, confirmed: false };
             let id = metrics::log_metric_as(env.pla, &input, &env.validation, "assistant", env.now).map_err(|e| e.to_string())?;
-            Ok(done(json!({ "metric_id": id, "kind": args["kind"], "date": date, "value": value, "unit": args["unit"] }), Some(Undo { kind: "metric".into(), id })))
+            Ok(done(
+                json!({ "metric_id": id, "kind": args["kind"], "date": date, "value": value, "unit": args["unit"] }),
+                Some(Undo { kind: "metric".into(), id }),
+            ))
         }
         "create_note" => {
             unknown_keys(args, &["title", "body"])?;
@@ -312,7 +313,10 @@ pub fn run(env: &ToolEnv<'_>, tool: &str, args: &Value) -> Result<ToolRecord, St
             let body = required(args, "body", 600)?;
             let title = note_title(&text(args, "title", 120)?.unwrap_or_default(), &body, today);
             // the model said "the note was created" before Save (real window)
-            Ok(done(json!({ "suggested": true, "title": title, "body": body, "saved": null, "note_for_you": "nothing is saved yet: tell the user they can press Save" }), None))
+            Ok(done(
+                json!({ "suggested": true, "title": title, "body": body, "saved": null, "note_for_you": "nothing is saved yet: tell the user they can press Save" }),
+                None,
+            ))
         }
         other => Err(format!("unknown tool {other:?}")),
     }
@@ -334,6 +338,16 @@ mod tests {
 
     fn now() -> DateTime<FixedOffset> {
         DateTime::parse_from_rfc3339("2026-10-06T09:00:00+03:00").unwrap()
+    }
+
+    #[test]
+    fn every_tool_is_described_on_a_line_of_its_own() {
+        // architecture review M9: a missing `\n\` sent suggest_note indented
+        let lines: Vec<&str> = descriptions().lines().collect();
+        assert_eq!(lines.len(), TOOLS.len());
+        for (line, tool) in lines.iter().zip(TOOLS) {
+            assert!(line.starts_with(&format!("- {tool} ")), "{line:?}");
+        }
     }
 
     #[test]

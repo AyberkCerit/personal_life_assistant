@@ -1,0 +1,5 @@
+# Long lines are the house style; this keeps rustfmt close to it (architecture review A8).
+max_width = 160
+use_small_heuristics = "Max"
+# CRLF in the Windows working copy, as git checks it out (the repository keeps LF)
+newline_style = "Native"

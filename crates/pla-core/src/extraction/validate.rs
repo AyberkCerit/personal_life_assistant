@@ -10,7 +10,7 @@ const LB_TO_KG: f64 = 0.453_592_37;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ValidationSettings {
-    /// E-D7: size of one glass of water, user-configurable.
+    /// E-D7: size of one glass of water (250 ml; no setting changes it yet).
     pub glass_ml: f64,
 }
 
@@ -22,21 +22,8 @@ impl Default for ValidationSettings {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum ValidItem {
-    Action {
-        reminder: bool,
-        title: String,
-        date: Option<NaiveDate>,
-        time: Option<NaiveTime>,
-    },
-    Metric {
-        kind: MetricKind,
-        date: NaiveDate,
-        value: Option<f64>,
-        unit: Option<Unit>,
-        exercise: Option<String>,
-        sets: Option<i64>,
-        reps: Option<i64>,
-    },
+    Action { reminder: bool, title: String, date: Option<NaiveDate>, time: Option<NaiveTime> },
+    Metric { kind: MetricKind, date: NaiveDate, value: Option<f64>, unit: Option<Unit>, exercise: Option<String>, sets: Option<i64>, reps: Option<i64> },
 }
 
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
@@ -78,15 +65,6 @@ pub fn canonical_value(m: &RawMetric, s: &ValidationSettings) -> Option<f64> {
         (Some(MetricKind::Sleep), Some(Unit::Min)) => v / 60.0,
         _ => v,
     })
-}
-
-fn canonical_unit(kind: MetricKind) -> Unit {
-    match kind {
-        MetricKind::Sleep => Unit::H,
-        MetricKind::Water => Unit::Ml,
-        MetricKind::Steps => Unit::Count,
-        MetricKind::Weight | MetricKind::Workout => Unit::Kg,
-    }
 }
 
 /// E-D8 plausible ranges, inclusive, in canonical units.
@@ -144,7 +122,7 @@ pub fn validate(item: &RawItem, reference: NaiveDate, s: &ValidationSettings) ->
                 kind,
                 date: date.unwrap_or(reference),
                 value,
-                unit: value.map(|_| canonical_unit(kind)),
+                unit: value.map(|_| kind.canonical_unit()),
                 exercise: m.exercise.clone(),
                 sets: m.sets,
                 reps: m.reps,
@@ -171,12 +149,10 @@ mod tests {
     #[test]
     fn valid_task_is_trimmed_and_dated() {
         let got = check(r#"{"type":"reminder","title":"  Dişçi ","when":{"day_offset":1,"time":"09:00"}}"#).unwrap();
-        assert_eq!(got, ValidItem::Action {
-            reminder: true,
-            title: "Dişçi".into(),
-            date: Some(d("2026-10-07")),
-            time: Some(NaiveTime::from_hms_opt(9, 0, 0).unwrap()),
-        });
+        assert_eq!(
+            got,
+            ValidItem::Action { reminder: true, title: "Dişçi".into(), date: Some(d("2026-10-07")), time: Some(NaiveTime::from_hms_opt(9, 0, 0).unwrap()) }
+        );
     }
 
     #[test]
@@ -186,10 +162,7 @@ mod tests {
         assert_eq!(check(r#"{"type":"task","title":"x","metric":{"kind":"sleep","value":7}}"#), Err(InvalidReason::UnexpectedMetric));
         assert_eq!(check(r#"{"type":"task","title":"x","when":{"time":"24:00"}}"#), Err(InvalidReason::InvalidTime("24:00".into())));
         assert_eq!(check(r#"{"type":"task","title":"x","when":{"day_offset":1,"weekday":"mon"}}"#), Err(InvalidReason::ConflictingDate));
-        assert_eq!(
-            check(r#"{"type":"task","title":"x","when":{"date":"2026-13-01"}}"#),
-            Err(InvalidReason::Date(DateError::InvalidDate("2026-13-01".into())))
-        );
+        assert_eq!(check(r#"{"type":"task","title":"x","when":{"date":"2026-13-01"}}"#), Err(InvalidReason::Date(DateError::InvalidDate("2026-13-01".into()))));
     }
 
     #[test]
@@ -234,14 +207,17 @@ mod tests {
     fn workout_needs_some_numbers_and_gets_the_reference_date() {
         assert_eq!(check(r#"{"type":"metric","metric":{"kind":"workout","exercise":"plank"}}"#), Err(InvalidReason::EmptyWorkout));
         let got = check(r#"{"type":"metric","metric":{"kind":"workout","exercise":"deadlift","sets":4,"reps":6,"value":110,"unit":"kg"}}"#).unwrap();
-        assert_eq!(got, ValidItem::Metric {
-            kind: MetricKind::Workout,
-            date: d("2026-10-06"),
-            value: Some(110.0),
-            unit: Some(Unit::Kg),
-            exercise: Some("deadlift".into()),
-            sets: Some(4),
-            reps: Some(6),
-        });
+        assert_eq!(
+            got,
+            ValidItem::Metric {
+                kind: MetricKind::Workout,
+                date: d("2026-10-06"),
+                value: Some(110.0),
+                unit: Some(Unit::Kg),
+                exercise: Some("deadlift".into()),
+                sets: Some(4),
+                reps: Some(6),
+            }
+        );
     }
 }

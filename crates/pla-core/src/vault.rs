@@ -198,29 +198,58 @@ fn is_hidden(entry: &std::fs::DirEntry) -> bool {
     false
 }
 
-/// Counts `.md` files up to `limit`, looking at no more than `max_entries` entries and never following
-/// links or junctions. Returns the count and whether a limit cut it short.
-fn count_notes(dir: &Path, limit: usize, max_entries: usize) -> (usize, bool) {
-    let (mut count, mut seen) = (0, 0);
-    let mut stack = vec![dir.to_path_buf()];
-    while let Some(d) = stack.pop() {
-        let Ok(entries) = std::fs::read_dir(&d) else { continue };
-        for e in entries.flatten() {
-            seen += 1;
-            if seen > max_entries {
-                return (count, true);
-            }
+/// One file or folder the vault walk found.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WalkEntry {
+    /// Vault-relative, `/` separators.
+    pub rel: String,
+    pub path: PathBuf,
+    pub is_dir: bool,
+}
+
+/// Every visible file and folder under `root`, in no particular order (architecture review 5.2: the
+/// one walk the tree, the index, the extraction, images and the wizard share). Hidden places (a dot
+/// name, or Windows' hidden/system mark) and links or junctions are skipped, never followed; a
+/// folder that cannot be read is left out.
+pub fn walk_vault(root: &Path) -> impl Iterator<Item = WalkEntry> {
+    let mut stack: Vec<(PathBuf, String)> = vec![(root.to_path_buf(), String::new())];
+    let mut pending: std::vec::IntoIter<std::fs::DirEntry> = Vec::new().into_iter();
+    let mut prefix = String::new();
+    std::iter::from_fn(move || loop {
+        if let Some(e) = pending.next() {
             let Ok(kind) = e.file_type() else { continue };
             if kind.is_symlink() || is_hidden(&e) {
                 continue;
             }
+            let rel = format!("{prefix}{}", e.file_name().to_string_lossy());
             if kind.is_dir() {
-                stack.push(e.path());
-            } else if e.file_name().to_string_lossy().to_ascii_lowercase().ends_with(".md") {
-                count += 1;
-                if count >= limit {
-                    return (count, true);
-                }
+                stack.push((e.path(), format!("{rel}/")));
+            }
+            return Some(WalkEntry { rel, path: e.path(), is_dir: kind.is_dir() });
+        }
+        let (dir, next_prefix) = stack.pop()?;
+        prefix = next_prefix;
+        pending = std::fs::read_dir(&dir).map(|it| it.flatten().collect::<Vec<_>>()).unwrap_or_default().into_iter();
+    })
+}
+
+/// Whether `name` is a Markdown note's file name.
+pub fn is_note_name(name: &str) -> bool {
+    Path::new(name).extension().is_some_and(|e| e.eq_ignore_ascii_case("md"))
+}
+
+/// Counts `.md` files up to `limit`, looking at no more than `max_entries` entries. Returns the
+/// count and whether a limit cut it short.
+fn count_notes(dir: &Path, limit: usize, max_entries: usize) -> (usize, bool) {
+    let mut count = 0;
+    for (seen, e) in walk_vault(dir).enumerate() {
+        if seen >= max_entries {
+            return (count, true);
+        }
+        if !e.is_dir && is_note_name(&e.rel) {
+            count += 1;
+            if count >= limit {
+                return (count, true);
             }
         }
     }
@@ -243,7 +272,7 @@ pub fn default_app_root() -> Option<PathBuf> {
 /// PLA's own folders: `%APPDATA%\PLA` (settings, databases) and `%LOCALAPPDATA%\PLA` (models). The
 /// uninstaller may delete both (NFR-SEC-010), so neither may hold the vault.
 pub fn app_data_roots() -> Vec<PathBuf> {
-    ["APPDATA", "LOCALAPPDATA"].iter().filter_map(|k| std::env::var_os(k)).map(|p| PathBuf::from(p).join("PLA")).collect()
+    ["APPDATA", "LOCALAPPDATA"].iter().filter_map(std::env::var_os).map(|p| PathBuf::from(p).join("PLA")).collect()
 }
 
 /// Whether `path` is one of `roots` or inside one, compared as Windows does (case-insensitively),
@@ -330,7 +359,7 @@ fn belongs_to(root: &Path, vault_id: &str) -> bool {
 }
 
 fn new_vault_id() -> String {
-    uuid::Uuid::new_v4().simple().to_string()
+    crate::util::new_id()
 }
 
 fn save_config(root: &Path, config: &VaultConfig) -> Result<(), VaultError> {
@@ -348,6 +377,14 @@ fn is_valid_folder(dir: &str) -> bool {
     let mut parts = Path::new(dir).components().peekable();
     let first_visible = matches!(parts.peek(), Some(Component::Normal(p)) if !p.to_string_lossy().starts_with('.'));
     first_visible && parts.all(|c| matches!(c, Component::Normal(_)))
+}
+
+/// Whether the vault path `rel` is `folder` or lies under it, compared as Windows does: letter
+/// case ignored, `/` or `\` separators (architecture review M1: `Templates/` is `templates`).
+pub fn is_under(rel: &str, folder: &str) -> bool {
+    let key = |s: &str| s.replace('\\', "/").trim_matches('/').to_lowercase();
+    let (rel, folder) = (key(rel), key(folder));
+    !folder.is_empty() && (rel == folder || rel.strip_prefix(&folder).is_some_and(|rest| rest.starts_with('/')))
 }
 
 fn is_network_path(path: &Path) -> bool {
@@ -469,18 +506,24 @@ mod tests {
         for bad in ["../outside", "C:/Users/x/Desktop", "/abs", ".obsidian", ".pla", "", "notes/../../x"] {
             let tmp = tempfile::tempdir().unwrap();
             std::fs::create_dir(tmp.path().join(".pla")).unwrap();
-            let config = format!("vault_id = \"0123456789abcdef0123456789abcdef\"
+            let config = format!(
+                "vault_id = \"0123456789abcdef0123456789abcdef\"
 [folders]
 daily = {bad:?}
-");
+"
+            );
             std::fs::write(tmp.path().join(".pla/config"), &config).unwrap();
             assert!(matches!(open_vault(tmp.path()), Err(VaultError::InvalidFolder(_))), "accepted {bad:?}");
         }
         let tmp = tempfile::tempdir().unwrap();
         std::fs::create_dir(tmp.path().join(".pla")).unwrap();
-        std::fs::write(tmp.path().join(".pla/config"), "[folders]
+        std::fs::write(
+            tmp.path().join(".pla/config"),
+            "[folders]
 notes = \"Notlar/Arşiv\"
-").unwrap();
+",
+        )
+        .unwrap();
         open_vault(tmp.path()).unwrap();
         assert!(tmp.path().join("Notlar/Arşiv").is_dir());
     }
@@ -507,7 +550,13 @@ notes = \"Notlar/Arşiv\"
     fn a_folder_inside_plas_own_data_cannot_be_the_vault() {
         // NFR-SEC-010: the uninstaller may delete these folders; a vault there would go with them
         let roots = [PathBuf::from(r"C:\Users\a\AppData\Roaming\PLA"), PathBuf::from(r"C:\Users\a\AppData\Local\PLA")];
-        for p in [r"C:\Users\a\AppData\Roaming\PLA", r"c:\users\A\appdata\roaming\pla\Notlar", r"C:\Users\a\AppData\Local\PLA\models\x", r"\\?\C:\Users\a\AppData\Roaming\PLA\Notlar", r"C:\Users\a\AppData\Roaming\x\..\PLA\Notlar"] {
+        for p in [
+            r"C:\Users\a\AppData\Roaming\PLA",
+            r"c:\users\A\appdata\roaming\pla\Notlar",
+            r"C:\Users\a\AppData\Local\PLA\models\x",
+            r"\\?\C:\Users\a\AppData\Roaming\PLA\Notlar",
+            r"C:\Users\a\AppData\Roaming\x\..\PLA\Notlar",
+        ] {
             assert!(inside_app_data(Path::new(p), &roots), "{p}");
         }
         for p in [r"C:\Users\a\AppData\Roaming\PLA Notlar", r"C:\Users\a\AppData\Roaming", r"D:\PLA", r"C:\Users\a\Documents\PLA Vault"] {
@@ -525,7 +574,7 @@ notes = \"Notlar/Arşiv\"
         let link = tmp.path().join("kisayol");
         let ok = std::process::Command::new("cmd").args(["/C", "mklink", "/J"]).arg(&link).arg(&root).output().unwrap().status.success();
         assert!(ok, "mklink /J");
-        assert!(inside_app_data(&link.join("Notlar"), &[root.clone()]));
+        assert!(inside_app_data(&link.join("Notlar"), std::slice::from_ref(&root)));
         assert!(inside_app_data(&link.join("Yeni klasör"), &[root]), "a folder still to be made");
     }
 
@@ -577,7 +626,14 @@ notes = \"Notlar/Arşiv\"
     #[test]
     fn network_paths_are_recognised_in_every_spelling() {
         // final review I1: the wizard's text field accepts whatever the user types
-        for p in [r"\\sunucu\paylasim", "//sunucu/paylasim/Kasa", r"\/sunucu\paylasim", r"\\.\UNC\sunucu\paylasim\x", r"\\?\unc\sunucu\paylasim", r"\\?\UNC\sunucu\paylasim"] {
+        for p in [
+            r"\\sunucu\paylasim",
+            "//sunucu/paylasim/Kasa",
+            r"\/sunucu\paylasim",
+            r"\\.\UNC\sunucu\paylasim\x",
+            r"\\?\unc\sunucu\paylasim",
+            r"\\?\UNC\sunucu\paylasim",
+        ] {
             assert!(is_network_path(Path::new(p)), "{p}");
             assert_eq!(inspect_folder(Path::new(p)).state, FolderState::Network, "{p}");
         }
@@ -592,6 +648,34 @@ notes = \"Notlar/Arşiv\"
         for p in ["Notlar", r"C:Notlar", "", r"\Notlar"] {
             assert_eq!(inspect_folder(Path::new(p)).state, FolderState::Relative, "{p:?}");
         }
+    }
+
+    #[test]
+    fn the_vault_walk_skips_hidden_places_and_links() {
+        // architecture review 5.2: one walk, one rule for every caller
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().join("kasa");
+        for (rel, body) in [("notes/a.md", "x"), (".obsidian/w.md", "x"), ("notes/.gizli/b.md", "x"), ("c.png", "x"), ("Boş/", "")] {
+            let p = root.join(rel);
+            if rel.ends_with('/') {
+                std::fs::create_dir_all(p).unwrap();
+            } else {
+                std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+                std::fs::write(p, body).unwrap();
+            }
+        }
+        #[cfg(windows)]
+        {
+            std::fs::write(root.join("notes/gizli.md"), "x").unwrap();
+            let ok = std::process::Command::new("attrib").arg("+H").arg(root.join("notes/gizli.md")).output().unwrap().status.success();
+            assert!(ok, "attrib +H");
+            let ok =
+                std::process::Command::new("cmd").args(["/C", "mklink", "/J"]).arg(root.join("bağ")).arg(root.join("notes")).output().unwrap().status.success();
+            assert!(ok, "mklink /J");
+        }
+        let mut seen: Vec<(String, bool)> = walk_vault(&root).map(|e| (e.rel, e.is_dir)).collect();
+        seen.sort();
+        assert_eq!(seen, [("Boş".to_owned(), true), ("c.png".to_owned(), false), ("notes".to_owned(), true), ("notes/a.md".to_owned(), false)]);
     }
 
     #[test]

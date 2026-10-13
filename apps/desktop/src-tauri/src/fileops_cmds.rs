@@ -35,12 +35,16 @@ fn parent_of(rel: &str) -> &str {
 
 fn join(folder: &str, name: &str) -> String {
     let folder = folder.trim_matches('/');
-    if folder.is_empty() { name.to_owned() } else { format!("{folder}/{name}") }
+    if folder.is_empty() {
+        name.to_owned()
+    } else {
+        format!("{folder}/{name}")
+    }
 }
 
 fn with_session<T>(state: &State<AppState>, f: impl FnOnce(&Session) -> Result<T, String>) -> Result<T, String> {
     let guard = state.session.lock().expect("session lock");
-    f(guard.as_ref().ok_or("no_vault||")?)
+    f(guard.as_ref().ok_or(crate::commands::NO_VAULT)?)
 }
 
 /// Notes (other than `rel`) with a link to it, by the index.
@@ -87,6 +91,11 @@ fn move_note_with_links(state: &State<AppState>, session: &Session, from: &str, 
         }
     }
     fileops::move_note(&session.vault, &session.db.lock().expect("db lock"), from, to).map_err(code)?;
+    if pla_core::notes::is_excluded(to, &session.vault.config.folders) {
+        // into templates/ or reports/: its items lose their source (architecture review M6); the
+        // watcher stays quiet about PLA's own move, so the worker is told here
+        session.worker.send(crate::worker::Command::Enqueue(to.to_owned()));
+    }
     relink(state, &session.vault, &sources, from, to, by_name);
     if case_only {
         // the old name still opens the file, so a touch would keep it in the index: walk the disk
@@ -134,24 +143,19 @@ pub fn move_entry(app: AppHandle, state: State<AppState>, path: String, folder: 
 fn move_folder_quietly(state: &State<AppState>, session: &Session, from: &str, to: &str) -> Result<(), String> {
     let root = files::resolve(&session.vault, from).map_err(code)?;
     let case_only = fileops::same_ignoring_case(from, to);
-    let mut dirs = vec![(root, String::new())];
-    while let Some((dir, prefix)) = dirs.pop() {
-        for entry in std::fs::read_dir(&dir).into_iter().flatten().flatten() {
-            let inner = format!("{prefix}{}", entry.file_name().to_string_lossy());
-            if entry.file_type().is_ok_and(|t| t.is_dir()) {
-                dirs.push((entry.path(), format!("{inner}/")));
-            } else if inner.to_lowercase().ends_with(".md") {
-                if let Ok(text) = std::fs::read_to_string(entry.path()) {
-                    state.self_writes.record_text(&format!("{to}/{inner}"), &text);
-                    if case_only {
-                        state.self_writes.record_text(&format!("{from}/{inner}"), &text);
-                    }
-                }
+    for note in pla_core::vault::walk_vault(&root).filter(|e| !e.is_dir && pla_core::vault::is_note_name(&e.rel)) {
+        if let Ok(text) = std::fs::read_to_string(&note.path) {
+            state.self_writes.record_text(&format!("{to}/{}", note.rel), &text);
+            if case_only {
+                state.self_writes.record_text(&format!("{from}/{}", note.rel), &text);
             }
         }
     }
     fileops::move_folder(&session.vault, &session.db.lock().expect("db lock"), from, to).map_err(code)?;
     session.indexer.send(IndexCommand::Rescan);
+    if pla_core::notes::is_excluded(&format!("{to}/x.md"), &session.vault.config.folders) {
+        session.worker.send(crate::worker::Command::Rescan); // as for a note moved there
+    }
     Ok(())
 }
 
@@ -192,7 +196,9 @@ pub fn delete_entry(app: AppHandle, state: State<AppState>, path: String) -> Res
 
 #[cfg(windows)]
 pub(crate) fn to_recycle_bin(path: &Path) -> Result<(), String> {
-    use windows_sys::Win32::UI::Shell::{SHFileOperationW, FOF_ALLOWUNDO, FOF_NOCONFIRMATION, FOF_NOERRORUI, FOF_SILENT, FOF_WANTNUKEWARNING, FO_DELETE, SHFILEOPSTRUCTW};
+    use windows_sys::Win32::UI::Shell::{
+        SHFileOperationW, FOF_ALLOWUNDO, FOF_NOCONFIRMATION, FOF_NOERRORUI, FOF_SILENT, FOF_WANTNUKEWARNING, FO_DELETE, SHFILEOPSTRUCTW,
+    };
     // a list of paths, each NUL-terminated, ended by one more NUL
     let from: Vec<u16> = path.as_os_str().to_string_lossy().encode_utf16().chain([0, 0]).collect();
     let mut op = SHFILEOPSTRUCTW {

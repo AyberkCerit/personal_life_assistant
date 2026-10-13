@@ -150,7 +150,7 @@ function mockMetrics(cmd: string, args: Record<string, unknown>): unknown {
       const input = args.input as { kind: string; date: string; value: number | null; unit: string | null; exercise: string | null; sets: number | null; reps: number | null; confirmed: boolean };
       const value = input.kind === "water" && input.unit === "glass" ? (input.value ?? 0) * 250 : input.value;
       if (input.kind !== "workout" && value === null) throw "missing_value";
-      if (input.kind === "weight" && value !== null && value > 400 && !input.confirmed) throw `out_of_range|${value}`;
+      if (input.kind === "weight" && value !== null && value > 400 && !input.confirmed) throw `out_of_range|value|${value}`;
       const fields = { kind: input.kind, date: input.date, value, exercise: input.exercise, sets: input.sets, reps: input.reps };
       if (cmd === "metric_edit") {
         metricsDb = metricsDb.map((r) => (r.metric_id === args.id ? { ...r, ...fields, user_modified: true } : r));

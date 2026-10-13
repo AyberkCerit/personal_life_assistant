@@ -42,8 +42,15 @@ pub enum QaError {
     Db(#[from] rusqlite::Error),
 }
 
-const DAYS: [(&str, &str); 7] =
-    [("Monday", "Pazartesi"), ("Tuesday", "Salı"), ("Wednesday", "Çarşamba"), ("Thursday", "Perşembe"), ("Friday", "Cuma"), ("Saturday", "Cumartesi"), ("Sunday", "Pazar")];
+const DAYS: [(&str, &str); 7] = [
+    ("Monday", "Pazartesi"),
+    ("Tuesday", "Salı"),
+    ("Wednesday", "Çarşamba"),
+    ("Thursday", "Perşembe"),
+    ("Friday", "Cuma"),
+    ("Saturday", "Cumartesi"),
+    ("Sunday", "Pazar"),
+];
 
 fn day_names(date: chrono::NaiveDate) -> (&'static str, &'static str) {
     DAYS[date.format("%u").to_string().parse::<usize>().unwrap_or(1) - 1]
@@ -210,7 +217,7 @@ fn answer_body(ctx: &Context, question: &str, calls: &[ToolRecord], now: DateTim
 fn trimmed(rec: &ToolRecord, left: &mut usize) -> ToolRecord {
     let mut rec = rec.clone();
     let text = rec.result.to_string();
-    let cost = context::tokens(&text) + 30; // with the call and the "Tool result:" wrapper
+    let cost = crate::util::tokens(&text) + 30; // with the call and the "Tool result:" wrapper
     if cost > *left {
         let keep: String = text.chars().take(*left * 2).collect();
         rec.result = Value::String(format!("{keep}… (cut: too long)"));
@@ -252,8 +259,10 @@ fn afternoon(tool: &str, mut args: Value, question: &str) -> Value {
     // minutes written by the user ("7:30", "6.45") mean the time as written
     let with_minutes = lower.as_bytes().windows(3).any(|b| b[0].is_ascii_digit() && (b[1] == b':' || b[1] == b'.') && b[2].is_ascii_digit());
     let says = |list: &[&str]| w.iter().any(|x| list.iter().any(|p| x == p || x.starts_with(p) && p.len() >= 5));
-    let am = lower.contains("a.m") || w.iter().any(|x| x == "am" || (x.ends_with("am") && x.trim_end_matches("am").chars().all(|c| c.is_ascii_digit() || c == ':') && x.len() > 2));
-    let pm = lower.contains("p.m") || w.iter().any(|x| x == "pm" || (x.ends_with("pm") && x.trim_end_matches("pm").chars().all(|c| c.is_ascii_digit() || c == ':') && x.len() > 2));
+    let am = lower.contains("a.m")
+        || w.iter().any(|x| x == "am" || (x.ends_with("am") && x.trim_end_matches("am").chars().all(|c| c.is_ascii_digit() || c == ':') && x.len() > 2));
+    let pm = lower.contains("p.m")
+        || w.iter().any(|x| x == "pm" || (x.ends_with("pm") && x.trim_end_matches("pm").chars().all(|c| c.is_ascii_digit() || c == ':') && x.len() > 2));
     let evening = pm || says(&["akşam", "aksam", "evening", "night", "tonight", "öğleden", "ogleden", "afternoon"]);
     let early = am || says(&["sabah", "morning", "erken", "gece", "kalk", "uyan", "alarm", "wake"]);
     if evening || (!early && !with_minutes) {
@@ -272,8 +281,36 @@ fn points_back(text: &str) -> bool {
 
 /// The words of a note request itself; what is left is the user's own content.
 const COMMAND_WORDS: [&str; 30] = [
-    "notlarıma", "notlarima", "notlara", "notuma", "notlarım", "not", "al", "et", "ekle", "kaydet", "yaz", "oluştur", "olustur", "yeni", "bir", "ve",
-    "bunu", "onu", "şunu", "buna", "ona", "save", "note", "notes", "make", "this", "to", "my", "a", "of",
+    "notlarıma",
+    "notlarima",
+    "notlara",
+    "notuma",
+    "notlarım",
+    "not",
+    "al",
+    "et",
+    "ekle",
+    "kaydet",
+    "yaz",
+    "oluştur",
+    "olustur",
+    "yeni",
+    "bir",
+    "ve",
+    "bunu",
+    "onu",
+    "şunu",
+    "buna",
+    "ona",
+    "save",
+    "note",
+    "notes",
+    "make",
+    "this",
+    "to",
+    "my",
+    "a",
+    "of",
 ];
 
 /// Whether `text` asks for a note without content of its own ("notlarıma ekle bunu", "save this").
@@ -314,7 +351,8 @@ fn named_title(question: &str) -> Option<String> {
     let keys: Vec<String> = original.iter().map(|w| crate::index::key(w).trim_matches(|c: char| !c.is_alphanumeric()).to_owned()).collect();
     if let Some(i) = keys.iter().position(|w| w == "diye") {
         let rest: Vec<&str> = keys[i + 1..].iter().map(String::as_str).filter(|w| *w != "bir").collect();
-        let creates = rest.first().is_some_and(|w| w.starts_with("not")) && rest.get(1).is_some_and(|w| ["oluştur", "olustur", "aç", "ac", "aç,", "yarat"].iter().any(|v| w.starts_with(v)));
+        let creates = rest.first().is_some_and(|w| w.starts_with("not"))
+            && rest.get(1).is_some_and(|w| ["oluştur", "olustur", "aç", "ac", "aç,", "yarat"].iter().any(|v| w.starts_with(v)));
         if creates && i > 0 {
             let name = original[i.saturating_sub(3)..i].join(" ");
             let name = name.rsplit([',', ':', '.']).next().unwrap_or(&name).trim().to_owned();
@@ -353,17 +391,15 @@ fn already_kept(question: &str, turns: &[Turn]) -> Option<String> {
 /// The task a query of this question found, by id: the only tasks the assistant may complete. The
 /// eval saw the model add a task and then complete it in the same breath.
 fn found_task<'a>(done: &'a [ToolRecord], id: &str) -> Option<&'a Value> {
-    done.iter()
-        .filter(|r| r.ok && r.tool == "query_tasks")
-        .flat_map(|r| r.result["tasks"].as_array().into_iter().flatten())
-        .find(|t| t["task_id"] == id)
+    done.iter().filter(|r| r.ok && r.tool == "query_tasks").flat_map(|r| r.result["tasks"].as_array().into_iter().flatten()).find(|t| t["task_id"] == id)
 }
 
 /// Question words: a message with one asks, it does not report (final review C1).
 const ASKING: [&str; 16] = ["ne", "neler", "kaç", "kac", "hangi", "nasıl", "nasil", "mi", "mı", "mu", "mü", "what", "which", "how", "when", "did"];
 
 /// Common English past forms whose task is written in the present ("paid" → "Pay the rent").
-const IRREGULAR: [(&str, &str); 8] = [("paid", "pay"), ("bought", "buy"), ("sent", "send"), ("went", "go"), ("did", "do"), ("made", "make"), ("took", "take"), ("got", "get")];
+const IRREGULAR: [(&str, &str); 8] =
+    [("paid", "pay"), ("bought", "buy"), ("sent", "send"), ("went", "go"), ("did", "do"), ("made", "make"), ("took", "take"), ("got", "get")];
 
 /// Whether the user says they did `title`: an explicit "tamamla / bitti / done", or a verb in the past
 /// whose stem is the task's verb ("ödedim" ~ "Fatura öde", "aradım" ~ "Annemi ara", "called" ~ "Call
@@ -379,19 +415,26 @@ fn asks(question: &str) -> bool {
 
 /// "tamamla", "bitti", "done": finished, without saying which task.
 fn says_finished(question: &str) -> bool {
-    words(question).iter().any(|w| ["tamamla", "tamamlandı", "tamamlandi", "bitti", "bitirdim", "hallettim", "done", "finished", "completed"].contains(&w.as_str()))
+    words(question)
+        .iter()
+        .any(|w| ["tamamla", "tamamlandı", "tamamlandi", "bitti", "bitirdim", "hallettim", "done", "finished", "completed"].contains(&w.as_str()))
 }
 
 /// A past verb in the message on the task's own verb: "ödedim" ~ "Fatura öde".
 fn did_its_verb(question: &str, title: &str) -> bool {
     let q = words(question);
     let title_words = words(title);
-    let verb = |base: &str| title_words.iter().any(|t| t == base || (t.chars().count() >= 3 && base.chars().count() >= 3 && (base.starts_with(t.as_str()) || t.starts_with(base))));
+    let verb = |base: &str| {
+        title_words.iter().any(|t| t == base || (t.chars().count() >= 3 && base.chars().count() >= 3 && (base.starts_with(t.as_str()) || t.starts_with(base))))
+    };
     q.iter().any(|w| {
         if let Some((_, base)) = IRREGULAR.iter().find(|(past, _)| past == w) {
             return verb(base);
         }
-        ["dım", "dim", "dum", "düm", "tım", "tim", "tum", "tüm", "ed"].iter().find_map(|e| w.strip_suffix(e)).is_some_and(|stem| stem.chars().count() >= 2 && verb(stem))
+        ["dım", "dim", "dum", "düm", "tım", "tim", "tum", "tüm", "ed"]
+            .iter()
+            .find_map(|e| w.strip_suffix(e))
+            .is_some_and(|stem| stem.chars().count() >= 2 && verb(stem))
     })
 }
 
@@ -399,8 +442,15 @@ fn did_its_verb(question: &str, title: &str) -> bool {
 fn delegates(question: &str) -> bool {
     let w = words(question);
     let pair = |a: &str, b: &str| w.windows(2).any(|p| p[0] == a && p[1] == b);
-    pair("karar", "ver") || pair("sen", "seç") || pair("sen", "sec") || pair("sen", "bil") || pair("fark", "etmez") || w.iter().any(|x| x == "farketmez")
-        || pair("you", "decide") || pair("up", "to") && w.iter().any(|x| x == "you") || pair("your", "call")
+    pair("karar", "ver")
+        || pair("sen", "seç")
+        || pair("sen", "sec")
+        || pair("sen", "bil")
+        || pair("fark", "etmez")
+        || w.iter().any(|x| x == "farketmez")
+        || pair("you", "decide")
+        || pair("up", "to") && w.iter().any(|x| x == "you")
+        || pair("your", "call")
 }
 
 /// The earlier message asked for a note in so many words ("notlarıma ekle", "not al", "save this").
@@ -473,17 +523,20 @@ pub fn cited(text: &str) -> Vec<String> {
     out
 }
 
-/// FR-QA-003…016 for one question. `turns` are the follow-ups (oldest first).
-pub fn answer(
-    model: &mut dyn ChatModel,
-    env: &ToolEnv<'_>,
-    question: &str,
-    turns: &[Turn],
-    memory: context::Memory<'_>,
-    ui_lang: &str,
-    cancel: &AtomicBool,
-    on: &mut dyn FnMut(Progress),
-) -> Result<Answer, QaError> {
+/// One question as the panel asks it.
+pub struct Question<'a> {
+    pub text: &'a str,
+    /// The follow-ups the model sees again, oldest first.
+    pub turns: &'a [Turn],
+    /// The question's vector, when semantic memory has one (FR-MEM-005).
+    pub memory: context::Memory<'a>,
+    /// PLA's own language, the last say on the answer's (FR-QA-012).
+    pub ui_lang: &'a str,
+}
+
+/// FR-QA-003…016 for one question.
+pub fn answer(model: &mut dyn ChatModel, env: &ToolEnv<'_>, q: &Question<'_>, cancel: &AtomicBool, on: &mut dyn FnMut(Progress)) -> Result<Answer, QaError> {
+    let Question { text: question, turns, memory, ui_lang } = *q;
     let ctx = context::build(env.cache, question, turns, env.now, memory, &env.vault.config.folders.reports)?;
     let lang = super::lang::answer_language(question, turns.last().map(|t| t.question.as_str()), ui_lang);
     let mut calls: Vec<ToolRecord> = Vec::new(); // as the model sees them
@@ -654,7 +707,14 @@ mod tests {
             "Yarın 10:00 için hatırlatıcı ekledim.",
         );
         let mut events = Vec::new();
-        let a = answer(&mut model, &tool_env, "Yarın saat 10'da doktor randevum var, hatırlat", &[], None, "tr", &AtomicBool::new(false), &mut |p| events.push(p)).unwrap();
+        let a = answer(
+            &mut model,
+            &tool_env,
+            &Question { text: "Yarın saat 10'da doktor randevum var, hatırlat", turns: &[], memory: None, ui_lang: "tr" },
+            &AtomicBool::new(false),
+            &mut |p| events.push(p),
+        )
+        .unwrap();
         assert_eq!(a.tools.len(), 1);
         assert_eq!(a.tools[0].undo.as_ref().unwrap().kind, "task");
         assert_eq!(a.text, "Yarın 10:00 için hatırlatıcı ekledim.");
@@ -676,10 +736,24 @@ mod tests {
         let tool_env = ToolEnv { vault: &e.vault, pla: &e.pla, cache: &e.cache, now: now(), validation: ValidationSettings::default() };
         let call = "{\"tool\":\"add_task\",\"args\":{\"title\":\"Annemi ara\",\"date\":\"2026-10-09\",\"time\":\"10:00\",\"remind\":true}}";
         let mut model = scripted(&[call], "Tamam.");
-        let a = answer(&mut model, &tool_env, "Cuma günü annemi aramam lazım", &[], None, "tr", &AtomicBool::new(false), &mut |_| {}).unwrap();
+        let a = answer(
+            &mut model,
+            &tool_env,
+            &Question { text: "Cuma günü annemi aramam lazım", turns: &[], memory: None, ui_lang: "tr" },
+            &AtomicBool::new(false),
+            &mut |_| {},
+        )
+        .unwrap();
         assert_eq!((a.tools[0].result["time"].clone(), a.tools[0].result["remind"].clone()), (Value::Null, Value::Bool(false)));
         let mut model = scripted(&[call], "Tamam.");
-        let a = answer(&mut model, &tool_env, "Cuma 10'da annemi ara", &[], None, "tr", &AtomicBool::new(false), &mut |_| {}).unwrap();
+        let a = answer(
+            &mut model,
+            &tool_env,
+            &Question { text: "Cuma 10'da annemi ara", turns: &[], memory: None, ui_lang: "tr" },
+            &AtomicBool::new(false),
+            &mut |_| {},
+        )
+        .unwrap();
         assert_eq!(a.tools[0].result["time"], "10:00", "said, so kept");
     }
 
@@ -699,7 +773,9 @@ mod tests {
         // final review C1: the task stays, so its undo must too
         let e = env();
         let tool_env = ToolEnv { vault: &e.vault, pla: &e.pla, cache: &e.cache, now: now(), validation: ValidationSettings::default() };
-        let err = answer(&mut Breaks, &tool_env, "Yarın doktor", &[], None, "tr", &AtomicBool::new(false), &mut |_| {}).unwrap_err();
+        let err =
+            answer(&mut Breaks, &tool_env, &Question { text: "Yarın doktor", turns: &[], memory: None, ui_lang: "tr" }, &AtomicBool::new(false), &mut |_| {})
+                .unwrap_err();
         let QaError::Model { tools, .. } = err else { panic!("expected a model error") };
         assert_eq!(tools.len(), 1);
         assert!(tools[0].undo.is_some());
@@ -711,7 +787,7 @@ mod tests {
         let tool_env = ToolEnv { vault: &e.vault, pla: &e.pla, cache: &e.cache, now: now(), validation: ValidationSettings::default() };
         let cancel = AtomicBool::new(false);
         let mut model = scripted(&["{\"tool\":\"add_task\",\"args\":{\"title\":\"x\",\"date\":\"2026-10-07\"}}"], "");
-        let err = answer(&mut model, &tool_env, "x ekle", &[], None, "tr", &cancel, &mut |p| {
+        let err = answer(&mut model, &tool_env, &Question { text: "x ekle", turns: &[], memory: None, ui_lang: "tr" }, &cancel, &mut |p| {
             if matches!(p, Progress::Working(None)) {
                 cancel.store(true, Ordering::SeqCst); // Stop lands while the model decides
             }
@@ -728,7 +804,14 @@ mod tests {
         let call = "{\"tool\":\"add_task\",\"args\":{\"title\":\"Market alışverişi\",\"date\":\"2026-10-10\"}}";
         let again = "{\"tool\":\"add_task\",\"args\":{\"title\":\"market ALIŞVERİŞİ\",\"date\":\"2026-10-10\"}}";
         let mut model = scripted(&[call, again, call], "Ekledim.");
-        let a = answer(&mut model, &tool_env, "Cumartesi markete gitmem gerekiyor", &[], None, "tr", &AtomicBool::new(false), &mut |_| {}).unwrap();
+        let a = answer(
+            &mut model,
+            &tool_env,
+            &Question { text: "Cumartesi markete gitmem gerekiyor", turns: &[], memory: None, ui_lang: "tr" },
+            &AtomicBool::new(false),
+            &mut |_| {},
+        )
+        .unwrap();
         assert_eq!(a.tools.len(), 1);
         let n: i64 = e.pla.query_row("SELECT count(*) FROM task", [], |r| r.get(0)).unwrap();
         assert_eq!(n, 1);
@@ -741,7 +824,8 @@ mod tests {
         let tool_env = ToolEnv { vault: &e.vault, pla: &e.pla, cache: &e.cache, now: now(), validation: ValidationSettings::default() };
         let bad = "{\"tool\":\"add_task\",\"args\":{\"title\":\"x\",\"date\":\"yarın\"}}";
         let mut model = scripted(&[bad, bad], "Ekleyemedim.");
-        let a = answer(&mut model, &tool_env, "x ekle", &[], None, "tr", &AtomicBool::new(false), &mut |_| {}).unwrap();
+        let a =
+            answer(&mut model, &tool_env, &Question { text: "x ekle", turns: &[], memory: None, ui_lang: "tr" }, &AtomicBool::new(false), &mut |_| {}).unwrap();
         assert_eq!(a.tools.len(), 1, "only the second refusal reaches the user");
         assert!(a.tools[0].error.as_deref().unwrap().contains("not a date"));
         let second = model.bodies[1]["messages"].as_array().unwrap();
@@ -755,7 +839,8 @@ mod tests {
         let q = |list: &str| format!("{{\"tool\":\"query_tasks\",\"args\":{{\"list\":\"{list}\"}}}}");
         let calls = [q("today"), q("upcoming"), q("completed"), q("all"), q("today")];
         let mut model = scripted(&calls.iter().map(String::as_str).collect::<Vec<_>>(), "Tamam.");
-        let a = answer(&mut model, &tool_env, "görevlerim", &[], None, "tr", &AtomicBool::new(false), &mut |_| {}).unwrap();
+        let a = answer(&mut model, &tool_env, &Question { text: "görevlerim", turns: &[], memory: None, ui_lang: "tr" }, &AtomicBool::new(false), &mut |_| {})
+            .unwrap();
         assert_eq!(a.tools.len(), MAX_CALLS);
     }
 
@@ -767,7 +852,7 @@ mod tests {
         let cancel = AtomicBool::new(false);
         let mut model = scripted(&[], "bir iki üç dört beş");
         let mut seen = 0;
-        let err = answer(&mut model, &tool_env, "say", &[], None, "tr", &cancel, &mut |p| {
+        let err = answer(&mut model, &tool_env, &Question { text: "say", turns: &[], memory: None, ui_lang: "tr" }, &cancel, &mut |p| {
             if matches!(p, Progress::Token(_)) {
                 seen += 1;
                 if seen == 2 {
@@ -787,10 +872,24 @@ mod tests {
         crate::index::index_note(&e.cache, "notes/PLA.md", "# PLA\n\nKarar: Tauri kullanılacak.", 0, 1).unwrap();
         let tool_env = ToolEnv { vault: &e.vault, pla: &e.pla, cache: &e.cache, now: now(), validation: ValidationSettings::default() };
         let mut model = scripted(&[], "Tauri seçildi ([[PLA]]).");
-        let a = answer(&mut model, &tool_env, "PLA kararları neler", &[], None, "tr", &AtomicBool::new(false), &mut |_| {}).unwrap();
+        let a = answer(
+            &mut model,
+            &tool_env,
+            &Question { text: "PLA kararları neler", turns: &[], memory: None, ui_lang: "tr" },
+            &AtomicBool::new(false),
+            &mut |_| {},
+        )
+        .unwrap();
         assert_eq!(a.sources, ["notes/PLA.md"]);
         let mut model = scripted(&[], "Tauri seçildi.");
-        let a = answer(&mut model, &tool_env, "PLA kararları neler", &[], None, "tr", &AtomicBool::new(false), &mut |_| {}).unwrap();
+        let a = answer(
+            &mut model,
+            &tool_env,
+            &Question { text: "PLA kararları neler", turns: &[], memory: None, ui_lang: "tr" },
+            &AtomicBool::new(false),
+            &mut |_| {},
+        )
+        .unwrap();
         assert_eq!(a.sources, ["notes/PLA.md"], "uncited: the notes its context came from");
         assert_eq!(cited("[[A|x]] ve [[B#h]] ve [[A]]"), ["A", "B"]);
     }
@@ -801,17 +900,25 @@ mod tests {
         let e = env();
         let tool_env = ToolEnv { vault: &e.vault, pla: &e.pla, cache: &e.cache, now: now(), validation: ValidationSettings::default() };
         let mut model = scripted(&[], "Selam!");
-        answer(&mut model, &tool_env, "selam", &[], None, "en", &AtomicBool::new(false), &mut |_| {}).unwrap();
+        answer(&mut model, &tool_env, &Question { text: "selam", turns: &[], memory: None, ui_lang: "en" }, &AtomicBool::new(false), &mut |_| {}).unwrap();
         let last = model.bodies[1]["messages"].as_array().unwrap().last().unwrap()["content"].as_str().unwrap().to_owned();
         assert!(last.ends_with("Write it in Turkish."), "{last}");
         let offer = ToolRecord { tool: "suggest_note".into(), args: json!({}), ok: true, result: json!({}), error: None, undo: None };
-        assert!(write_instruction("tr", &[offer.clone()]).contains("press the \"Kaydet\" button"));
+        assert!(write_instruction("tr", std::slice::from_ref(&offer)).contains("press the \"Kaydet\" button"));
         assert!(write_instruction("en", &[offer]).contains("press the \"Save\" button"));
         assert!(!write_instruction("tr", &[]).contains("Save"));
     }
 
     fn turn(q: &str) -> Turn {
-        Turn { turn_id: q.into(), question: q.into(), answer: String::new(), tools: Vec::new(), created_at: String::new(), status: "done".into(), new_topic: false }
+        Turn {
+            turn_id: q.into(),
+            question: q.into(),
+            answer: String::new(),
+            tools: Vec::new(),
+            created_at: String::new(),
+            status: "done".into(),
+            new_topic: false,
+        }
     }
 
     #[test]
@@ -823,7 +930,12 @@ mod tests {
         assert_eq!(args["body"], said, "past the request itself, to what it pointed at");
         let kept = with_referred_body("create_note", json!({ "title": "Ders", "body": "İşletim sistemleri chapter 1" }), "bunu not al", &turns[..1]);
         assert_eq!(kept["body"], "İşletim sistemleri chapter 1", "a body about it stays");
-        let own = with_referred_body("create_note", json!({ "title": "Market", "body": "süt, ekmek" }), "not al: market listesi süt, ekmek, yumurta ve peynir", &turns[..1]);
+        let own = with_referred_body(
+            "create_note",
+            json!({ "title": "Market", "body": "süt, ekmek" }),
+            "not al: market listesi süt, ekmek, yumurta ve peynir",
+            &turns[..1],
+        );
         assert_eq!(own["body"], "süt, ekmek", "a long message with its own content is not about the earlier one");
     }
 
@@ -864,11 +976,24 @@ mod tests {
         // the real window: "Annemi aramak" and a second open task; nothing was completed
         let e = env();
         for title in ["Annemi aramak", "Güç"] {
-            crate::tasks::add_task_as(&e.pla, &crate::tasks::TaskInput { title: title.into(), details: None, date: Some("2026-10-07".into()), time: None, remind: Some(false) }, "manual", now()).unwrap();
+            crate::tasks::add_task_as(
+                &e.pla,
+                &crate::tasks::TaskInput { title: title.into(), details: None, date: Some("2026-10-07".into()), time: None, remind: Some(false) },
+                "manual",
+                now(),
+            )
+            .unwrap();
         }
         let tool_env = ToolEnv { vault: &e.vault, pla: &e.pla, cache: &e.cache, now: now(), validation: ValidationSettings::default() };
         let mut model = scripted(&["{\"tool\":\"query_tasks\",\"args\":{\"list\":\"all\"}}"], "Tamam.");
-        let a = answer(&mut model, &tool_env, "annemi aradım, o görevi tamamla", &[], None, "tr", &AtomicBool::new(false), &mut |_| {}).unwrap();
+        let a = answer(
+            &mut model,
+            &tool_env,
+            &Question { text: "annemi aradım, o görevi tamamla", turns: &[], memory: None, ui_lang: "tr" },
+            &AtomicBool::new(false),
+            &mut |_| {},
+        )
+        .unwrap();
         let done = a.tools.iter().find(|t| t.tool == "complete_task" && t.ok).expect("completed");
         assert_eq!(done.result["title"], "Annemi aramak");
     }
@@ -877,22 +1002,48 @@ mod tests {
     fn a_search_asked_twice_still_completes_the_task() {
         // eval final3: the model repeated query_tasks instead of answering, and nothing was completed
         let e = env();
-        crate::tasks::add_task_as(&e.pla, &crate::tasks::TaskInput { title: "Elektrikçiyi ara".into(), details: None, date: Some("2026-10-06".into()), time: None, remind: Some(false) }, "manual", now()).unwrap();
+        crate::tasks::add_task_as(
+            &e.pla,
+            &crate::tasks::TaskInput { title: "Elektrikçiyi ara".into(), details: None, date: Some("2026-10-06".into()), time: None, remind: Some(false) },
+            "manual",
+            now(),
+        )
+        .unwrap();
         let tool_env = ToolEnv { vault: &e.vault, pla: &e.pla, cache: &e.cache, now: now(), validation: ValidationSettings::default() };
         let query = "{\"tool\":\"query_tasks\",\"args\":{\"list\":\"all\",\"text\":\"elektrikçiyi aradım\"}}";
         let mut model = scripted(&[query, query], "Tamamlandı.");
-        let a = answer(&mut model, &tool_env, "elektrikçiyi aradım", &[], None, "tr", &AtomicBool::new(false), &mut |_| {}).unwrap();
+        let a = answer(
+            &mut model,
+            &tool_env,
+            &Question { text: "elektrikçiyi aradım", turns: &[], memory: None, ui_lang: "tr" },
+            &AtomicBool::new(false),
+            &mut |_| {},
+        )
+        .unwrap();
         assert!(a.tools.iter().any(|t| t.tool == "complete_task" && t.ok), "{:?}", a.tools);
     }
 
     #[test]
     fn a_question_with_one_found_task_completes_nothing() {
         let e = env();
-        crate::tasks::add_task_as(&e.pla, &crate::tasks::TaskInput { title: "Annemi ara".into(), details: None, date: Some("2026-10-07".into()), time: None, remind: Some(false) }, "manual", now()).unwrap();
+        crate::tasks::add_task_as(
+            &e.pla,
+            &crate::tasks::TaskInput { title: "Annemi ara".into(), details: None, date: Some("2026-10-07".into()), time: None, remind: Some(false) },
+            "manual",
+            now(),
+        )
+        .unwrap();
         let tool_env = ToolEnv { vault: &e.vault, pla: &e.pla, cache: &e.cache, now: now(), validation: ValidationSettings::default() };
         let query = "{\"tool\":\"query_tasks\",\"args\":{\"list\":\"upcoming\"}}";
         let mut model = scripted(&[query], "Yarın annemi arayacaksın.");
-        let a = answer(&mut model, &tool_env, "yarın ne işim var, unuttum", &[], None, "tr", &AtomicBool::new(false), &mut |_| {}).unwrap();
+        let a = answer(
+            &mut model,
+            &tool_env,
+            &Question { text: "yarın ne işim var, unuttum", turns: &[], memory: None, ui_lang: "tr" },
+            &AtomicBool::new(false),
+            &mut |_| {},
+        )
+        .unwrap();
         assert!(!a.tools.iter().any(|t| t.tool == "complete_task"), "{:?}", a.tools);
         let decide = model.bodies[1]["messages"].as_array().unwrap();
         assert!(!decide.iter().any(|m| m["content"].as_str().unwrap_or_default().contains("call complete_task with task_id")), "no nudge either");
@@ -905,7 +1056,14 @@ mod tests {
         let tool_env = ToolEnv { vault: &e.vault, pla: &e.pla, cache: &e.cache, now: now(), validation: ValidationSettings::default() };
         let add = "{\"tool\":\"add_task\",\"args\":{\"title\":\"Toplantı\",\"date\":\"2026-10-07\",\"time\":\"14:00\"}}";
         let mut model = scripted(&[add], "Ekledim.");
-        let a = answer(&mut model, &tool_env, "sen karar ver", &[turn("yarın öğleden sonra toplantı ekle")], None, "tr", &AtomicBool::new(false), &mut |_| {}).unwrap();
+        let a = answer(
+            &mut model,
+            &tool_env,
+            &Question { text: "sen karar ver", turns: &[turn("yarın öğleden sonra toplantı ekle")], memory: None, ui_lang: "tr" },
+            &AtomicBool::new(false),
+            &mut |_| {},
+        )
+        .unwrap();
         assert_eq!(a.tools.iter().map(|t| t.tool.as_str()).collect::<Vec<_>>(), ["add_task"]);
         assert!(!delegates("karar verdim, yarın başlıyorum"));
     }
@@ -916,7 +1074,12 @@ mod tests {
         let turns = [turn("how many steps did I walk this week?")];
         let own = with_referred_body("create_note", json!({ "title": "Dentist", "body": "" }), "make a note that the dentist moved to Monday", &turns);
         assert_eq!(own["body"], "", "\"that\" does not point back; the engine keeps what the model wrote");
-        let milk = with_referred_body("create_note", json!({ "title": "Market", "body": "süt ekmek" }), "not al: süt ekmek", &[turn("bugün derste işletim sistemleri öğrendik")]);
+        let milk = with_referred_body(
+            "create_note",
+            json!({ "title": "Market", "body": "süt ekmek" }),
+            "not al: süt ekmek",
+            &[turn("bugün derste işletim sistemleri öğrendik")],
+        );
         assert_eq!(milk["body"], "süt ekmek");
     }
 
@@ -954,7 +1117,14 @@ mod tests {
         }];
         let call = "{\"tool\":\"create_note\",\"args\":{\"title\":\"Ders\",\"body\":\"İşletim sistemleri chapter 1\"}}";
         let mut model = scripted(&[call, call], "Zaten kayıtlı.");
-        let a = answer(&mut model, &tool_env, "notlarıma ekle bunu", &[told], None, "tr", &AtomicBool::new(false), &mut |_| {}).unwrap();
+        let a = answer(
+            &mut model,
+            &tool_env,
+            &Question { text: "notlarıma ekle bunu", turns: &[told], memory: None, ui_lang: "tr" },
+            &AtomicBool::new(false),
+            &mut |_| {},
+        )
+        .unwrap();
         assert!(!a.tools.iter().any(|t| t.tool == "create_note" && t.ok), "{:?}", a.tools);
         assert!(!e.vault.root.join("notes").exists() || std::fs::read_dir(e.vault.root.join("notes")).unwrap().next().is_none());
         let heard = model.bodies[1]["messages"].as_array().unwrap().iter().any(|m| m["content"].as_str().unwrap_or_default().contains("notes/Ders.md"));
@@ -974,8 +1144,15 @@ mod tests {
         // the eval: the model added "Kargoyu al", then completed it
         let e = env();
         let tool_env = ToolEnv { vault: &e.vault, pla: &e.pla, cache: &e.cache, now: now(), validation: ValidationSettings::default() };
-        let mut model = scripted(&["{\"tool\":\"add_task\",\"args\":{\"title\":\"Kargoyu al\",\"date\":\"2026-10-09\"}}", "{\"tool\":\"complete_task\",\"args\":{\"task_id\":\"x\"}}"], "Tamam.");
-        answer(&mut model, &tool_env, "cuma kargoyu al", &[], None, "tr", &AtomicBool::new(false), &mut |_| {}).unwrap();
+        let mut model = scripted(
+            &[
+                "{\"tool\":\"add_task\",\"args\":{\"title\":\"Kargoyu al\",\"date\":\"2026-10-09\"}}",
+                "{\"tool\":\"complete_task\",\"args\":{\"task_id\":\"x\"}}",
+            ],
+            "Tamam.",
+        );
+        answer(&mut model, &tool_env, &Question { text: "cuma kargoyu al", turns: &[], memory: None, ui_lang: "tr" }, &AtomicBool::new(false), &mut |_| {})
+            .unwrap();
         let open: i64 = e.pla.query_row("SELECT count(*) FROM task WHERE status = 'open'", [], |r| r.get(0)).unwrap();
         assert_eq!(open, 1);
     }
@@ -984,13 +1161,28 @@ mod tests {
     fn a_task_the_user_did_is_completed_when_the_model_only_searched() {
         // the eval: "faturayı ödedim" found "Fatura öde", then the model just answered
         let e = env();
-        crate::tasks::add_task_as(&e.pla, &crate::tasks::TaskInput { title: "Fatura öde".into(), details: None, date: Some("2026-10-06".into()), time: None, remind: Some(false) }, "manual", now()).unwrap();
+        crate::tasks::add_task_as(
+            &e.pla,
+            &crate::tasks::TaskInput { title: "Fatura öde".into(), details: None, date: Some("2026-10-06".into()), time: None, remind: Some(false) },
+            "manual",
+            now(),
+        )
+        .unwrap();
         let tool_env = ToolEnv { vault: &e.vault, pla: &e.pla, cache: &e.cache, now: now(), validation: ValidationSettings::default() };
         let mut model = scripted(&["{\"tool\":\"query_tasks\",\"args\":{\"list\":\"all\",\"text\":\"faturayı ödedim\"}}"], "Tamam.");
-        let a = answer(&mut model, &tool_env, "faturayı ödedim", &[], None, "tr", &AtomicBool::new(false), &mut |_| {}).unwrap();
+        let a =
+            answer(&mut model, &tool_env, &Question { text: "faturayı ödedim", turns: &[], memory: None, ui_lang: "tr" }, &AtomicBool::new(false), &mut |_| {})
+                .unwrap();
         assert!(a.tools.iter().any(|t| t.tool == "complete_task" && t.ok && t.undo.is_some()), "{:?}", a.tools);
         let mut model = scripted(&["{\"tool\":\"query_tasks\",\"args\":{\"list\":\"all\",\"text\":\"fatura\"}}"], "Evet.");
-        let asked = answer(&mut model, &tool_env, "faturayı ödedim mi?", &[], None, "tr", &AtomicBool::new(false), &mut |_| {}).unwrap();
+        let asked = answer(
+            &mut model,
+            &tool_env,
+            &Question { text: "faturayı ödedim mi?", turns: &[], memory: None, ui_lang: "tr" },
+            &AtomicBool::new(false),
+            &mut |_| {},
+        )
+        .unwrap();
         assert!(!asked.tools.iter().any(|t| t.tool == "complete_task"), "a question completes nothing");
     }
 
@@ -1003,11 +1195,25 @@ mod tests {
         let turns = [turn(said), turn("notlarıma ekle bunu")];
         // the real model offered a note instead, which a short reply is not worth (eval v4)
         let mut model = scripted(&["{\"tool\":\"suggest_note\",\"args\":{\"title\":\"x\",\"body\":\"y\"}}"], "Kaydettim.");
-        let a = answer(&mut model, &tool_env, "sen karar ver", &turns, None, "tr", &AtomicBool::new(false), &mut |_| {}).unwrap();
+        let a = answer(
+            &mut model,
+            &tool_env,
+            &Question { text: "sen karar ver", turns: &turns, memory: None, ui_lang: "tr" },
+            &AtomicBool::new(false),
+            &mut |_| {},
+        )
+        .unwrap();
         let note = a.tools.iter().find(|t| t.tool == "create_note").expect("a note");
         assert!(std::fs::read_to_string(e.vault.root.join(note.result["note"].as_str().unwrap())).unwrap().contains("işletim sistemleri"));
         let mut model = scripted(&[], "Tamam.");
-        let chat = answer(&mut model, &tool_env, "sen karar ver", &[turn("akşam ne yesek bilemedim")], None, "tr", &AtomicBool::new(false), &mut |_| {}).unwrap();
+        let chat = answer(
+            &mut model,
+            &tool_env,
+            &Question { text: "sen karar ver", turns: &[turn("akşam ne yesek bilemedim")], memory: None, ui_lang: "tr" },
+            &AtomicBool::new(false),
+            &mut |_| {},
+        )
+        .unwrap();
         assert!(chat.tools.is_empty(), "no note was asked for");
     }
 
@@ -1034,7 +1240,14 @@ mod tests {
             new_topic: false,
         };
         let mut model = scripted(&[], "Cuma boş.");
-        answer(&mut model, &tool_env, "Peki ya cuma?", &[earlier], None, "tr", &AtomicBool::new(false), &mut |_| {}).unwrap();
+        answer(
+            &mut model,
+            &tool_env,
+            &Question { text: "Peki ya cuma?", turns: &[earlier], memory: None, ui_lang: "tr" },
+            &AtomicBool::new(false),
+            &mut |_| {},
+        )
+        .unwrap();
         let msgs = model.bodies[1]["messages"].as_array().unwrap();
         assert_eq!(msgs[1]["content"], "Yarın ne işim var?");
         assert_eq!(msgs[2]["content"], "Dişçi.");

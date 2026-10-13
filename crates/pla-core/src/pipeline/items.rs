@@ -6,6 +6,7 @@ use rusqlite::{params, Connection, OptionalExtension};
 use serde_json::{Map, Value};
 
 use crate::extraction::{validate, MetricKind, RawExtraction, RawItem, Unit, ValidItem, ValidationSettings};
+use crate::util::new_id;
 
 const MAX_TITLE_CHARS: usize = 200;
 const DEFAULT_REMINDER_TIME: (u32, u32) = (9, 0);
@@ -34,29 +35,6 @@ struct Existing {
     claimed: bool,
 }
 
-pub fn metric_kind_name(kind: MetricKind) -> &'static str {
-    match kind {
-        MetricKind::Sleep => "sleep",
-        MetricKind::Water => "water",
-        MetricKind::Steps => "steps",
-        MetricKind::Weight => "weight",
-        MetricKind::Workout => "workout",
-    }
-}
-
-fn unit_name(unit: Unit) -> &'static str {
-    match unit {
-        Unit::H => "h",
-        Unit::Min => "min",
-        Unit::Ml => "ml",
-        Unit::L => "l",
-        Unit::Glass => "glass",
-        Unit::Count => "count",
-        Unit::Kg => "kg",
-        Unit::Lb => "lb",
-    }
-}
-
 fn normalize(s: &str) -> String {
     s.split_whitespace().collect::<Vec<_>>().join(" ").to_lowercase()
 }
@@ -77,7 +55,7 @@ pub fn item_signature(item: &ValidItem) -> String {
         }
         // Water adds up: two amounts on one day are two items too.
         ValidItem::Metric { kind: MetricKind::Water, date, value, .. } => format!("metric:water:{date}:{}", value.unwrap_or_default()),
-        ValidItem::Metric { kind, date, .. } => format!("metric:{}:{date}", metric_kind_name(*kind)),
+        ValidItem::Metric { kind, date, .. } => format!("metric:{}:{date}", kind.as_str()),
     }
 }
 
@@ -123,12 +101,8 @@ pub fn apply_block_items(
     for raw in &extraction.items {
         match validate(raw, reference, settings) {
             Err(reason) => outcomes.push(review(conn, block_id, raw, &reason.to_string(), &now_s)?),
-            Ok(ValidItem::Action { reminder: true, date: None, .. }) => {
-                outcomes.push(review(conn, block_id, raw, "reminder without a date", &now_s)?)
-            }
-            Ok(ValidItem::Action { date: Some(d), .. }) if skip_past_before.is_some_and(|today| d < today) => {
-                outcomes.push(Outcome::SkippedPast)
-            }
+            Ok(ValidItem::Action { reminder: true, date: None, .. }) => outcomes.push(review(conn, block_id, raw, "reminder without a date", &now_s)?),
+            Ok(ValidItem::Action { date: Some(d), .. }) if skip_past_before.is_some_and(|today| d < today) => outcomes.push(Outcome::SkippedPast),
             Ok(item) => {
                 let signature = item_signature(&item);
                 accepted.push((item, signature));
@@ -189,13 +163,7 @@ pub fn apply_block_items(
     Ok(outcomes)
 }
 
-pub fn record_unreadable_answer(
-    conn: &Connection,
-    block_id: &str,
-    answer: &str,
-    reason: &str,
-    now: DateTime<FixedOffset>,
-) -> rusqlite::Result<Outcome> {
+pub fn record_unreadable_answer(conn: &Connection, block_id: &str, answer: &str, reason: &str, now: DateTime<FixedOffset>) -> rusqlite::Result<Outcome> {
     let payload = serde_json::json!({ "raw_answer": answer }).to_string();
     insert_review(conn, block_id, &payload, reason, &now.to_rfc3339())
 }
@@ -212,28 +180,32 @@ pub fn reject_item(conn: &Connection, item: &ItemRef, now: DateTime<FixedOffset>
         ItemRef::Task(id) => ("task", "task_id", id),
         ItemRef::Metric(id) => ("metric_record", "metric_id", id),
     };
-    let found: Option<(Option<String>, Option<String>)> = conn
-        .query_row(&format!("SELECT block_id, item_signature FROM {table} WHERE {key} = ?1"), [id], |r| Ok((r.get(0)?, r.get(1)?)))
-        .optional()?;
+    let found: Option<(Option<String>, Option<String>)> =
+        conn.query_row(&format!("SELECT block_id, item_signature FROM {table} WHERE {key} = ?1"), [id], |r| Ok((r.get(0)?, r.get(1)?))).optional()?;
     let Some((block_id, signature)) = found else { return Ok(false) };
-    if let (Some(block_id), Some(signature)) = (block_id, signature) {
-        conn.execute(
-            "INSERT OR IGNORE INTO rejection (rejection_id, block_id, item_signature, rejected_at) VALUES (?1, ?2, ?3, ?4)",
-            params![new_id(), block_id, signature, now.to_rfc3339()],
-        )?;
+    // One step: a savepoint works alone and inside a caller's transaction (architecture review M9).
+    conn.execute_batch("SAVEPOINT reject_item")?;
+    let done = (|| {
+        if let (Some(block_id), Some(signature)) = (&block_id, &signature) {
+            conn.execute(
+                "INSERT OR IGNORE INTO rejection (rejection_id, block_id, item_signature, rejected_at) VALUES (?1, ?2, ?3, ?4)",
+                params![new_id(), block_id, signature, now.to_rfc3339()],
+            )?;
+        }
+        conn.execute(&format!("DELETE FROM {table} WHERE {key} = ?1"), [id])
+    })();
+    match done {
+        Ok(_) => conn.execute_batch("RELEASE reject_item")?,
+        Err(e) => {
+            conn.execute_batch("ROLLBACK TO reject_item; RELEASE reject_item")?;
+            return Err(e);
+        }
     }
-    conn.execute(&format!("DELETE FROM {table} WHERE {key} = ?1"), [id])?;
     Ok(true)
 }
 
-fn new_id() -> String {
-    uuid::Uuid::new_v4().simple().to_string()
-}
-
 fn load_rejections(conn: &Connection, block_id: &str) -> rusqlite::Result<Vec<String>> {
-    conn.prepare("SELECT item_signature FROM rejection WHERE block_id = ?1")?
-        .query_map([block_id], |r| r.get(0))?
-        .collect()
+    conn.prepare("SELECT item_signature FROM rejection WHERE block_id = ?1")?.query_map([block_id], |r| r.get(0))?.collect()
 }
 
 fn review(conn: &Connection, block_id: &str, raw: &RawItem, reason: &str, now: &str) -> rusqlite::Result<Outcome> {
@@ -271,26 +243,15 @@ fn load_existing(conn: &Connection, block_id: &str, now: &str) -> rusqlite::Resu
     const SOURCES: &str = "(block_id = ?1 OR block_id IN (SELECT o.block_id FROM block o JOIN block b ON o.note_path = b.note_path
                            WHERE b.block_id = ?1 AND o.missing = 1 AND o.missing_since = ?2))";
     let mut out: Vec<Existing> = conn
-        .prepare(&format!(
-            "SELECT task_id, COALESCE(item_signature, ''), user_modified, status FROM task WHERE origin = 'extracted' AND {SOURCES}"
-        ))?
+        .prepare(&format!("SELECT task_id, COALESCE(item_signature, ''), user_modified, status FROM task WHERE origin = 'extracted' AND {SOURCES}"))?
         .query_map([block_id, now], |r| {
             let status: String = r.get(3)?;
-            Ok(Existing {
-                item: ItemRef::Task(r.get(0)?),
-                signature: r.get(1)?,
-                user_owned: r.get::<_, bool>(2)? || status != "open",
-                claimed: false,
-            })
+            Ok(Existing { item: ItemRef::Task(r.get(0)?), signature: r.get(1)?, user_owned: r.get::<_, bool>(2)? || status != "open", claimed: false })
         })?
         .collect::<Result<_, _>>()?;
     let metrics: Vec<Existing> = conn
-        .prepare(&format!(
-            "SELECT metric_id, COALESCE(item_signature, ''), user_modified FROM metric_record WHERE origin = 'extracted' AND {SOURCES}"
-        ))?
-        .query_map([block_id, now], |r| {
-            Ok(Existing { item: ItemRef::Metric(r.get(0)?), signature: r.get(1)?, user_owned: r.get(2)?, claimed: false })
-        })?
+        .prepare(&format!("SELECT metric_id, COALESCE(item_signature, ''), user_modified FROM metric_record WHERE origin = 'extracted' AND {SOURCES}"))?
+        .query_map([block_id, now], |r| Ok(Existing { item: ItemRef::Metric(r.get(0)?), signature: r.get(1)?, user_owned: r.get(2)?, claimed: false }))?
         .collect::<Result<_, _>>()?;
     out.extend(metrics);
     Ok(out)
@@ -300,9 +261,7 @@ fn load_existing(conn: &Connection, block_id: &str, now: &str) -> rusqlite::Resu
 fn adopt(conn: &Connection, item: &ItemRef, block_id: &str) -> rusqlite::Result<()> {
     match item {
         ItemRef::Task(id) => conn.execute("UPDATE task SET block_id = ?1, source_missing = 0 WHERE task_id = ?2", [block_id, id])?,
-        ItemRef::Metric(id) => {
-            conn.execute("UPDATE metric_record SET block_id = ?1, source_missing = 0 WHERE metric_id = ?2", [block_id, id])?
-        }
+        ItemRef::Metric(id) => conn.execute("UPDATE metric_record SET block_id = ?1, source_missing = 0 WHERE metric_id = ?2", [block_id, id])?,
     };
     Ok(())
 }
@@ -362,9 +321,9 @@ fn insert_item(conn: &Connection, block_id: &str, item: &ValidItem, signature: &
                  VALUES (?1, ?2, ?3, ?4, ?5, 'extracted', ?6, ?7, ?8)",
                 params![
                     id,
-                    metric_kind_name(*kind),
+                    kind.as_str(),
                     metric_value_json(*value, exercise, *sets, *reps),
-                    unit.map(unit_name),
+                    unit.map(Unit::as_str),
                     date.format("%Y-%m-%d").to_string(),
                     block_id,
                     signature,
@@ -389,9 +348,9 @@ fn update_item(conn: &Connection, target: &ItemRef, block_id: &str, item: &Valid
             conn.execute(
                 "UPDATE metric_record SET type = ?1, value_json = ?2, unit = ?3, date = ?4, item_signature = ?5, source_missing = 0, block_id = ?7 WHERE metric_id = ?6",
                 params![
-                    metric_kind_name(*kind),
+                    kind.as_str(),
                     metric_value_json(*value, exercise, *sets, *reps),
-                    unit.map(unit_name),
+                    unit.map(Unit::as_str),
                     date.format("%Y-%m-%d").to_string(),
                     signature,
                     id,
@@ -449,6 +408,22 @@ mod tests {
         let (origin, block, sig): (String, String, String) =
             conn.query_row("SELECT origin, block_id, item_signature FROM task", [], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).unwrap();
         assert_eq!((origin.as_str(), block.as_str(), sig.as_str()), ("extracted", "b1", "action:dişçi"));
+    }
+
+    #[test]
+    fn a_rejection_is_kept_only_with_its_deletion() {
+        // architecture review M9: remembering the rejection and deleting the item are one step
+        let (_t, conn) = setup();
+        apply(&conn, DENTIST);
+        let id: String = conn.query_row("SELECT task_id FROM task", [], |r| r.get(0)).unwrap();
+        conn.execute_batch("CREATE TRIGGER no_delete BEFORE DELETE ON task BEGIN SELECT RAISE(ABORT, 'locked'); END;").unwrap();
+        assert!(reject_item(&conn, &ItemRef::Task(id.clone()), now()).is_err());
+        assert_eq!((count(&conn, "rejection"), count(&conn, "task")), (0, 1), "nothing half done");
+        conn.execute_batch("DROP TRIGGER no_delete;").unwrap();
+        let tx = conn.unchecked_transaction().unwrap(); // inside a caller's transaction too
+        assert!(reject_item(&tx, &ItemRef::Task(id), now()).unwrap());
+        tx.commit().unwrap();
+        assert_eq!((count(&conn, "rejection"), count(&conn, "task")), (1, 0));
     }
 
     #[test]
@@ -563,8 +538,8 @@ mod tests {
         let (_t, conn) = setup();
         apply(&conn, r#"{"type":"task","title":"Dişçi"},{"type":"task","title":"Market"}"#);
         apply(&conn, r#"{"type":"task","title":"Markete git"},{"type":"task","title":"Dişçiye git"}"#);
-        let titles: Vec<String> = conn.prepare("SELECT title FROM task ORDER BY title").unwrap()
-            .query_map([], |r| r.get(0)).unwrap().map(Result::unwrap).collect();
+        let titles: Vec<String> =
+            conn.prepare("SELECT title FROM task ORDER BY title").unwrap().query_map([], |r| r.get(0)).unwrap().map(Result::unwrap).collect();
         assert_eq!(titles, vec!["Dişçiye git", "Markete git"]);
     }
 

@@ -8,7 +8,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::Serialize;
 
-use crate::pipeline::blocks::content_hash;
+use crate::util::content_hash;
 
 /// A wikilink as written in a note: its normalised target and where it stands.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -44,17 +44,20 @@ pub fn key(s: &str) -> String {
 
 /// `key` without the Turkish diacritics FTS5 also drops (ç ğ ş ö ü), for finding the matching line.
 fn loose(s: &str) -> String {
-    key(s).chars().map(|c| match c {
-        'ç' => 'c',
-        'ğ' => 'g',
-        'ş' => 's',
-        'ö' => 'o',
-        'ü' => 'u',
-        'â' => 'a',
-        'î' => 'i',
-        'û' => 'u',
-        c => c,
-    }).collect()
+    key(s)
+        .chars()
+        .map(|c| match c {
+            'ç' => 'c',
+            'ğ' => 'g',
+            'ş' => 's',
+            'ö' => 'o',
+            'ü' => 'u',
+            'â' => 'a',
+            'î' => 'i',
+            'û' => 'u',
+            c => c,
+        })
+        .collect()
 }
 
 /// How a link target or note name is compared: lower-case, `/` separators, no `.md`, no `#heading`.
@@ -69,16 +72,6 @@ pub fn strip_md(name: &str) -> &str {
         Some(at) if name.is_char_boundary(at) && name[at..].eq_ignore_ascii_case(".md") => &name[..at],
         _ => name,
     }
-}
-
-/// The frontmatter's lines (without the `---` fences) and the index of the first body line, or
-/// `None` when there is no frontmatter or it never closes (FR-EDT-007: then there is none).
-fn split_frontmatter<'a>(lines: &[&'a str]) -> Option<(Vec<&'a str>, usize)> {
-    if lines.first().map(|l| l.trim_end()) != Some("---") {
-        return None;
-    }
-    let end = lines.iter().enumerate().skip(1).find(|(_, l)| matches!(l.trim_end(), "---" | "..."))?.0;
-    Some((lines[1..end].to_vec(), end + 1))
 }
 
 fn push_unique(list: &mut Vec<String>, item: String) {
@@ -163,7 +156,7 @@ pub fn parse_note(rel: &str, text: &str) -> ParsedNote {
     let text = text.strip_prefix('\u{feff}').unwrap_or(text);
     let lines: Vec<&str> = text.lines().collect();
     let title = std::path::Path::new(rel).file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
-    let body_start = split_frontmatter(&lines).map_or(0, |(_, start)| start);
+    let body_start = crate::markdown::frontmatter_end(&lines).unwrap_or(0);
     // FR-EDT-006/007: the same reading as the properties strip; invalid YAML gives none (its lines
     // are still not the body)
     let front = crate::media::read_frontmatter(text);
@@ -173,21 +166,10 @@ pub fn parse_note(rel: &str, text: &str) -> ParsedNote {
         push_unique(&mut tags, fold(&t));
     }
     let mut links = Vec::new();
-    let mut fence: Option<&str> = None; // the marker that opened the code block
+    let mut fences = crate::markdown::Fences::default();
     for (i, line) in lines.iter().enumerate().skip(body_start) {
-        let trimmed = line.trim_start();
-        let marker = ["```", "~~~"].into_iter().find(|m| trimmed.starts_with(m));
-        match (fence, marker) {
-            (None, Some(m)) => {
-                fence = Some(m);
-                continue;
-            }
-            (Some(open), Some(m)) if open == m => {
-                fence = None;
-                continue;
-            }
-            (Some(_), _) => continue,
-            (None, None) => {}
+        if fences.is_code(line) {
+            continue;
         }
         let plain = without_inline_code(line);
         tags_in(&plain, &mut tags);
@@ -220,7 +202,10 @@ pub fn index_note(conn: &Connection, rel: &str, text: &str, mtime: i64, size: i6
     tx.execute("INSERT INTO note_fts (note_path, title, body) VALUES (?1, ?2, ?3)", params![rel, note.title, note.body])?;
     crate::memory::sync_chunks(&tx, rel, &note.title, &note.body)?; // FR-MEM-002: only changed chunks lose their vector
     for link in &note.links {
-        tx.execute("INSERT INTO link (source_path, target_path, line_text, line) VALUES (?1, ?2, ?3, ?4)", params![rel, link.target, link.line_text, link.line as i64])?;
+        tx.execute(
+            "INSERT INTO link (source_path, target_path, line_text, line) VALUES (?1, ?2, ?3, ?4)",
+            params![rel, link.target, link.line_text, link.line as i64],
+        )?;
     }
     tx.commit()
 }
@@ -255,25 +240,8 @@ fn is_hidden(rel: &str) -> bool {
 /// Every `.md` file of the vault outside hidden folders, as `/`-separated relative paths. Links and
 /// junctions are not followed.
 fn markdown_files(root: &Path) -> Vec<String> {
-    let mut out = Vec::new();
-    let mut stack = vec![root.to_path_buf()];
-    while let Some(dir) = stack.pop() {
-        let Ok(entries) = std::fs::read_dir(&dir) else { continue };
-        for e in entries.flatten() {
-            let name = e.file_name().to_string_lossy().into_owned();
-            let Ok(kind) = e.file_type() else { continue };
-            if name.starts_with('.') || kind.is_symlink() {
-                continue;
-            }
-            if kind.is_dir() {
-                stack.push(e.path());
-            } else if name.to_ascii_lowercase().ends_with(".md") {
-                if let Ok(rel) = e.path().strip_prefix(root) {
-                    out.push(rel.components().map(|c| c.as_os_str().to_string_lossy()).collect::<Vec<_>>().join("/"));
-                }
-            }
-        }
-    }
+    let notes = crate::vault::walk_vault(root).filter(|e| !e.is_dir && crate::vault::is_note_name(&e.rel));
+    let mut out: Vec<String> = notes.map(|e| e.rel).collect();
     out.sort();
     out
 }
@@ -288,9 +256,8 @@ pub fn find_on_disk(root: &Path, target: &str) -> Option<String> {
     }
     let files = markdown_files(root);
     let shortest = |hits: Vec<&String>| hits.into_iter().min_by_key(|p| (p.len(), (*p).clone())).cloned();
-    shortest(files.iter().filter(|p| normalize_name(p) == wanted).collect()).or_else(|| {
-        shortest(files.iter().filter(|p| normalize_name(p).rsplit('/').next() == Some(name.as_str()) && !wanted.contains('/')).collect())
-    })
+    shortest(files.iter().filter(|p| normalize_name(p) == wanted).collect())
+        .or_else(|| shortest(files.iter().filter(|p| normalize_name(p).rsplit('/').next() == Some(name.as_str()) && !wanted.contains('/')).collect()))
 }
 
 fn stamp(meta: &std::fs::Metadata) -> (i64, i64) {
@@ -428,7 +395,6 @@ fn i_variants(word: &str) -> Vec<String> {
 const IN_FOLDER: &str = "(?2 IS NULL OR substr(n.note_path, 1, length(?2) + 1) = ?2 || '/')";
 const HAS_TAG: &str = "(?3 IS NULL OR EXISTS (SELECT 1 FROM json_each(n.tag_keys) WHERE value = ?3 OR substr(value, 1, length(?3) + 1) = ?3 || '/'))";
 
-/// FR-EDT-014/015: ranked full-text results; `folder` and `tag` narrow them. A tag alone lists its notes.
 /// A note's text for the assistant's context (FR-MEM-009).
 #[derive(Debug, Clone, PartialEq)]
 pub struct NoteText {
@@ -441,10 +407,10 @@ pub struct NoteText {
 
 /// Words that say nothing about what is asked (Turkish and English question words and fillers).
 const STOPWORDS: &[&str] = &[
-    "ben", "bana", "beni", "benim", "bir", "bu", "şu", "ve", "ile", "için", "ama", "gibi", "kadar", "daha", "çok", "mi", "mı", "mu", "mü", "ne",
-    "neler", "nedir", "nasıl", "neden", "niye", "hangi", "kaç", "var", "yok", "olan", "oldu", "olarak", "da", "de", "ki", "the", "and", "for",
-    "what", "which", "how", "why", "when", "where", "who", "did", "does", "was", "were", "are", "have", "has", "with", "about", "from", "that",
-    "this", "you", "your", "my", "me", "can", "will",
+    "ben", "bana", "beni", "benim", "bir", "bu", "şu", "ve", "ile", "için", "ama", "gibi", "kadar", "daha", "çok", "mi", "mı", "mu", "mü", "ne", "neler",
+    "nedir", "nasıl", "neden", "niye", "hangi", "kaç", "var", "yok", "olan", "oldu", "olarak", "da", "de", "ki", "the", "and", "for", "what", "which", "how",
+    "why", "when", "where", "who", "did", "does", "was", "were", "are", "have", "has", "with", "about", "from", "that", "this", "you", "your", "my", "me",
+    "can", "will",
 ];
 
 /// The question's words for retrieval: folded, at least three letters, no filler words.
@@ -498,6 +464,7 @@ pub fn recent(conn: &Connection, since_ms: i64, limit: usize) -> rusqlite::Resul
     .collect()
 }
 
+/// FR-EDT-014/015: ranked full-text results; `folder` and `tag` narrow them. A tag alone lists its notes.
 pub fn search(conn: &Connection, text: &str, folder: Option<&str>, tag: Option<&str>, limit: usize) -> rusqlite::Result<Vec<SearchHit>> {
     let folder = folder.map(|f| f.trim_matches('/').to_owned()).filter(|f| !f.is_empty());
     let tag = tag.map(|t| key(t.trim().trim_start_matches('#'))).filter(|t| !t.is_empty());
@@ -535,7 +502,6 @@ pub fn search(conn: &Connection, text: &str, folder: Option<&str>, tag: Option<&
         .collect())
 }
 
-/// Every note's path, title and aliases: what links resolve against and quick open searches.
 /// A note as links and quick open see it: path, title, aliases, last change.
 type Name = (String, String, Vec<String>, i64);
 
@@ -587,7 +553,9 @@ pub fn backlinks(conn: &Connection, rel: &str) -> rusqlite::Result<Vec<Backlink>
          WHERE l.target_path = ?1 AND l.source_path <> ?2 ORDER BY l.source_path, l.line",
     )?;
     for name in candidates.iter().collect::<std::collections::BTreeSet<_>>() {
-        let rows = stmt.query_map(params![name, rel], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, i64>(2)?, r.get::<_, String>(3)?, r.get::<_, String>(4)?)))?;
+        let rows = stmt.query_map(params![name, rel], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, i64>(2)?, r.get::<_, String>(3)?, r.get::<_, String>(4)?))
+        })?;
         for row in rows {
             let (source_path, source_title, line, line_text, target) = row?;
             let goes_to = match resolved.get(&target) {
@@ -855,10 +823,7 @@ mod tests {
         put(&conn, "b.md", "---\ntags: [proje]\n---\n#Proje tekrar");
         put(&conn, "c.md", "#okuma");
         let tags = list_tags(&conn).unwrap();
-        assert_eq!(
-            tags.iter().map(|t| (t.tag.as_str(), t.count)).collect::<Vec<_>>(),
-            vec![("okuma", 1), ("proje", 2), ("proje/pla", 1)]
-        );
+        assert_eq!(tags.iter().map(|t| (t.tag.as_str(), t.count)).collect::<Vec<_>>(), vec![("okuma", 1), ("proje", 2), ("proje/pla", 1)]);
     }
 
     #[test]

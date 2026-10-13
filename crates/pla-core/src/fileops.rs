@@ -41,11 +41,7 @@ pub fn same_ignoring_case(a: &str, b: &str) -> bool {
 /// The system folders PLA keeps its own things in: they stay where `.pla/config` says, and so does
 /// any folder that holds one (a configured `journal/daily` keeps `journal` in place).
 pub fn is_system_folder(folders: &Folders, rel: &str) -> bool {
-    let rel = rel.trim_matches('/').to_lowercase();
-    [&folders.daily, &folders.inbox, &folders.notes, &folders.reports, &folders.attachments, &folders.templates].iter().any(|f| {
-        let f = f.trim_matches('/').to_lowercase();
-        f == rel || f.starts_with(&format!("{rel}/"))
-    })
+    [&folders.daily, &folders.inbox, &folders.notes, &folders.reports, &folders.attachments, &folders.templates].iter().any(|f| crate::vault::is_under(f, rel))
 }
 
 /// Puts `from` at `to` on disk: refuses an existing target (unless only the letter case differs,
@@ -123,16 +119,9 @@ pub fn rewrite_links(text: &str, old_rel: &str, new_rel: &str, by_name: bool) ->
     let (new_path, new_title) = (strip_md(new_rel).to_owned(), stem(new_rel));
     let mut out = String::with_capacity(text.len());
     let mut changed = false;
-    let mut fence: Option<&str> = None;
+    let mut fences = crate::markdown::Fences::default();
     for line in text.split_inclusive('\n') {
-        let trimmed = line.trim_start();
-        let marker = ["```", "~~~"].into_iter().find(|m| trimmed.starts_with(m));
-        match (fence, marker) {
-            (None, Some(m)) => fence = Some(m),
-            (Some(open), Some(m)) if open == m => fence = None,
-            _ => {}
-        }
-        if fence.is_some() || marker.is_some() {
+        if fences.is_code(line) {
             out.push_str(line);
             continue;
         }
@@ -328,7 +317,11 @@ mod tests {
         assert_eq!(rewrite_links("[[Plan]] ve [[arşiv/x/Plan]]", "arşiv/x/Plan.md", "arşiv/x/Eski.md", false).as_deref(), Some("[[Plan]] ve [[arşiv/x/Eski]]"));
         // a move keeps the name: a link written in other letter case is left as it is (M4)
         assert_eq!(rewrite_links("[[proje planı]]", "notes/Proje Planı.md", "arşiv/Proje Planı.md", true), None);
-        assert_eq!(rewrite_links("![[Proje Planı]] gömülü", "notes/Proje Planı.md", "notes/Yeni.md", true).as_deref(), Some("![[Yeni]] gömülü"), "embeds point at the note too");
+        assert_eq!(
+            rewrite_links("![[Proje Planı]] gömülü", "notes/Proje Planı.md", "notes/Yeni.md", true).as_deref(),
+            Some("![[Yeni]] gömülü"),
+            "embeds point at the note too"
+        );
     }
 
     #[test]

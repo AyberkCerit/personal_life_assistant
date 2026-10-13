@@ -120,7 +120,9 @@ fn user_dword(subkey: &str, value: &str) -> Option<u32> {
     let mut data = 0u32;
     let mut size = std::mem::size_of::<u32>() as u32;
     // SAFETY: NUL-terminated names, a DWORD-sized out buffer and its size.
-    let status = unsafe { RegGetValueW(HKEY_CURRENT_USER, key.as_ptr(), name.as_ptr(), RRF_RT_REG_DWORD, std::ptr::null_mut(), (&mut data as *mut u32).cast(), &mut size) };
+    let status = unsafe {
+        RegGetValueW(HKEY_CURRENT_USER, key.as_ptr(), name.as_ptr(), RRF_RT_REG_DWORD, std::ptr::null_mut(), (&mut data as *mut u32).cast(), &mut size)
+    };
     (status == 0).then_some(data)
 }
 
@@ -138,7 +140,6 @@ pub fn windows_notifications_on() -> bool {
     }
 }
 
-
 #[derive(Serialize)]
 pub struct BackupStatus {
     job: pla_core::jobs::JobStatus,
@@ -148,7 +149,7 @@ pub struct BackupStatus {
 #[tauri::command]
 pub fn backup_status(state: State<AppState>) -> Result<BackupStatus, String> {
     let guard = state.session.lock().expect("session lock");
-    let session = guard.as_ref().ok_or("no_vault")?;
+    let session = guard.as_ref().ok_or(crate::commands::NO_VAULT)?;
     let job = pla_core::jobs::status(&session.db.lock().expect("db lock"), pla_core::jobs::DAILY).map_err(|e| e.to_string())?;
     Ok(BackupStatus { job, backups: pla_core::jobs::backups(&session.vault.root) })
 }
@@ -163,7 +164,7 @@ pub fn export_data(state: State<AppState>, dir: String, lang: String) -> Result<
     let style = region_style();
     let (tasks, metrics) = {
         let guard = state.session.lock().expect("session lock");
-        let session = guard.as_ref().ok_or("no_vault")?;
+        let session = guard.as_ref().ok_or(crate::commands::NO_VAULT)?;
         let db = session.db.lock().expect("db lock");
         let tasks = pla_core::export::tasks_csv(&db, &lang, style).map_err(|e| e.to_string())?;
         (tasks, pla_core::export::metrics_csv(&db, &lang, style).map_err(|e| e.to_string())?)
@@ -225,7 +226,7 @@ pub struct About {
 pub fn about_info(app: AppHandle) -> Result<About, String> {
     let settings = pla_core::settings::load_settings(&app_root()?).map_err(|e| e.to_string())?.settings;
     let entry = settings.model_id.as_deref().and_then(pla_core::models::catalog::by_id);
-    let model = settings.model_path.as_deref().and_then(|p| crate::commands::describe_model(p, settings.model_id.as_deref())).map(|m| m.name);
+    let model = settings.model_path.as_deref().and_then(|p| crate::model_cmds::describe_model(p, settings.model_id.as_deref())).map(|m| m.name);
     Ok(About { version: app.package_info().version.to_string(), model_licence: model.as_ref().and(entry.map(|e| e.licence)), model, components: COMPONENTS })
 }
 

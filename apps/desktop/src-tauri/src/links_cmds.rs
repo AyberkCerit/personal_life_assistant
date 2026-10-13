@@ -10,7 +10,7 @@ use crate::indexer::IndexCommand;
 
 fn with_cache<T>(state: &State<AppState>, f: impl FnOnce(&rusqlite::Connection) -> rusqlite::Result<T>) -> Result<T, String> {
     let guard = state.session.lock().expect("session lock");
-    let session = guard.as_ref().ok_or("no_vault")?;
+    let session = guard.as_ref().ok_or(crate::commands::NO_VAULT)?;
     let cache = session.cache.lock().expect("cache lock");
     f(&cache).map_err(|e| e.to_string())
 }
@@ -62,7 +62,7 @@ pub struct OpenedLink {
 #[tauri::command]
 pub fn open_link(state: State<AppState>, target: String) -> Result<OpenedLink, String> {
     let guard = state.session.lock().expect("session lock");
-    let session = guard.as_ref().ok_or("no_vault")?;
+    let session = guard.as_ref().ok_or(crate::commands::NO_VAULT)?;
     if let Some(path) = index::resolve_link(&session.cache.lock().expect("cache lock"), &target).map_err(|e| e.to_string())? {
         return Ok(OpenedLink { path, created: false });
     }

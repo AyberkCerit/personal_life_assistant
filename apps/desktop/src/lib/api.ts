@@ -190,7 +190,7 @@ export const api = {
   metricsOverview: () => call<MetricCard[]>("metrics_overview"),
   metricsSummary: (kind: MetricKind, days: number) => call<Summary>("metrics_summary", { kind, days }),
   metricRecords: (kind: MetricKind, days: number) => call<MetricRecord[]>("metric_records", { kind, days }),
-  /** Errors are codes, e.g. `out_of_range|450` (see `metricError`). */
+  /** Errors are codes, e.g. `out_of_range|value|450` (see `metricError`). */
   metricLog: (input: MetricInput) => call<string>("metric_log", { input }),
   metricEdit: (id: string, input: MetricInput) => call<void>("metric_edit", { id, input }),
   metricDelete: (id: string) => call<void>("metric_delete", { id }),
@@ -258,4 +258,6 @@ export const api = {
   onTasksChanged: (cb: () => void) => on<unknown>("tasks-changed", () => cb()),
   onNewNote: (cb: () => void) => on<unknown>("new-note", () => cb()),
   onPausedChanged: (cb: (paused: boolean) => void) => on<boolean>("paused-changed", cb),
+  /** A background job (backup, weekly report) failed for the second time today (FR-SCH-015). */
+  onBackgroundProblem: (cb: (message: string) => void) => on<string>("background-problem", cb),
 };

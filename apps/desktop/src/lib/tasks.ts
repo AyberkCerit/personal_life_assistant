@@ -1,4 +1,5 @@
 // Task grouping and labels for the task panel (FR-TSK-001, -007, -008). No framework code.
+import type { Key } from "./i18n";
 
 export interface Task {
   task_id: string;
@@ -96,6 +97,15 @@ export function revealRange(fileText: string, block: string): { anchor: number; 
   const text = fileText.replace(/\r\n?/g, "\n");
   const at = text.indexOf(block);
   return at < 0 ? null : { anchor: at, head: at + block.length };
+}
+
+const ERROR_CODES = ["bad_title", "bad_date", "bad_time", "not_found", "not_an_action", "no_vault"];
+
+/** Reads the task commands' `<code>|<detail>|<reason>` errors (architecture review A2). */
+export function taskError(err: string): { key: Key; detail: string } {
+  const [code, detail = "", ...rest] = err.split("|");
+  if (ERROR_CODES.includes(code)) return { key: `tasks.error.${code}` as Key, detail };
+  return { key: "tasks.error.other", detail: code === "io" ? rest.join("|") : err };
 }
 
 export function isReminder(task: Task): boolean {

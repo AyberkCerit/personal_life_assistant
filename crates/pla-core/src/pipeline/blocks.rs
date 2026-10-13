@@ -26,18 +26,9 @@ struct Stored {
     missing: bool,
 }
 
-/// FNV-1a 64-bit — only answers "did this change?" (FR-EXT-007, FR-VLT-012), not a security hash.
-pub fn content_hash(bytes: &[u8]) -> String {
-    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
-    for byte in bytes {
-        h ^= u64::from(*byte);
-        h = h.wrapping_mul(0x0000_0100_0000_01b3);
-    }
-    format!("{h:016x}")
-}
-
+/// A block's text, hashed to tell whether it changed since extraction (FR-EXT-007).
 pub fn text_hash(text: &str) -> String {
-    content_hash(text.as_bytes())
+    crate::util::content_hash(text.as_bytes())
 }
 
 /// `note_written` is the note file's modification time: when PLA sees a note for the first time,
@@ -86,8 +77,7 @@ pub fn sync_note_blocks(
     }
     // Blocks that disappear in this sync: a new block made of their text (a split or merged
     // paragraph) keeps their first-seen time, so "yarın" keeps meaning the day it was written.
-    let vanished: Vec<&Stored> =
-        m.unmatched_old.iter().filter_map(|id| stored.iter().find(|s| &s.block.id == id && !s.missing)).collect();
+    let vanished: Vec<&Stored> = m.unmatched_old.iter().filter_map(|id| stored.iter().find(|s| &s.block.id == id && !s.missing)).collect();
     for &i in &m.unmatched_new {
         let b = &blocks[i];
         if first_sight {
@@ -96,7 +86,7 @@ pub fn sync_note_blocks(
                 continue;
             }
         }
-        let id = uuid::Uuid::new_v4().simple().to_string();
+        let id = crate::util::new_id();
         let first_seen = inherited_first_seen(&b.text, &vanished).unwrap_or(new_first_seen);
         conn.execute(
             "INSERT INTO block (block_id, note_path, position, text, text_hash, first_seen_at, last_seen_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
@@ -155,9 +145,9 @@ fn take_over_moved_block(
         )?
         .query_map(params![note_path, block.text], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))?
         .collect::<rusqlite::Result<_>>()?;
-    let Some((id, first_seen_at, extracted_hash, _)) = candidates.into_iter().find(|(_, _, _, since)| {
-        since.as_deref().and_then(|t| DateTime::parse_from_rfc3339(t).ok()).is_some_and(|t| t >= revive_after)
-    }) else {
+    let Some((id, first_seen_at, extracted_hash, _)) =
+        candidates.into_iter().find(|(_, _, _, since)| since.as_deref().and_then(|t| DateTime::parse_from_rfc3339(t).ok()).is_some_and(|t| t >= revive_after))
+    else {
         return Ok(None);
     };
     let hash = text_hash(&block.text);
@@ -183,10 +173,8 @@ pub fn mark_extracted(conn: &Connection, block_id: &str) -> rusqlite::Result<()>
 
 /// FR-VLT-019: the note is gone; its items stay, marked as having lost their source.
 pub fn mark_note_missing(conn: &Connection, note_path: &str, now: DateTime<FixedOffset>) -> rusqlite::Result<usize> {
-    let ids: Vec<String> = conn
-        .prepare("SELECT block_id FROM block WHERE note_path = ?1 AND missing = 0")?
-        .query_map([note_path], |r| r.get(0))?
-        .collect::<Result<_, _>>()?;
+    let ids: Vec<String> =
+        conn.prepare("SELECT block_id FROM block WHERE note_path = ?1 AND missing = 0")?.query_map([note_path], |r| r.get(0))?.collect::<Result<_, _>>()?;
     let now_s = now.to_rfc3339();
     for id in &ids {
         mark_missing(conn, id, &now_s)?;
@@ -197,6 +185,32 @@ pub fn mark_note_missing(conn: &Connection, note_path: &str, now: DateTime<Fixed
 fn mark_missing(conn: &Connection, block_id: &str, now: &str) -> rusqlite::Result<()> {
     conn.execute("UPDATE block SET missing = 1, missing_since = ?1 WHERE block_id = ?2", params![now, block_id])?;
     set_source_missing(conn, block_id, true)
+}
+
+/// Daily maintenance (architecture review A10, owner decision 2026-10-13): a block missing for more
+/// than `days` days that no task, measurement, rejection or review item points at is deleted. It can
+/// no longer come back (that takes a day), and its text would otherwise stay in pla.db for ever.
+/// Returns how many went.
+pub fn prune_missing(conn: &Connection, now: DateTime<FixedOffset>, days: i64) -> rusqlite::Result<usize> {
+    let before = now - TimeDelta::days(days);
+    let candidates: Vec<(String, Option<String>)> = conn
+        .prepare(
+            "SELECT b.block_id, b.missing_since FROM block b WHERE b.missing = 1
+               AND NOT EXISTS (SELECT 1 FROM task t WHERE t.block_id = b.block_id)
+               AND NOT EXISTS (SELECT 1 FROM metric_record m WHERE m.block_id = b.block_id)
+               AND NOT EXISTS (SELECT 1 FROM rejection r WHERE r.block_id = b.block_id)
+               AND NOT EXISTS (SELECT 1 FROM review_item v WHERE v.block_id = b.block_id)",
+        )?
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
+        .collect::<rusqlite::Result<_>>()?;
+    let mut pruned = 0;
+    for (id, since) in candidates {
+        // compared as times, not text: the stamps may carry different offsets
+        if since.as_deref().and_then(|t| DateTime::parse_from_rfc3339(t).ok()).is_some_and(|t| t < before) {
+            pruned += conn.execute("DELETE FROM block WHERE block_id = ?1", [id])?;
+        }
+    }
+    Ok(pruned)
 }
 
 fn set_source_missing(conn: &Connection, block_id: &str, missing: bool) -> rusqlite::Result<()> {
@@ -213,9 +227,7 @@ fn has_any_block(conn: &Connection, note_path: &str) -> rusqlite::Result<bool> {
 fn load(conn: &Connection, note_path: &str, now: DateTime<FixedOffset>) -> rusqlite::Result<Vec<Stored>> {
     let revive_after = now - TimeDelta::hours(REVIVE_WINDOW_HOURS);
     let rows = conn
-        .prepare(
-            "SELECT block_id, position, text, extracted_hash, first_seen_at, missing, missing_since FROM block WHERE note_path = ?1 ORDER BY position",
-        )?
+        .prepare("SELECT block_id, position, text, extracted_hash, first_seen_at, missing, missing_since FROM block WHERE note_path = ?1 ORDER BY position")?
         .query_map([note_path], |r| {
             Ok((
                 Stored {
@@ -230,13 +242,7 @@ fn load(conn: &Connection, note_path: &str, now: DateTime<FixedOffset>) -> rusql
         .collect::<rusqlite::Result<Vec<_>>>()?;
     Ok(rows
         .into_iter()
-        .filter(|(s, since)| {
-            !s.missing
-                || since
-                    .as_deref()
-                    .and_then(|t| DateTime::parse_from_rfc3339(t).ok())
-                    .is_some_and(|t| t >= revive_after)
-        })
+        .filter(|(s, since)| !s.missing || since.as_deref().and_then(|t| DateTime::parse_from_rfc3339(t).ok()).is_some_and(|t| t >= revive_after))
         .map(|(s, _)| s)
         .collect())
 }
@@ -266,6 +272,31 @@ mod tests {
             [id, block_id],
         )
         .unwrap();
+    }
+
+    #[test]
+    fn long_missing_blocks_nothing_points_at_are_pruned() {
+        // architecture review A10, owner decision 2026-10-13: 60 days
+        let tmp = tempfile::tempdir().unwrap();
+        let dbs = open_databases(tmp.path()).unwrap();
+        let blocks = sync(&dbs.pla, "notes/x.md", "Bir.\n\nİki.\n\nÜç.\n\nDört.", None, T1);
+        let ids: Vec<String> = blocks.iter().map(|b| b.block_id.clone()).collect();
+        insert_task(&dbs.pla, "t", &ids[1]);
+        dbs.pla.execute("INSERT INTO rejection (rejection_id, block_id, item_signature, rejected_at) VALUES ('r', ?1, 'action:x', 'now')", [&ids[2]]).unwrap();
+        dbs.pla
+            .execute("INSERT INTO review_item (review_id, block_id, payload_json, reason, created_at) VALUES ('v', ?1, '{}', 'x', 'now')", [&ids[3]])
+            .unwrap();
+        mark_note_missing(&dbs.pla, "notes/x.md", at(T1)).unwrap(); // gone on 2026-10-06
+        let alive = sync(&dbs.pla, "notes/y.md", "Beş.", None, T1);
+        mark_note_missing(&dbs.pla, "notes/y.md", at("2026-11-01T10:00:00+03:00")).unwrap(); // gone later
+
+        assert_eq!(prune_missing(&dbs.pla, at("2026-12-04T10:00:00+03:00"), 60).unwrap(), 0, "59 days: kept");
+        assert_eq!(prune_missing(&dbs.pla, at("2026-12-06T10:00:00+03:00"), 60).unwrap(), 1, "only the unreferenced old one");
+        let left: Vec<String> = dbs.pla.prepare("SELECT block_id FROM block").unwrap().query_map([], |r| r.get(0)).unwrap().map(Result::unwrap).collect();
+        assert!(!left.contains(&ids[0]), "unreferenced, 61 days missing");
+        for kept in [&ids[1], &ids[2], &ids[3], &alive[0].block_id] {
+            assert!(left.contains(kept), "a task, a rejection, a review item or a later date keeps {kept}");
+        }
     }
 
     #[test]
@@ -328,10 +359,8 @@ mod tests {
         let first = sync(&dbs.pla, "notes/x.md", "Cuma fatura öde.", None, T1);
         insert_task(&dbs.pla, "t1", &first[0].block_id);
         assert_eq!(mark_note_missing(&dbs.pla, "notes/x.md", at(T1)).unwrap(), 1);
-        let (task, block): (i64, i64) = dbs
-            .pla
-            .query_row("SELECT t.source_missing, b.missing FROM task t JOIN block b USING (block_id)", [], |r| Ok((r.get(0)?, r.get(1)?)))
-            .unwrap();
+        let (task, block): (i64, i64) =
+            dbs.pla.query_row("SELECT t.source_missing, b.missing FROM task t JOIN block b USING (block_id)", [], |r| Ok((r.get(0)?, r.get(1)?))).unwrap();
         assert_eq!((task, block), (1, 1));
     }
 

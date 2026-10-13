@@ -32,8 +32,7 @@ pub enum Removal {
 
 pub fn removal(settings: &AppSettings, models_dir: Option<&Path>) -> Option<Removal> {
     let path = settings.model_path.as_ref()?;
-    let ours = settings.model_id.is_some()
-        && models_dir.zip(path.parent()).is_some_and(|(dir, parent)| same_dir(dir, parent));
+    let ours = settings.model_id.is_some() && models_dir.zip(path.parent()).is_some_and(|(dir, parent)| same_dir(dir, parent));
     Some(if ours { Removal::Delete(path.clone()) } else { Removal::Unlink })
 }
 

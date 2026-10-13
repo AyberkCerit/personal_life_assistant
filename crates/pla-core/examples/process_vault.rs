@@ -58,7 +58,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     let mut metrics = dbs.pla.prepare("SELECT type, value_json, unit, date FROM metric_record ORDER BY date")?;
     let rows = metrics.query_map([], |r| {
-        Ok(format!("{} {} {} on {}", r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, Option<String>>(2)?.unwrap_or_default(), r.get::<_, String>(3)?))
+        Ok(format!(
+            "{} {} {} on {}",
+            r.get::<_, String>(0)?,
+            r.get::<_, String>(1)?,
+            r.get::<_, Option<String>>(2)?.unwrap_or_default(),
+            r.get::<_, String>(3)?
+        ))
     })?;
     println!("metrics:");
     for row in rows {

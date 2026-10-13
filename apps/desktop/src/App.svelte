@@ -36,7 +36,7 @@
   import { DEFAULT_WIDTHS, LIMITS, clampWidth, loadWidths, saveWidths } from "./lib/panes";
   import type { MetricKind } from "./lib/metrics";
   import type { MetricRecord } from "./lib/api";
-  import type { Section } from "./lib/settings";
+  import { describeError, type Section } from "./lib/settings";
   import type { Progress } from "./lib/wizard";
   import { t, tf, lang, setLang, type Lang } from "./lib/i18n";
   import type { VaultInfo } from "./lib/api";
@@ -238,7 +238,7 @@
     try {
       await vaultOpened(await api.openVault(picked));
     } catch (e) {
-      error = String(e);
+      error = describeError(e); // `app_data|<path>` in a sentence, as in the settings (architecture review A2)
     }
   }
 
@@ -402,6 +402,8 @@
     const unAdded = api.onItemsAdded((items) => {
       if (items.some((i) => i.kind === "metric")) metricsVersion++;
     });
+    // FR-SCH-015: Windows shows it as a notification; the window says it too (architecture review M9)
+    const unProblem = api.onBackgroundProblem((message) => (error = tf("background.problem", { reason: message })));
     const shortcut = (e: KeyboardEvent) => {
       if (e.ctrlKey && e.key === ",") {
         e.preventDefault();
@@ -453,6 +455,7 @@
       void unOpen.then((f) => f());
       void unQuick.then((f) => f());
       void unAdded.then((f) => f());
+      void unProblem.then((f) => f());
       window.removeEventListener("keydown", shortcut);
       window.removeEventListener("dragover", noFileDrop);
       window.removeEventListener("drop", noFileDrop);

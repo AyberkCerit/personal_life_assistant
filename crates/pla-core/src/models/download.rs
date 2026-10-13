@@ -281,7 +281,11 @@ pub fn free_space(dir: &Path) -> u64 {
     let mut free: u64 = 0;
     // SAFETY: `wide` is NUL-terminated and outlives the call; the out pointers are valid or null.
     let ok = unsafe { GetDiskFreeSpaceExW(wide.as_ptr(), &mut free, std::ptr::null_mut(), std::ptr::null_mut()) };
-    if ok == 0 { u64::MAX } else { free }
+    if ok == 0 {
+        u64::MAX
+    } else {
+        free
+    }
 }
 
 #[cfg(not(windows))]
@@ -376,7 +380,11 @@ mod tests {
     impl UrlPolicy for LocalOnly {
         fn allows(&self, url: &str) -> Result<(), PolicyError> {
             let (_, host) = scheme_and_host(url)?;
-            if host == "127.0.0.1" { Ok(()) } else { Err(PolicyError::HostNotAllowed(host)) }
+            if host == "127.0.0.1" {
+                Ok(())
+            } else {
+                Err(PolicyError::HostNotAllowed(host))
+            }
         }
     }
 
@@ -407,7 +415,8 @@ mod tests {
     }
 
     fn run(e: &CatalogEntry, dir: &Path, cancel: &AtomicBool, progress: &mut dyn FnMut(Progress)) -> Result<PathBuf, DownloadError> {
-        let req = Request { entry: e, dir, policy: &LocalOnly, free_space: &plenty, cancel, progress_every: Duration::ZERO, stall_after: Duration::from_millis(400) };
+        let req =
+            Request { entry: e, dir, policy: &LocalOnly, free_space: &plenty, cancel, progress_every: Duration::ZERO, stall_after: Duration::from_millis(400) };
         download(&req, progress)
     }
 
@@ -503,7 +512,15 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let e = entry(&url, &data);
         let small = |_: &Path| 10u64;
-        let req = Request { entry: &e, dir: tmp.path(), policy: &LocalOnly, free_space: &small, cancel: &AtomicBool::new(false), progress_every: Duration::ZERO, stall_after: Duration::from_millis(400) };
+        let req = Request {
+            entry: &e,
+            dir: tmp.path(),
+            policy: &LocalOnly,
+            free_space: &small,
+            cancel: &AtomicBool::new(false),
+            progress_every: Duration::ZERO,
+            stall_after: Duration::from_millis(400),
+        };
         assert_eq!(download(&req, &mut |_| {}), Err(DownloadError::InsufficientSpace { needed: 300_000 + SPARE_BYTES, available: 10 }));
         assert!(seen.lock().unwrap().is_empty());
     }
@@ -559,7 +576,15 @@ mod tests {
         let e = entry(&url, &data);
         let cancel = AtomicBool::new(false);
         let started = std::time::Instant::now();
-        let req = Request { entry: &e, dir: tmp.path(), policy: &LocalOnly, free_space: &plenty, cancel: &cancel, progress_every: Duration::ZERO, stall_after: Duration::from_secs(30) };
+        let req = Request {
+            entry: &e,
+            dir: tmp.path(),
+            policy: &LocalOnly,
+            free_space: &plenty,
+            cancel: &cancel,
+            progress_every: Duration::ZERO,
+            stall_after: Duration::from_secs(30),
+        };
         let result = std::thread::scope(|scope| {
             scope.spawn(|| {
                 std::thread::sleep(Duration::from_millis(300));

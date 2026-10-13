@@ -11,7 +11,7 @@ use std::time::Duration;
 use notify_debouncer_full::notify::{RecommendedWatcher, RecursiveMode};
 use notify_debouncer_full::{new_debouncer, DebounceEventResult, Debouncer, RecommendedCache};
 use pla_core::notes::is_excluded;
-use pla_core::pipeline::blocks::content_hash;
+use pla_core::util::content_hash;
 use pla_core::vault::Vault;
 use tauri::{AppHandle, Emitter};
 
@@ -63,7 +63,7 @@ pub fn classify(vault: &Vault, paths: &[PathBuf], own: &SelfWrites) -> Changes {
             continue;
         }
         if !rel.to_lowercase().ends_with(".md") {
-            if path.is_dir() || (path.extension().is_none() && !path.exists()) {
+            if crate::indexer::is_folder_event(path) {
                 out.rescan = true;
             }
             continue;
@@ -148,11 +148,7 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let vault = open_vault(tmp.path()).unwrap();
         let own = SelfWrites::new();
-        let paths = [
-            vault.root.join(".obsidian/workspace.json"),
-            vault.root.join("templates/gunluk.md"),
-            vault.root.join("attachments/resim.png"),
-        ];
+        let paths = [vault.root.join(".obsidian/workspace.json"), vault.root.join("templates/gunluk.md"), vault.root.join("attachments/resim.png")];
         let c = classify(&vault, &paths, &own);
         assert!(c.notes.is_empty());
         assert!(c.tree_changed, "a new picture still changes the tree");
@@ -191,5 +187,15 @@ mod tests {
         assert!(c.rescan);
         let file_only = classify(&vault, &[vault.root.join("notes/eski.md")], &SelfWrites::new());
         assert!(!file_only.rescan);
+    }
+
+    #[test]
+    fn a_vanished_folder_with_a_dot_in_its_name_asks_for_a_rescan() {
+        // architecture review M3: the same reading as the indexer's, or the notes inside a deleted
+        // `2026.10` keep their tasks unmarked until the next start
+        let tmp = tempfile::tempdir().unwrap();
+        let vault = open_vault(tmp.path()).unwrap();
+        assert!(classify(&vault, &[vault.root.join("notes/2026.10")], &SelfWrites::new()).rescan);
+        assert!(!classify(&vault, &[vault.root.join("notes/resim.png")], &SelfWrites::new()).rescan, "a vanished picture is a file");
     }
 }

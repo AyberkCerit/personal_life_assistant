@@ -5,7 +5,8 @@ use std::path::Path;
 
 use chrono::NaiveDate;
 
-use crate::vault::{Folders, Vault};
+use crate::markdown::{frontmatter_end, is_heading, list_item_body, Fences};
+use crate::vault::{is_note_name, is_under, walk_vault, Folders, Vault};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Block {
@@ -19,26 +20,19 @@ pub fn split_blocks(text: &str) -> Vec<Block> {
     let lines: Vec<&str> = text.lines().collect();
     let mut blocks = Vec::new();
     let mut current: Vec<&str> = Vec::new();
-    let mut fence: Option<&str> = None;
+    let mut fences = Fences::default();
 
-    for line in &lines[frontmatter_end(&lines)..] {
+    for line in &lines[frontmatter_end(&lines).unwrap_or(0)..] {
         let trimmed = line.trim_start();
-        if let Some(marker) = fence {
-            if trimmed.starts_with(marker) {
-                fence = None;
-            }
-            continue;
-        }
-        if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
-            flush(&mut current, &mut blocks);
-            fence = Some(&trimmed[..3]);
+        if fences.is_code(line) {
+            flush(&mut current, &mut blocks); // code ends the block before it and is no block itself
         } else if trimmed.is_empty() {
             flush(&mut current, &mut blocks);
         } else if is_heading(trimmed) {
             flush(&mut current, &mut blocks);
             current.push(line);
             flush(&mut current, &mut blocks);
-        } else if is_list_item(trimmed) {
+        } else if list_item_body(trimmed).is_some() {
             flush(&mut current, &mut blocks);
             current.push(line);
         } else {
@@ -57,62 +51,30 @@ fn flush(current: &mut Vec<&str>, blocks: &mut Vec<Block>) {
     current.clear();
 }
 
-fn is_heading(trimmed: &str) -> bool {
-    let hashes = trimmed.chars().take_while(|c| *c == '#').count();
-    (1..=6).contains(&hashes) && trimmed[hashes..].starts_with(' ')
-}
-
-fn is_list_item(trimmed: &str) -> bool {
-    if ["- ", "* ", "+ "].iter().any(|m| trimmed.starts_with(m)) {
-        return true;
-    }
-    let digits = trimmed.chars().take_while(char::is_ascii_digit).count();
-    digits > 0 && (trimmed[digits..].starts_with(". ") || trimmed[digits..].starts_with(") "))
-}
-
 /// Decision 2026-10-02 (FR-EDT-019): a checked list item is done and never produces items.
 pub fn is_checked_item(text: &str) -> bool {
-    let t = text.trim_start();
-    let after_marker = ["- ", "* ", "+ "].iter().find_map(|m| t.strip_prefix(m)).or_else(|| {
-        let digits = t.chars().take_while(char::is_ascii_digit).count();
-        (digits > 0).then(|| &t[digits..]).and_then(|r| r.strip_prefix(". ").or_else(|| r.strip_prefix(") ")))
-    });
-    after_marker.is_some_and(|r| r.starts_with("[x]") || r.starts_with("[X]"))
-}
-
-/// Index of the first body line: after a `---` … `---`/`...` frontmatter, or 0 when there is none.
-fn frontmatter_end(lines: &[&str]) -> usize {
-    if lines.first().map(|l| l.trim_end()) != Some("---") {
-        return 0;
-    }
-    lines
-        .iter()
-        .enumerate()
-        .skip(1)
-        .find(|(_, l)| matches!(l.trim_end(), "---" | "..."))
-        .map_or(0, |(i, _)| i + 1)
+    list_item_body(text.trim_start()).is_some_and(|r| r.starts_with("[x]") || r.starts_with("[X]"))
 }
 
 /// FR-EXT-001: notes written by PLA itself carry `pla_generated: true` and are never extracted.
 pub fn is_generated(text: &str) -> bool {
     let text = text.strip_prefix('\u{feff}').unwrap_or(text);
     let lines: Vec<&str> = text.lines().collect();
-    let end = frontmatter_end(&lines);
-    end > 0
-        && lines[1..end - 1].iter().any(|line| {
+    frontmatter_end(&lines).is_some_and(|end| {
+        lines[1..end - 1].iter().any(|line| {
             line.split_once(':').is_some_and(|(key, value)| {
-                key.trim().eq_ignore_ascii_case("pla_generated")
-                    && value.trim().trim_matches(|c| c == '"' || c == '\'').eq_ignore_ascii_case("true")
+                key.trim().eq_ignore_ascii_case("pla_generated") && value.trim().trim_matches(|c| c == '"' || c == '\'').eq_ignore_ascii_case("true")
             })
         })
+    })
 }
 
 /// Hidden paths and the reports/templates folders are never extracted (FR-EXT-001, FR-VLT-017).
 pub fn is_excluded(rel: &str, folders: &Folders) -> bool {
     let path = Path::new(rel);
     path.components().any(|c| c.as_os_str().to_string_lossy().starts_with('.'))
-        || path.starts_with(&folders.reports)
-        || path.starts_with(&folders.templates)
+        || is_under(rel, &folders.reports)
+        || is_under(rel, &folders.templates)
         || path.file_stem().is_some_and(|s| {
             let s = s.to_string_lossy();
             s.contains(crate::files::CONFLICT_SUFFIX) || s.contains(crate::files::OLD_CONFLICT_SUFFIX)
@@ -121,43 +83,21 @@ pub fn is_excluded(rel: &str, folders: &Folders) -> bool {
 
 /// `<daily>/…/YYYY-MM-DD.md` → that date (the reference date of a daily note, FR-EXT-009).
 pub fn daily_note_date(rel: &str, folders: &Folders) -> Option<NaiveDate> {
-    let path = Path::new(rel);
-    if !path.starts_with(&folders.daily) {
+    if !is_under(rel, &folders.daily) {
         return None;
     }
+    let path = Path::new(rel);
     NaiveDate::parse_from_str(path.file_stem()?.to_str()?, "%Y-%m-%d").ok()
 }
 
 /// All user notes of the vault, as sorted vault-relative paths with `/` separators.
 pub fn list_user_notes(vault: &Vault) -> std::io::Result<Vec<String>> {
-    let mut out = Vec::new();
-    walk(&vault.root, &vault.root, &vault.config.folders, &mut out)?;
+    std::fs::read_dir(&vault.root)?; // a vault that cannot be read is an error, not an empty one
+    let folders = &vault.config.folders;
+    let notes = walk_vault(&vault.root).filter(|e| !e.is_dir && is_note_name(&e.rel) && !is_excluded(&e.rel, folders));
+    let mut out: Vec<String> = notes.map(|e| e.rel).collect();
     out.sort();
     Ok(out)
-}
-
-fn walk(root: &Path, dir: &Path, folders: &Folders, out: &mut Vec<String>) -> std::io::Result<()> {
-    for entry in std::fs::read_dir(dir)? {
-        let entry = entry?;
-        let kind = entry.file_type()?;
-        let path = entry.path();
-        let rel = path
-            .strip_prefix(root)
-            .expect("walked path is under the vault root")
-            .components()
-            .map(|c| c.as_os_str().to_string_lossy())
-            .collect::<Vec<_>>()
-            .join("/");
-        if is_excluded(&rel, folders) || kind.is_symlink() {
-            continue;
-        }
-        if kind.is_dir() {
-            walk(root, &path, folders, out)?;
-        } else if path.extension().is_some_and(|e| e.eq_ignore_ascii_case("md")) {
-            out.push(rel);
-        }
-    }
-    Ok(())
 }
 
 #[cfg(test)]
@@ -182,13 +122,7 @@ mod tests {
     #[test]
     fn paragraphs_and_list_items_are_blocks() {
         let note = "Yarın 9'da dişçi.\nSonra market.\n\n- süt al\n- ekmek al\n  (tam buğday)\n1. birinci\n\nSon paragraf.";
-        assert_eq!(texts(note), vec![
-            "Yarın 9'da dişçi.\nSonra market.",
-            "- süt al",
-            "- ekmek al\n  (tam buğday)",
-            "1. birinci",
-            "Son paragraf.",
-        ]);
+        assert_eq!(texts(note), vec!["Yarın 9'da dişçi.\nSonra market.", "- süt al", "- ekmek al\n  (tam buğday)", "1. birinci", "Son paragraf.",]);
         let positions: Vec<usize> = split_blocks(note).iter().map(|b| b.position).collect();
         assert_eq!(positions, vec![0, 1, 2, 3, 4]);
     }
@@ -236,6 +170,17 @@ mod tests {
         assert_eq!(daily_note_date("daily/2026-10-06.md", &f), NaiveDate::from_ymd_opt(2026, 10, 6));
         assert_eq!(daily_note_date("notes/2026-10-06.md", &f), None);
         assert_eq!(daily_note_date("daily/2026/plan.md", &f), None);
+    }
+
+    #[test]
+    fn system_folders_match_whatever_their_letter_case() {
+        // architecture review M1: an Obsidian vault's `Templates/` is the configured `templates`,
+        // as Windows sees it
+        let f = Folders::default();
+        assert!(is_excluded("Templates/Günlük.md", &f));
+        assert!(is_excluded("REPORTS/weekly/2026-W40.md", &f));
+        assert!(!is_excluded("templatesx/a.md", &f));
+        assert_eq!(daily_note_date("Daily/2026/2026-10-06.md", &f), NaiveDate::from_ymd_opt(2026, 10, 6));
     }
 
     #[test]
