@@ -32,7 +32,7 @@ pub fn note_meta(text: String) -> FrontMatter {
 /// The open vault, copied out so no file work happens under the session lock (final review I2).
 fn vault_of(state: &State<AppState>) -> Result<Vault, String> {
     let guard = state.session.lock().expect("session lock");
-    Ok(guard.as_ref().ok_or("no_vault||")?.vault.clone())
+    Ok(guard.as_ref().ok_or(crate::commands::NO_VAULT)?.vault.clone())
 }
 
 /// The vault's images, walked at most every few seconds: a note with many embeds asks at once.
@@ -72,12 +72,7 @@ pub struct SavedImage {
 #[tauri::command(async)]
 pub fn save_image(app: AppHandle, state: State<'_, AppState>, request: Request<'_>) -> Result<SavedImage, String> {
     let InvokeBody::Raw(bytes) = request.body() else { return Err("not_image||".into()) };
-    let name = request
-        .headers()
-        .get("x-name")
-        .and_then(|v| v.to_str().ok())
-        .map(percent_decode)
-        .filter(|n| !n.trim().is_empty());
+    let name = request.headers().get("x-name").and_then(|v| v.to_str().ok()).map(percent_decode).filter(|n| !n.trim().is_empty());
     let vault = vault_of(&state)?;
     let path = media::save_attachment(&vault, bytes, name.as_deref(), Local::now().fixed_offset()).map_err(media_code)?;
     *IMAGES.lock().expect("images lock") = None; // the new image is found at once

@@ -1,9 +1,9 @@
 <script lang="ts">
   import { api, type ReviewItem, type Task, type TaskInput } from "./api";
   import { onMount } from "svelte";
-  import { filterByOrigin, groupTasks, msUntilNextDay, todayIso, type OriginFilter, type TaskList } from "./tasks";
+  import { filterByOrigin, groupTasks, msUntilNextDay, taskError, todayIso, type OriginFilter, type TaskList } from "./tasks";
   import TaskRow from "./TaskRow.svelte";
-  import { lang, t } from "./i18n";
+  import { lang, t, tf } from "./i18n";
   import CalendarCheck from "@lucide/svelte/icons/calendar-check";
   import CircleAlert from "@lucide/svelte/icons/circle-alert";
   import CircleCheck from "@lucide/svelte/icons/circle-check";
@@ -47,6 +47,12 @@
   const labels = $derived({ today: t("tasks.today"), tomorrow: t("tasks.tomorrow"), noDate: t("tasks.noDate"), overdue: t("tasks.overdue") });
   const groups = $derived(tab === "review" ? [] : groupTasks(filterByOrigin(tasks, filter), tab, today, labels, lang));
 
+  /** The commands' error codes in the UI language (architecture review A2). */
+  function errorText(e: unknown): string {
+    const { key, detail } = taskError(String(e));
+    return tf(key, { detail });
+  }
+
   async function run(action: () => Promise<unknown>): Promise<boolean> {
     let ok = true;
     try {
@@ -54,7 +60,7 @@
       error = null;
       onChanged(); // e.g. a reminder ticked off here leaves the reminder banner
     } catch (e) {
-      error = String(e);
+      error = errorText(e);
       ok = false;
     }
     await load();
@@ -71,7 +77,7 @@
         tasks = await api.listTasks(tab);
       }
     } catch (e) {
-      error = String(e);
+      error = errorText(e);
     }
   }
 

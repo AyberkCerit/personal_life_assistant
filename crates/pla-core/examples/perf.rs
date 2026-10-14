@@ -31,6 +31,9 @@ fn runs(n: usize, mut f: impl FnMut(usize)) -> f64 {
     p95((0..n).map(|i| time(|| f(i)).0).collect())
 }
 
+/// One interface query to time, by name.
+type Query<'a> = Box<dyn Fn() + 'a>;
+
 struct Row {
     id: &'static str,
     what: String,
@@ -70,7 +73,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // NFR-PERF-005: the queries behind the task panel, the measurements screen and the reports
     let pla = &dbs.pla;
     use pla_core::tasks::{list_tasks, TaskList};
-    let queries: Vec<(&str, Box<dyn Fn()>)> = vec![
+    let queries: Vec<(&str, Query)> = vec![
         ("tasks: today", Box::new(|| drop(list_tasks(pla, TaskList::Today, today).unwrap()))),
         ("tasks: upcoming", Box::new(|| drop(list_tasks(pla, TaskList::Upcoming, today).unwrap()))),
         ("tasks: completed", Box::new(|| drop(list_tasks(pla, TaskList::Completed, today).unwrap()))),
@@ -131,7 +134,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let first_token = |host: &mut ModelHost, q: &str| -> (f64, bool) {
             let started = Instant::now();
             let mut first: Option<f64> = None;
-            let answered = pla_core::qa::engine::answer(host, &env, q, &[], None, "tr", &AtomicBool::new(false), &mut |p| {
+            let answered = pla_core::qa::engine::answer(host, &env, &pla_core::qa::engine::Question { text: q, turns: &[], memory: None, ui_lang: "tr" }, &AtomicBool::new(false), &mut |p| {
                 if matches!(p, pla_core::qa::engine::Progress::Token(_)) && first.is_none() {
                     first = Some(started.elapsed().as_secs_f64() * 1000.0);
                 }

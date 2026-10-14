@@ -60,11 +60,9 @@ mod tests {
             assert_eq!(HuggingFace.allows(ok), Ok(()), "{ok}");
         }
         assert_eq!(HuggingFace.allows("http://huggingface.co/x"), Err(PolicyError::NotHttps));
-        for (bad, host) in [
-            ("https://example.com/x", "example.com"),
-            ("https://huggingface.co.evil.com/x", "huggingface.co.evil.com"),
-            ("https://evilhf.co/x", "evilhf.co"),
-        ] {
+        for (bad, host) in
+            [("https://example.com/x", "example.com"), ("https://huggingface.co.evil.com/x", "huggingface.co.evil.com"), ("https://evilhf.co/x", "evilhf.co")]
+        {
             assert_eq!(HuggingFace.allows(bad), Err(PolicyError::HostNotAllowed(host.into())), "{bad}");
         }
         assert!(matches!(HuggingFace.allows("https://user@huggingface.co/x"), Err(PolicyError::BadUrl(_))));

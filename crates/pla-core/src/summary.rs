@@ -13,8 +13,9 @@ use serde_json::{json, Value};
 use crate::index::NoteText;
 use crate::llm::LlmError;
 use crate::memory::{self, Embedder};
-use crate::qa::context::tokens;
+use crate::notes::daily_note_date;
 use crate::qa::ChatModel;
+use crate::util::tokens;
 use crate::vault::Folders;
 
 /// Owner decision A: the first maintenance summarises the last 30 days, each later one at most 20.
@@ -33,7 +34,7 @@ pub struct DaySources {
 }
 
 fn excluded(rel: &str, folders: &Folders) -> bool {
-    [&folders.reports, &folders.templates].iter().any(|f| rel.starts_with(&format!("{}/", f.trim_matches('/'))))
+    [&folders.reports, &folders.templates].iter().any(|f| crate::vault::is_under(rel, f))
 }
 
 /// The local day a modification time falls on.
@@ -43,21 +44,9 @@ pub fn day_of(ms: i64) -> Option<NaiveDate> {
 
 fn day_bounds(date: NaiveDate) -> (i64, i64) {
     // where midnight does not exist (a DST jump at 00:00), the day starts at its first real hour
-    let start = |d: NaiveDate| {
-        (0..3)
-            .find_map(|h| Local.from_local_datetime(&d.and_hms_opt(h, 0, 0).expect("an hour")).earliest())
-            .map_or(0, |t| t.timestamp_millis())
-    };
+    let start =
+        |d: NaiveDate| (0..3).find_map(|h| Local.from_local_datetime(&d.and_hms_opt(h, 0, 0).expect("an hour")).earliest()).map_or(0, |t| t.timestamp_millis());
     (start(date), start(date + Duration::days(1)))
-}
-
-/// The date of a daily note path (`daily/2026/2026-10-06.md`), if it is one.
-pub fn daily_note_date(folders: &Folders, rel: &str) -> Option<NaiveDate> {
-    let rest = rel.strip_prefix(&format!("{}/", folders.daily.trim_matches('/')))?;
-    let (_year, file) = rest.split_once('/')?;
-    let stem = file.strip_suffix(".md")?;
-    let date = NaiveDate::parse_from_str(stem, "%Y-%m-%d").ok()?;
-    (crate::fileops::daily_note_rel(folders, date) == rel).then_some(date)
 }
 
 const NOTE: &str = "SELECT n.note_path, n.title, '', n.mtime, n.content_hash FROM note_index n";
@@ -70,19 +59,23 @@ fn note_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<(NoteText, String)> {
 /// so a whole maintenance plan stays cheap on a large vault (final review I1).
 fn day_notes(conn: &Connection, folders: &Folders, date: NaiveDate) -> rusqlite::Result<Vec<(NoteText, String)>> {
     let (from, to) = day_bounds(date);
-    let daily = crate::fileops::daily_note_rel(folders, date);
     let mut rows: Vec<(NoteText, String)> = conn
         .prepare(&format!("{NOTE} WHERE n.mtime >= ?1 AND n.mtime < ?2 ORDER BY n.note_path"))?
         .query_map(params![from, to], note_row)?
         .collect::<Result<_, _>>()?;
     // a daily note belongs to its own date, whenever it was last changed
-    rows.retain(|(n, _)| daily_note_date(folders, &n.note_path).is_none_or(|d| d == date) && !excluded(&n.note_path, folders));
-    if !rows.iter().any(|(n, _)| n.note_path == daily) {
-        if let Some(row) = conn.query_row(&format!("{NOTE} WHERE n.note_path = ?1"), [&daily], note_row).optional()? {
-            rows.insert(0, row);
-        }
-    }
-    Ok(rows)
+    rows.retain(|(n, _)| daily_note_date(&n.note_path, folders).is_none_or(|d| d == date) && !excluded(&n.note_path, folders));
+    // the day's daily notes, wherever under the daily folder they are (`daily/2026/…` or flat)
+    let named: Vec<(NoteText, String)> = conn
+        .prepare(&format!("{NOTE} WHERE n.note_path LIKE ?1 ORDER BY n.note_path"))?
+        .query_map([format!("%{}.md", date.format("%Y-%m-%d"))], note_row)?
+        .collect::<Result<_, _>>()?;
+    let mut daily: Vec<(NoteText, String)> = named
+        .into_iter()
+        .filter(|(n, _)| daily_note_date(&n.note_path, folders) == Some(date) && !rows.iter().any(|(r, _)| r.note_path == n.note_path))
+        .collect();
+    daily.append(&mut rows);
+    Ok(daily)
 }
 
 fn signature_of(rows: &[(NoteText, String)]) -> String {
@@ -104,8 +97,10 @@ pub fn sources(conn: &Connection, folders: &Folders, date: NaiveDate) -> rusqlit
     let mut rows = day_notes(conn, folders, date)?;
     let signature = signature_of(&rows);
     for (n, _) in rows.iter_mut() {
-        let parts: Vec<(String, String)> =
-            conn.prepare("SELECT heading, text FROM chunk WHERE note_path = ?1 ORDER BY ord")?.query_map([&n.note_path], |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<Result<_, _>>()?;
+        let parts: Vec<(String, String)> = conn
+            .prepare("SELECT heading, text FROM chunk WHERE note_path = ?1 ORDER BY ord")?
+            .query_map([&n.note_path], |r| Ok((r.get(0)?, r.get(1)?)))?
+            .collect::<Result<_, _>>()?;
         let mut last = String::new();
         let mut body = String::new();
         for (heading, text) in parts {
@@ -123,13 +118,14 @@ pub fn sources(conn: &Connection, folders: &Folders, date: NaiveDate) -> rusqlit
 
 /// Every past day that has notes: last-change days and daily-note dates, newest first.
 pub fn note_days(conn: &Connection, folders: &Folders, today: NaiveDate) -> rusqlite::Result<Vec<NaiveDate>> {
-    let rows: Vec<(String, i64)> = conn.prepare("SELECT note_path, mtime FROM note_index")?.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<Result<_, _>>()?;
+    let rows: Vec<(String, i64)> =
+        conn.prepare("SELECT note_path, mtime FROM note_index")?.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<Result<_, _>>()?;
     let mut days: Vec<NaiveDate> = Vec::new();
     for (rel, mtime) in rows {
         if excluded(&rel, folders) {
             continue;
         }
-        let day = daily_note_date(folders, &rel).or_else(|| day_of(mtime));
+        let day = daily_note_date(&rel, folders).or_else(|| day_of(mtime));
         if let Some(d) = day.filter(|d| *d < today) {
             if !days.contains(&d) {
                 days.push(d);
@@ -308,12 +304,16 @@ pub fn find_days(conn: &Connection, question: &str, query: crate::qa::context::M
     }
     if let Some((vector, model)) = query {
         let blob: Vec<u8> = vector.iter().flat_map(|x| x.to_le_bytes()).collect();
-        let days: Vec<i64> =
-            conn.prepare("SELECT day FROM summary_vec WHERE embedding MATCH ?1 AND k = 10 ORDER BY distance")?.query_map([blob], |r| r.get(0))?.collect::<Result<_, _>>()?;
+        let days: Vec<i64> = conn
+            .prepare("SELECT day FROM summary_vec WHERE embedding MATCH ?1 AND k = 10 ORDER BY distance")?
+            .query_map([blob], |r| r.get(0))?
+            .collect::<Result<_, _>>()?;
         for (i, n) in days.into_iter().enumerate() {
             let Some(d) = NaiveDate::from_num_days_from_ce_opt(n as i32) else { continue };
-            let same_model: Option<String> =
-                conn.query_row("SELECT embedded_model FROM daily_summary WHERE date = ?1", [d.format("%Y-%m-%d").to_string()], |r| r.get(0)).optional()?.flatten();
+            let same_model: Option<String> = conn
+                .query_row("SELECT embedded_model FROM daily_summary WHERE date = ?1", [d.format("%Y-%m-%d").to_string()], |r| r.get(0))
+                .optional()?
+                .flatten();
             if same_model.as_deref() == Some(model) {
                 add(d, i + 1);
             }
@@ -325,9 +325,8 @@ pub fn find_days(conn: &Connection, question: &str, query: crate::qa::context::M
 
 /// The notes a stored summary came from.
 pub fn source_paths(conn: &Connection, date: NaiveDate) -> rusqlite::Result<Vec<String>> {
-    let paths: Option<String> = conn
-        .query_row("SELECT source_paths_json FROM daily_summary WHERE date = ?1", [date.format("%Y-%m-%d").to_string()], |r| r.get(0))
-        .optional()?;
+    let paths: Option<String> =
+        conn.query_row("SELECT source_paths_json FROM daily_summary WHERE date = ?1", [date.format("%Y-%m-%d").to_string()], |r| r.get(0)).optional()?;
     Ok(paths.and_then(|p| serde_json::from_str(&p).ok()).unwrap_or_default())
 }
 
@@ -381,6 +380,32 @@ mod tests {
         let before = day.signature.clone();
         index_note(&conn, "notes/Plan.md", "# Plan\n\nYeni karar.", noon(d("2026-10-06")), 1).unwrap();
         assert_ne!(sources(&conn, &f, d("2026-10-06")).unwrap().signature, before, "a change makes it stale");
+    }
+
+    #[test]
+    fn a_flat_daily_note_belongs_to_its_own_date() {
+        // architecture review M2: extraction already reads `daily/2026-10-06.md` (Obsidian's
+        // default) as a daily note; the summaries must too
+        let (_t, conn) = cache();
+        let f = Folders::default();
+        index_note(&conn, "daily/2026-10-06.md", "# 2026-10-06\n\nDişçi.", noon(d("2026-10-07")), 1).unwrap();
+        let paths = |day| sources(&conn, &f, d(day)).unwrap().notes.into_iter().map(|n| n.note_path).collect::<Vec<_>>();
+        assert_eq!(paths("2026-10-06"), ["daily/2026-10-06.md"]);
+        assert!(paths("2026-10-07").is_empty());
+        assert_eq!(note_days(&conn, &f, d("2026-10-08")).unwrap(), [d("2026-10-06")]);
+    }
+
+    #[test]
+    fn templates_and_reports_stay_out_whatever_their_letter_case() {
+        // architecture review M1: an Obsidian vault's `Templates/` is the configured `templates`
+        let (_t, conn) = cache();
+        let f = Folders::default();
+        index_note(&conn, "notes/Plan.md", "# Plan\n\nKarar.", noon(d("2026-10-06")), 1).unwrap();
+        index_note(&conn, "Templates/Günlük.md", "# {{date}}", noon(d("2026-10-06")), 1).unwrap();
+        index_note(&conn, "Reports/weekly/w41.md", "# Rapor", noon(d("2026-10-06")), 1).unwrap();
+        let day = sources(&conn, &f, d("2026-10-06")).unwrap();
+        let paths: Vec<&str> = day.notes.iter().map(|n| n.note_path.as_str()).collect();
+        assert_eq!(paths, ["notes/Plan.md"]);
     }
 
     #[test]
@@ -441,7 +466,5 @@ mod tests {
         assert_eq!(find_days(&conn, "Monday", None, 2).unwrap(), [d("2026-10-05")], "weekday names are searchable");
         assert_eq!(find_days(&conn, "pazartesi ne yaptım", None, 2).unwrap(), [d("2026-10-05")], "in Turkish too");
         assert_eq!(source_paths(&conn, d("2026-10-06")).unwrap(), ["notes/a.md"]);
-        assert_eq!(daily_note_date(&f, "daily/2026/2026-10-06.md"), Some(d("2026-10-06")));
-        assert_eq!(daily_note_date(&f, "notes/2026-10-06.md"), None);
     }
 }

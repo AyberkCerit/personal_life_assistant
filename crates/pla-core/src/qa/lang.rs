@@ -4,10 +4,82 @@
 
 /// Words that only Turkish writes this way (also without Turkish letters, as people type them).
 const TR_WORDS: &[&str] = &[
-    "ve", "bir", "bu", "su", "o", "ne", "mi", "mı", "mu", "mü", "için", "icin", "nasıl", "nasil", "kaç", "kac", "hangi", "yarın", "yarin", "bugün", "bugun", "dün",
-    "dun", "gün", "gun", "var", "yok", "ben", "benim", "sen", "saat", "lazım", "lazim", "gerek", "ile", "neler", "selam", "slm", "merhaba", "naber", "sa",
-    "tamam", "evet", "hayır", "hayir", "teşekkür", "tesekkur", "teşekkürler", "tesekkurler", "sağol", "sagol", "iyi", "günaydın", "gunaydin", "kilo", "ekle",
-    "bunu", "onu", "şunu", "ama", "çok", "cok", "da", "de", "ki", "gibi", "daha", "olarak", "kere", "adım", "adim", "bardak", "litre", "hafta", "ay", "yıl",
+    "ve",
+    "bir",
+    "bu",
+    "su",
+    "o",
+    "ne",
+    "mi",
+    "mı",
+    "mu",
+    "mü",
+    "için",
+    "icin",
+    "nasıl",
+    "nasil",
+    "kaç",
+    "kac",
+    "hangi",
+    "yarın",
+    "yarin",
+    "bugün",
+    "bugun",
+    "dün",
+    "dun",
+    "gün",
+    "gun",
+    "var",
+    "yok",
+    "ben",
+    "benim",
+    "sen",
+    "saat",
+    "lazım",
+    "lazim",
+    "gerek",
+    "ile",
+    "neler",
+    "selam",
+    "slm",
+    "merhaba",
+    "naber",
+    "sa",
+    "tamam",
+    "evet",
+    "hayır",
+    "hayir",
+    "teşekkür",
+    "tesekkur",
+    "teşekkürler",
+    "tesekkurler",
+    "sağol",
+    "sagol",
+    "iyi",
+    "günaydın",
+    "gunaydin",
+    "kilo",
+    "ekle",
+    "bunu",
+    "onu",
+    "şunu",
+    "ama",
+    "çok",
+    "cok",
+    "da",
+    "de",
+    "ki",
+    "gibi",
+    "daha",
+    "olarak",
+    "kere",
+    "adım",
+    "adim",
+    "bardak",
+    "litre",
+    "hafta",
+    "ay",
+    "yıl",
 ];
 
 /// Turkish endings, for words like "kiloyum", "uyudum", "gidecegim" (four letters or more).
@@ -18,9 +90,61 @@ const TR_ENDINGS: &[&str] = &[
 
 const EN_WORDS: &[&str] = &[
     // not "a", "on", "at", "can": Turkish too ("mail at", "Can'a yaz", final review M2)
-    "the", "an", "and", "i", "i'm", "you", "my", "me", "is", "are", "was", "were", "to", "of", "in", "it", "this", "that", "what", "how", "when",
-    "did", "do", "does", "have", "has", "will", "please", "hi", "hello", "hey", "thanks", "thank", "yes", "today", "tomorrow", "yesterday", "weigh",
-    "slept", "walked", "drank", "remind", "note", "save", "need", "last", "night", "week", "hours", "steps", "much", "many", "with", "for", "about",
+    "the",
+    "an",
+    "and",
+    "i",
+    "i'm",
+    "you",
+    "my",
+    "me",
+    "is",
+    "are",
+    "was",
+    "were",
+    "to",
+    "of",
+    "in",
+    "it",
+    "this",
+    "that",
+    "what",
+    "how",
+    "when",
+    "did",
+    "do",
+    "does",
+    "have",
+    "has",
+    "will",
+    "please",
+    "hi",
+    "hello",
+    "hey",
+    "thanks",
+    "thank",
+    "yes",
+    "today",
+    "tomorrow",
+    "yesterday",
+    "weigh",
+    "slept",
+    "walked",
+    "drank",
+    "remind",
+    "note",
+    "save",
+    "need",
+    "last",
+    "night",
+    "week",
+    "hours",
+    "steps",
+    "much",
+    "many",
+    "with",
+    "for",
+    "about",
 ];
 
 fn score(text: &str) -> (usize, usize) {
@@ -30,7 +154,12 @@ fn score(text: &str) -> (usize, usize) {
     for w in lower.split(|c: char| !(c.is_alphanumeric() || c == '\'')).filter(|w| !w.is_empty()) {
         // a case ending after an apostrophe is Turkish ("Ali'ye", "Can'a", "10'da"); "'s", "'m" English
         if let Some((_, ending)) = w.split_once('\'') {
-            if ["a", "e", "ya", "ye", "da", "de", "ta", "te", "dan", "den", "tan", "ten", "ın", "in", "un", "ün", "nın", "nin", "la", "le", "yla", "yle", "ı", "i", "yı", "yi"].contains(&ending) {
+            if [
+                "a", "e", "ya", "ye", "da", "de", "ta", "te", "dan", "den", "tan", "ten", "ın", "in", "un", "ün", "nın", "nin", "la", "le", "yla", "yle", "ı",
+                "i", "yı", "yi",
+            ]
+            .contains(&ending)
+            {
                 tr += 1;
             } else if ["s", "m", "re", "ll", "ve", "t", "d"].contains(&ending) {
                 en += 1;
@@ -63,7 +192,11 @@ pub fn answer_language(question: &str, earlier: Option<&str>, ui: &str) -> &'sta
 
 /// The name the model is told.
 pub fn name(code: &str) -> &'static str {
-    if code == "en" { "English" } else { "Turkish" }
+    if code == "en" {
+        "English"
+    } else {
+        "Turkish"
+    }
 }
 
 #[cfg(test)]

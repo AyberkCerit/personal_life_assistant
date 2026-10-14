@@ -98,7 +98,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     for q in ["Bu hafta neler yaptım?", "Sınav ne zaman?"] {
         println!("-- question: {q}");
         let t = Instant::now();
-        let r = pla_core::qa::engine::answer(&mut probe, &env, q, &[], None, "tr", &AtomicBool::new(false), &mut |_| {});
+        let r = pla_core::qa::engine::answer(&mut probe, &env, &pla_core::qa::engine::Question { text: q, turns: &[], memory: None, ui_lang: "tr" }, &AtomicBool::new(false), &mut |_| {});
         let tools: Vec<String> = r.as_ref().map(|a| a.tools.iter().map(|c| c.tool.clone()).collect()).unwrap_or_default();
         println!("   total {:.1} s, tools {tools:?}", t.elapsed().as_secs_f64());
     }

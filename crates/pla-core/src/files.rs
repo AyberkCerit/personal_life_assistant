@@ -6,8 +6,8 @@ use std::path::{Component, Path, PathBuf};
 use serde::Serialize;
 
 use crate::fs_atomic::write_atomic;
-use crate::pipeline::blocks::content_hash;
-use crate::vault::Vault;
+use crate::util::content_hash;
+use crate::vault::{is_note_name, walk_vault, Vault, WalkEntry};
 
 pub(crate) const FORBIDDEN: [char; 11] = ['[', ']', '#', '^', '|', '\\', '/', ':', '*', '"', '?'];
 pub(crate) const FORBIDDEN_EXTRA: [char; 2] = ['<', '>'];
@@ -60,9 +60,7 @@ pub enum FileError {
 pub fn resolve(vault: &Vault, rel: &str) -> Result<PathBuf, FileError> {
     let path = Path::new(rel);
     let ok = !rel.is_empty()
-        && path.components().all(|c| {
-            matches!(c, Component::Normal(p) if { let p = p.to_string_lossy(); !p.starts_with('.') && !p.contains(':') })
-        });
+        && path.components().all(|c| matches!(c, Component::Normal(p) if { let p = p.to_string_lossy(); !p.starts_with('.') && !p.contains(':') }));
     if !ok {
         return Err(FileError::BadPath(rel.to_owned()));
     }
@@ -140,40 +138,25 @@ fn unique_rel(vault: &Vault, folder: &str, title: &str) -> Result<String, FileEr
     unreachable!("some numbered name is free")
 }
 
+/// The folders and notes of the vault in tree order: in each folder its folders first, then its
+/// notes, each alphabetically without regard to letter case.
 pub fn list_tree(vault: &Vault) -> std::io::Result<Vec<TreeEntry>> {
-    let mut out = Vec::new();
-    walk(&vault.root, "", 0, &mut out)?;
-    Ok(out)
-}
-
-fn walk(dir: &Path, prefix: &str, depth: usize, out: &mut Vec<TreeEntry>) -> std::io::Result<()> {
-    let mut dirs = Vec::new();
-    let mut notes = Vec::new();
-    for entry in std::fs::read_dir(dir)? {
-        let entry = entry?;
-        let name = entry.file_name().to_string_lossy().into_owned();
-        let kind = entry.file_type()?;
-        if name.starts_with('.') || kind.is_symlink() {
-            continue;
-        }
-        if kind.is_dir() {
-            dirs.push(name);
-        } else if Path::new(&name).extension().is_some_and(|e| e.eq_ignore_ascii_case("md")) {
-            notes.push(name);
-        }
-    }
-    dirs.sort_by_key(|n| n.to_lowercase());
-    notes.sort_by_key(|n| n.to_lowercase());
-    let rel = |name: &str| if prefix.is_empty() { name.to_owned() } else { format!("{prefix}/{name}") };
-    for name in dirs {
-        let path = rel(&name);
-        out.push(TreeEntry { path: path.clone(), name: name.clone(), is_dir: true, depth });
-        walk(&dir.join(&name), &path, depth + 1, out)?;
-    }
-    for name in notes {
-        out.push(TreeEntry { path: rel(&name), name, is_dir: false, depth });
-    }
-    Ok(())
+    std::fs::read_dir(&vault.root)?; // a vault that cannot be read is an error, not an empty tree
+    let mut entries: Vec<WalkEntry> = walk_vault(&vault.root).filter(|e| e.is_dir || is_note_name(&e.rel)).collect();
+    // per level a folder (0) before a note (1), then the name; a folder before what it holds
+    entries.sort_by_cached_key(|e| {
+        let parts: Vec<&str> = e.rel.split('/').collect();
+        let last = parts.len() - 1;
+        parts.iter().enumerate().map(|(i, p)| (u8::from(i == last && !e.is_dir), p.to_lowercase())).collect::<Vec<_>>()
+    });
+    Ok(entries
+        .into_iter()
+        .map(|e| {
+            let depth = e.rel.matches('/').count();
+            let name = e.rel.rsplit('/').next().unwrap_or_default().to_owned();
+            TreeEntry { path: e.rel, name, is_dir: e.is_dir, depth }
+        })
+        .collect())
 }
 
 #[cfg(test)]

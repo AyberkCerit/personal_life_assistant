@@ -1,8 +1,8 @@
 //! How reminders reach the user: a Windows notification with Done / Snooze buttons (FR-TSK-012)
 //! and, while the window is open, an in-app banner via events (decision 3, FR-TSK-015).
 
-use std::sync::mpsc::Sender;
 use std::sync::atomic::{AtomicU8, Ordering};
+use std::sync::mpsc::Sender;
 use std::sync::Mutex;
 
 use pla_core::reminders::DueReminder;
@@ -98,12 +98,20 @@ pub fn set_ui_language(lang: Option<&str>) {
 }
 
 /// The saved language wins; without one, Turkish when Windows is Turkish, otherwise English.
-fn pick(saved: u8, os_turkish: bool) -> &'static Strings {
+fn lang_code(saved: u8, os_turkish: bool) -> &'static str {
     match saved {
-        1 => &TR,
-        2 => &EN,
-        _ if os_turkish => &TR,
-        _ => &EN,
+        1 => "tr",
+        2 => "en",
+        _ if os_turkish => "tr",
+        _ => "en",
+    }
+}
+
+fn pick(saved: u8, os_turkish: bool) -> &'static Strings {
+    if lang_code(saved, os_turkish) == "tr" {
+        &TR
+    } else {
+        &EN
     }
 }
 
@@ -126,7 +134,8 @@ pub fn strings() -> &'static Strings {
 
 /// The language PLA speaks, `tr` or `en`, as `strings` picks it (the assistant's fallback).
 pub fn ui_lang() -> &'static str {
-    if std::ptr::eq(strings(), &TR) { "tr" } else { "en" }
+    // not by comparing `strings()` with `&TR`: references to a const need not share an address
+    lang_code(UI_LANG.load(Ordering::SeqCst), os_turkish())
 }
 
 /// `tauri.conf.json > identifier`, which the installer writes on the Start menu shortcut as its
@@ -146,7 +155,7 @@ pub fn show_info(title: &str, body: &str) {
     #[cfg(windows)]
     {
         if let Err(e) = tauri_winrt_notification::Toast::new(app_id()).title(title).text1(body).show() {
-            eprintln!("PLA: notification failed: {e}");
+            crate::applog::error(&format!("notification failed: {e}"));
         }
     }
 }
@@ -168,7 +177,7 @@ pub fn report_ready(app: &AppHandle, vault: &std::path::Path, week: pla_core::re
             })
             .show();
         if let Err(e) = shown {
-            eprintln!("PLA: notification failed: {e}");
+            crate::applog::error(&format!("notification failed: {e}"));
         }
     }
     #[cfg(not(windows))]
@@ -236,7 +245,7 @@ impl Notifier for AppNotifier {
                 })
                 .show();
             if let Err(e) = shown {
-                eprintln!("PLA: notification failed: {e}");
+                crate::applog::error(&format!("notification failed: {e}"));
             }
         }
     }
@@ -282,5 +291,17 @@ mod tests {
         assert_eq!(pick(2, true).done, "Done");
         assert_eq!(pick(0, true).done, "Tamamlandı");
         assert_eq!(pick(0, false).done, "Done");
+    }
+
+    #[test]
+    fn the_language_code_follows_the_same_choice_as_the_strings() {
+        // architecture review M4: decided from the setting, never by comparing addresses of consts
+        assert_eq!(lang_code(1, false), "tr");
+        assert_eq!(lang_code(2, true), "en");
+        assert_eq!(lang_code(0, true), "tr");
+        assert_eq!(lang_code(0, false), "en");
+        for (saved, os) in [(1, false), (2, true), (0, true), (0, false)] {
+            assert_eq!(pick(saved, os).done == TR.done, lang_code(saved, os) == "tr");
+        }
     }
 }

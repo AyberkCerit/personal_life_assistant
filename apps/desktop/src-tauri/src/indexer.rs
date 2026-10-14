@@ -3,8 +3,8 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
+use std::sync::Arc;
 use std::thread::JoinHandle;
 use std::time::Duration;
 
@@ -42,14 +42,14 @@ fn embed_step(conn: &rusqlite::Connection, job: &MemoryJob, stop: &AtomicBool, l
     if pending > 0 {
         let pause_or_stop = AtomicBool::new(stop.load(Ordering::SeqCst) || job.pause.load(Ordering::SeqCst));
         if let Err(e) = memory::embed_pending(conn, embedder.as_mut(), 8, std::time::Instant::now() + SLICE, &pause_or_stop) {
-            eprintln!("PLA: embedding failed: {e}");
+            crate::applog::error(&format!("embedding failed: {e}"));
         }
     }
     // FR-MEM-008: the days' summaries get vectors once the chunks have theirs
     if memory::pending(conn, &model).unwrap_or(pending) == 0 {
         let pause_or_stop = AtomicBool::new(stop.load(Ordering::SeqCst) || job.pause.load(Ordering::SeqCst));
         if let Err(e) = pla_core::summary::embed_pending(conn, embedder.as_mut(), std::time::Instant::now() + SLICE, &pause_or_stop) {
-            eprintln!("PLA: embedding summaries failed: {e}");
+            crate::applog::error(&format!("embedding summaries failed: {e}"));
         }
     }
     let now = (memory::pending(conn, &model).unwrap_or(pending), total);
@@ -109,12 +109,17 @@ pub fn index_events(root: &Path, paths: &[PathBuf]) -> (Vec<String>, bool) {
             if !notes.contains(&rel) {
                 notes.push(rel);
             }
-        } else if path.is_dir() || (!path.exists() && !looks_like_a_file(path)) {
-            // a folder appeared or vanished (its name may have a dot: `2026.10`)
+        } else if is_folder_event(path) {
             rescan = true;
         }
     }
     (notes, rescan)
+}
+
+/// A folder appeared or vanished (its name may have a dot: `2026.10`). The watcher and the index
+/// read events the same way (architecture review M3).
+pub fn is_folder_event(path: &Path) -> bool {
+    path.is_dir() || (!path.exists() && !looks_like_a_file(path))
 }
 
 /// A vanished path that was most likely a file (`resim.png`), not a folder (`2026.10`, `v1.2`).
@@ -128,14 +133,15 @@ pub fn spawn(root: PathBuf, cache: PathBuf, changed: Box<dyn Fn() + Send>, memor
     let (tx, rx) = mpsc::channel();
     let stop = Arc::new(AtomicBool::new(false));
     let thread_stop = Arc::clone(&stop);
-    let join = std::thread::Builder::new().name("pla-indexer".into()).spawn(move || run(&root, &cache, rx, changed, &thread_stop, memory)).expect("spawn indexer");
+    let join =
+        std::thread::Builder::new().name("pla-indexer".into()).spawn(move || run(&root, &cache, rx, changed, &thread_stop, memory)).expect("spawn indexer");
     IndexerHandle { tx, stop, join: Some(join) }
 }
 
 fn run(root: &Path, cache: &Path, rx: Receiver<IndexCommand>, changed: Box<dyn Fn() + Send>, stop: &AtomicBool, memory: Option<MemoryJob>) {
     let Ok(conn) = connect(cache) else { return };
     if let Err(e) = index::sync_vault_until(&conn, root, stop) {
-        eprintln!("PLA: index sync failed: {e}");
+        crate::applog::error(&format!("index sync failed: {e}"));
     }
     changed();
     let mut last = None;
@@ -170,7 +176,7 @@ fn run(root: &Path, cache: &Path, rx: Receiver<IndexCommand>, changed: Box<dyn F
             match result {
                 Ok(true) => any = true,
                 Ok(false) => {}
-                Err(e) => eprintln!("PLA: indexing failed: {e}"),
+                Err(e) => crate::applog::error(&format!("indexing failed: {e}")),
             }
         }
         if any {
