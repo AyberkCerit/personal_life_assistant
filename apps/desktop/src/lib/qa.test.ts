@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { answerParts, apply, qaError, started, toolLine, type ToolRecord } from "./qa";
+import { answerParts, apply, qaError, started, toolLine, warmDue, type ToolRecord } from "./qa";
 
 const added: ToolRecord = {
   tool: "add_task",
@@ -48,5 +48,13 @@ describe("assistant panel helpers", () => {
     expect(toolLine({ ...offer, result: { ...offer.result, saved: "notes/Ders notu.md" } }).key).toBe("qa.tool.suggestSaved");
     expect(qaError("no_model")).toBe("qa.error.no_model");
     expect(qaError("weird")).toBe("qa.error.model");
+  });
+});
+
+describe("read-ahead (FR-QA-017)", () => {
+  it("asks again only after a while: the model stops after a minute idle", () => {
+    expect(warmDue(null, 1_000)).toBe(true);
+    expect(warmDue(1_000, 20_000)).toBe(false);
+    expect(warmDue(1_000, 31_000)).toBe(true);
   });
 });

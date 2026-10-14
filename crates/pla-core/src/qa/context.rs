@@ -1,6 +1,7 @@
 //! FR-MEM-009/010: what the model reads for one question, inside its 8 192-token window: about 40%
 //! the last 48 hours of notes (cut from the oldest), 40% notes found for the question, 20% tool
-//! results. The follow-up turns (decision A) come out of the recent share.
+//! results. The recent share is the same for every question, so the model server can reuse it
+//! (M6 performance); the question and the follow-up turns (decision A) come out of the found share.
 
 use chrono::{DateTime, FixedOffset, TimeZone};
 use rusqlite::Connection;
@@ -14,6 +15,8 @@ pub const WINDOW: usize = 8192;
 /// wrappers and the 900-token answer (final review I5: 2 048 was too thin).
 pub const RESERVED: usize = 3000;
 pub const ANSWER_TOKENS: usize = 900;
+/// The last 48 hours' share, whatever the question.
+pub const RECENT_TOKENS: usize = (WINDOW - RESERVED) * 2 / 5;
 
 /// A cautious token count: about 3 characters a token for words, one token for each digit (the
 /// tokenizer splits numbers, and tool results are full of dates and ids).
@@ -77,40 +80,56 @@ fn chunk_block(h: &crate::memory::ChunkHit) -> String {
 /// What semantic memory adds to a question: its vector and the model that made it (FR-MEM-005).
 pub type Memory<'a> = Option<(&'a [f32], &'a str)>;
 
-/// Builds the context for `question` with the earlier `turns` (oldest first).
-pub fn build(cache: &Connection, question: &str, turns: &[Turn], now: DateTime<FixedOffset>, memory: Memory<'_>, reports: &str) -> rusqlite::Result<Context> {
-    let room = WINDOW - RESERVED - tokens(question).min(700);
-    let (mut recent_budget, mut found_budget, tool_budget) = (room * 2 / 5, room * 2 / 5, room / 5);
-
-    // Follow-ups first (from the recent share), newest kept when they do not all fit.
-    let mut kept: Vec<Turn> = Vec::new();
-    for t in turns.iter().rev() {
-        let cost = tokens(&t.question) + tokens(&t.answer) + 8;
-        if cost > recent_budget {
-            break;
-        }
-        recent_budget -= cost;
-        kept.insert(0, t.clone());
-    }
-
-    // FR-MEM-010: newest first; what does not fit is the oldest, the last one that fits is cut.
+/// FR-MEM-010: the last 48 hours in `RECENT_TOKENS`, chosen newest first: what does not fit is the
+/// oldest, the last one that fits is cut. Written oldest to newest: the note being written is the
+/// newest, and saving it then changes only the end of what the model server keeps (M6). Also the
+/// notes that went in whole.
+fn recent_notes(cache: &Connection, now: DateTime<FixedOffset>) -> rusqlite::Result<(String, Vec<String>)> {
     let since = now.timestamp_millis() - 48 * 3600 * 1000;
-    let mut recent = String::new();
+    let mut budget = RECENT_TOKENS;
+    let mut blocks: Vec<String> = Vec::new();
     let mut in_recent: Vec<String> = Vec::new();
     for n in index::recent(cache, since, 40)? {
         let block = note_block(&n, &n.body);
         let cost = tokens(&block);
-        if cost <= recent_budget {
-            recent_budget -= cost;
-            recent.push_str(&block);
+        if cost <= budget {
+            budget -= cost;
+            blocks.push(block);
             in_recent.push(n.note_path.clone());
         } else {
-            if recent_budget > 60 {
-                recent.push_str(&cut(&block, recent_budget));
+            if budget > 60 {
+                blocks.push(cut(&block, budget));
             }
             break;
         }
     }
+    blocks.reverse();
+    Ok((blocks.concat(), in_recent))
+}
+
+/// What every question starts with (M6 performance: read ahead when the panel opens).
+pub fn shared(cache: &Connection, now: DateTime<FixedOffset>) -> rusqlite::Result<Context> {
+    Ok(Context { recent: recent_notes(cache, now)?.0, ..Default::default() })
+}
+
+/// Builds the context for `question` with the earlier `turns` (oldest first).
+pub fn build(cache: &Connection, question: &str, turns: &[Turn], now: DateTime<FixedOffset>, memory: Memory<'_>, reports: &str) -> rusqlite::Result<Context> {
+    let room = WINDOW - RESERVED - tokens(question).min(700);
+    let tool_budget = room / 5;
+    let mut found_budget = room - RECENT_TOKENS - tool_budget;
+
+    // Follow-ups first (from the found share), newest kept when they do not all fit.
+    let mut kept: Vec<Turn> = Vec::new();
+    for t in turns.iter().rev() {
+        let cost = tokens(&t.question) + tokens(&t.answer) + 8;
+        if cost > found_budget {
+            break;
+        }
+        found_budget -= cost;
+        kept.insert(0, t.clone());
+    }
+
+    let (recent, in_recent) = recent_notes(cache, now)?;
 
     // FR-MEM-005: chunks from the hybrid search (keywords alone until the embedding model is there)
     let mut found = String::new();
@@ -230,6 +249,32 @@ mod tests {
         let ctx = build(&conn, "ne yaptım", &[], now(), None, "reports").unwrap();
         assert!(ctx.recent.contains("YENİ") && !ctx.recent.contains("ESKİ"), "the newest stays, the oldest goes");
         assert!(tokens(&ctx.recent) <= (WINDOW - RESERVED) * 2 / 5);
+    }
+
+    #[test]
+    fn the_recent_notes_run_oldest_to_newest() {
+        // M6 final review I5: the note being written is the newest; last in the prompt, saving it
+        // leaves the prefix the server keeps before it as it was
+        let (_t, conn) = cache();
+        let ms = now().timestamp_millis();
+        index::index_note(&conn, "notes/sabah.md", "# Sabah\n\nKahvaltı.", ms - 5 * 3_600_000, 10).unwrap();
+        index::index_note(&conn, "notes/akşam.md", "# Akşam\n\nToplantı.", ms - 3_600_000, 10).unwrap();
+        let ctx = build(&conn, "ne yaptım", &[], now(), None, "reports").unwrap();
+        assert!(ctx.recent.find("Kahvaltı").unwrap() < ctx.recent.find("Toplantı").unwrap(), "{}", ctx.recent);
+    }
+
+    #[test]
+    fn the_recent_notes_are_the_same_for_every_question() {
+        // M6 performance: the model server reuses the prompt up to the end of this part; a cut
+        // that moved with the question's length or the follow-ups made it read 4 000 tokens again
+        let (_t, conn) = cache();
+        let ms = now().timestamp_millis();
+        let long = "kelime ".repeat(2500);
+        index::index_note(&conn, "notes/yeni.md", &format!("# Yeni\n\nYENİ {long}"), ms - 3_600_000, 10).unwrap();
+        let short = build(&conn, "ne?", &[], now(), None, "reports").unwrap();
+        let long_q = build(&conn, &"bu hafta neler yaptım ".repeat(30), &[turn("bir", &"a ".repeat(800))], now(), None, "reports").unwrap();
+        assert_eq!(short.recent, long_q.recent);
+        assert_eq!(long_q.turns.len(), 1, "the follow-up still fits");
     }
 
     #[test]

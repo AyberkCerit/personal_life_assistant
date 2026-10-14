@@ -27,14 +27,24 @@ pub struct ServerConfig {
     pub embedding: bool,
 }
 
+/// NFR-PERF-012: a model uses at most N−1 logical cores (one stays for the editor), and at most
+/// four: more gives little on a laptop and heats it. The reference PC has four.
+pub fn model_threads(logical_cores: usize) -> u32 {
+    logical_cores.saturating_sub(1).clamp(1, 4) as u32
+}
+
+fn default_threads() -> u32 {
+    model_threads(std::thread::available_parallelism().map_or(4, |n| n.get()))
+}
+
 impl ServerConfig {
     pub fn new(server_bin: PathBuf, model: PathBuf) -> Self {
-        Self { server_bin, model, ctx_size: 8192, threads: 4, startup_timeout: Duration::from_secs(30), embedding: false }
+        Self { server_bin, model, ctx_size: 8192, threads: default_threads(), startup_timeout: Duration::from_secs(30), embedding: false }
     }
 
     /// EmbeddingGemma: a 2 048-token window, one batch as large as a whole input.
     pub fn embedding(server_bin: PathBuf, model: PathBuf) -> Self {
-        Self { server_bin, model, ctx_size: 2048, threads: 4, startup_timeout: Duration::from_secs(30), embedding: true }
+        Self { server_bin, model, ctx_size: 2048, threads: default_threads(), startup_timeout: Duration::from_secs(30), embedding: true }
     }
 
     pub fn args(&self, port: u16) -> Vec<String> {
@@ -689,12 +699,22 @@ mod tests {
     }
 
     #[test]
+    fn a_model_leaves_one_core_free() {
+        // NFR-PERF-012: the reference PC has 4 logical cores; 4 threads would take them all
+        assert_eq!(model_threads(4), 3);
+        assert_eq!(model_threads(16), 4);
+        assert_eq!(model_threads(2), 1);
+        assert_eq!(model_threads(1), 1);
+    }
+
+    #[test]
     fn args_bind_localhost_with_low_memory_flags_and_no_key() {
         let cfg = ServerConfig::new("llama-server.exe".into(), "m.gguf".into());
         let args = cfg.args(5555).join(" ");
-        for expected in ["--host 127.0.0.1", "--port 5555", "-c 8192", "-t 4", "-ngl 0", "-fa on", "-ctk q8_0", "-ctv q8_0", "-ub 256", "-b 512", "--cache-ram 512", "--no-webui"] {
+        for expected in ["--host 127.0.0.1", "--port 5555", "-c 8192", "-ngl 0", "-fa on", "-ctk q8_0", "-ctv q8_0", "-ub 256", "-b 512", "--cache-ram 512", "--no-webui"] {
             assert!(args.contains(expected), "missing `{expected}` in `{args}`");
         }
+        assert!(args.contains(&format!("-t {}", cfg.threads)) && cfg.threads <= 4);
         assert!(!args.contains("api-key"), "API key must not appear on the command line (NFR-SEC-002)");
     }
 

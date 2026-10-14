@@ -41,6 +41,8 @@ pub enum Command {
     DropModel(std::sync::mpsc::Sender<()>),
     /// FR-QA-003: answer a question with the same model; extraction waits (see `WorkerHandle::ask`).
     Ask(AskJob),
+    /// M6 performance: the assistant panel opened; read what every question starts with.
+    Warm { cache_path: std::path::PathBuf },
     /// FR-MEM-006: summarise the days that need it (maintenance), or `only` this day (the user
     /// asked for it again).
     Summarize { only: Option<chrono::NaiveDate>, cache_path: std::path::PathBuf },
@@ -88,6 +90,9 @@ pub struct WorkerHandle {
     pause: Arc<AtomicBool>,
     dropping: Arc<AtomicBool>,
     asking: Arc<AtomicUsize>,
+    /// Read-aheads waiting (M6): extraction yields to them between notes; summaries and reports
+    /// do not (a read-ahead is a guess, a question is not).
+    warming: Arc<AtomicUsize>,
     /// Stops a running summary request: a question, a model removal or closing comes first.
     interrupt: Arc<AtomicBool>,
     /// The Stop switch of the question being answered: closing the session flips it (final review C2).
@@ -126,6 +131,12 @@ impl WorkerHandle {
         self.send(Command::Ask(job));
     }
 
+    /// M6 performance: like a question, the read-ahead goes before the queue (between two notes).
+    pub fn warm(&self, cache_path: std::path::PathBuf) {
+        self.warming.fetch_add(1, Ordering::SeqCst);
+        self.send(Command::Warm { cache_path });
+    }
+
     pub fn sender(&self) -> Sender<Command> {
         self.tx.clone()
     }
@@ -159,6 +170,7 @@ struct Cancellable<'a> {
     pause: &'a AtomicBool,
     dropping: &'a AtomicBool,
     asking: &'a AtomicUsize,
+    warming: &'a AtomicUsize,
 }
 
 impl Extractor for Cancellable<'_> {
@@ -174,6 +186,9 @@ impl Extractor for Cancellable<'_> {
         }
         if self.asking.load(Ordering::SeqCst) > 0 {
             return Err(LlmError::Http("answering a question first".into()));
+        }
+        if self.warming.load(Ordering::SeqCst) > 0 {
+            return Err(LlmError::Http("reading ahead for the assistant first".into()));
         }
         self.inner.extract_raw(reference, text)
     }
@@ -242,6 +257,7 @@ pub struct Worker {
     pause: Arc<AtomicBool>,
     dropping: Arc<AtomicBool>,
     asking: Arc<AtomicUsize>,
+    warming: Arc<AtomicUsize>,
     interrupt: Arc<AtomicBool>,
     on_added: Option<AddedListener>,
     /// Hears each day summarised (the note's box refreshes).
@@ -269,6 +285,7 @@ impl Worker {
             pause: Arc::new(AtomicBool::new(false)),
             dropping: Arc::new(AtomicBool::new(false)),
             asking: Arc::new(AtomicUsize::new(0)),
+            warming: Arc::new(AtomicUsize::new(0)),
             interrupt: Arc::new(AtomicBool::new(false)),
             on_added: None,
             on_summary: None,
@@ -312,8 +329,9 @@ impl Worker {
         let (tx, rx) = mpsc::channel();
         let (cancel, pause, dropping, asking, interrupt) =
             (Arc::clone(&self.cancel), Arc::clone(&self.pause), Arc::clone(&self.dropping), Arc::clone(&self.asking), Arc::clone(&self.interrupt));
+        let warming = Arc::clone(&self.warming);
         let join = std::thread::Builder::new().name("pla-worker".into()).spawn(move || self.run(rx)).expect("spawn worker");
-        WorkerHandle { tx, cancel, pause, dropping, asking, interrupt, ask_cancel: Arc::new(Mutex::new(None)), join: Some(join) }
+        WorkerHandle { tx, cancel, pause, dropping, asking, warming, interrupt, ask_cancel: Arc::new(Mutex::new(None)), join: Some(join) }
     }
 
     fn run(mut self, rx: Receiver<Command>) {
@@ -360,6 +378,11 @@ impl Worker {
                     self.ask(job);
                     self.asking.fetch_sub(1, Ordering::SeqCst);
                     self.process(); // what the question interrupted
+                }
+                Ok(Command::Warm { cache_path }) => {
+                    self.warm(&cache_path);
+                    self.warming.fetch_sub(1, Ordering::SeqCst);
+                    self.process();
                 }
                 Ok(Command::Summarize { only, cache_path }) => {
                     self.summarize(only, &cache_path);
@@ -429,7 +452,7 @@ impl Worker {
             (self.notify)(&self.status); // field borrows: the extractor stays borrowed
             let now = (self.clock)();
             let mut guarded =
-                Cancellable { inner: extractor.as_mut(), cancel: &self.cancel, pause: &self.pause, dropping: &self.dropping, asking: &self.asking };
+                Cancellable { inner: extractor.as_mut(), cancel: &self.cancel, pause: &self.pause, dropping: &self.dropping, asking: &self.asking, warming: &self.warming };
             let (reader, listener, added) = (&self.reader, &self.on_added, &mut self.status.added);
             // Each note's additions are reported as soon as it is done (FR-EXT-015), not at the end of a long run.
             let mut on_note = |_: &str, outcomes: &[Outcome]| {
@@ -453,7 +476,7 @@ impl Worker {
                 self.status.paused = true; // stopped by a pause, not by a failure
                 self.status.last_error = None;
             }
-            if self.asking.load(Ordering::SeqCst) > 0 {
+            if self.asking.load(Ordering::SeqCst) > 0 || self.warming.load(Ordering::SeqCst) > 0 {
                 self.status.last_error = None; // stopped for a question; it goes on afterwards
             }
             self.status.busy = false;
@@ -654,6 +677,23 @@ impl Worker {
         self.publish();
     }
 
+    /// Starts the model and lets it read the shared start of the prompt. Not while paused (it is
+    /// work nobody asked for yet); a failure is left to the question, which reports it.
+    fn warm(&mut self, cache_path: &std::path::Path) {
+        if self.status.paused {
+            return;
+        }
+        let Some(model) = self.extractor.as_mut().and_then(|x| x.chat_model()) else { return };
+        let Ok(cache) = pla_core::db::connect(cache_path) else { return };
+        // only a closing session stops it: a question that comes meanwhile wants it finished
+        let _ = engine::warm(model, &cache, (self.clock)(), &self.cancel);
+        let model = self.model_state();
+        if model != self.status.model {
+            self.status.model = model;
+            self.publish();
+        }
+    }
+
     /// FR-QA-003…016 on the worker thread, which owns the model and pla.db (tools write there).
     fn ask(&mut self, job: AskJob) {
         let AskJob { turn_id, question, new_topic, cache_path, memory, cancel, on } = job;
@@ -814,6 +854,52 @@ mod tests {
             on("eklendi.");
             Ok("Hatırlatıcı eklendi.".into())
         }
+    }
+
+    /// Keeps the bodies of the chat requests it gets.
+    struct Recorder(Arc<Mutex<Vec<serde_json::Value>>>);
+    impl Extractor for Recorder {
+        fn extract_raw(&mut self, _: NaiveDate, _: &str) -> Result<String, LlmError> {
+            Ok(r#"{"items":[]}"#.to_owned())
+        }
+        fn chat_model(&mut self) -> Option<&mut dyn pla_core::qa::ChatModel> {
+            Some(self)
+        }
+    }
+    impl pla_core::qa::ChatModel for Recorder {
+        fn complete(&mut self, body: &serde_json::Value, _: &AtomicBool) -> Result<String, LlmError> {
+            self.0.lock().unwrap().push(body.clone());
+            Ok(String::new())
+        }
+        fn stream(&mut self, body: &serde_json::Value, _: &AtomicBool, _: &mut dyn FnMut(&str)) -> Result<String, LlmError> {
+            self.0.lock().unwrap().push(body.clone());
+            Ok(String::new())
+        }
+    }
+
+    #[test]
+    fn the_open_panel_warms_the_model_unless_paused() {
+        // M6 performance: the shared start of the prompt is read while the user types
+        let bodies = Arc::new(Mutex::new(Vec::new()));
+        let (_tmp, handle, statuses, data) = setup(Some(Box::new(Recorder(Arc::clone(&bodies)))));
+        wait_for(&statuses, |s| !s.busy && s.queued == 0);
+        handle.warm(data.join("cache.db"));
+        // a guess, not a question: a running summary or weekly report is not stopped for it
+        assert!(!handle.interrupt.load(Ordering::SeqCst) && handle.asking.load(Ordering::SeqCst) == 0);
+        let start = Instant::now();
+        while bodies.lock().unwrap().is_empty() {
+            assert!(start.elapsed() < Duration::from_secs(10), "no warm request");
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert_eq!(bodies.lock().unwrap()[0]["max_tokens"], 1);
+
+        handle.set_paused(true);
+        wait_for(&statuses, |s| s.paused);
+        handle.warm(data.join("cache.db"));
+        let (tx, rx) = std::sync::mpsc::channel();
+        handle.drop_model(tx); // runs after the warm request: by then it was skipped or sent
+        rx.recv_timeout(Duration::from_secs(10)).unwrap();
+        assert_eq!(bodies.lock().unwrap().len(), 1, "paused: background AI waits");
     }
 
     fn ask(handle: &WorkerHandle, data: &std::path::Path, question: &str) -> std::sync::mpsc::Receiver<QaEvent> {
