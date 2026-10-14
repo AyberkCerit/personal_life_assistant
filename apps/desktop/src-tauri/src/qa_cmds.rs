@@ -112,6 +112,14 @@ pub fn qa_history(state: State<AppState>) -> Result<Vec<Turn>, String> {
     turns
 }
 
+/// M6 performance: the assistant panel opened; the model reads ahead what every question shares.
+#[tauri::command]
+pub fn qa_warm(state: State<AppState>) {
+    if let Some(session) = state.session.lock().expect("session lock").as_ref() {
+        session.worker.warm(session.cache_path.clone());
+    }
+}
+
 /// FR-QA-015 (the panel asks first).
 #[tauri::command]
 pub fn qa_clear(state: State<AppState>) -> Result<(), String> {

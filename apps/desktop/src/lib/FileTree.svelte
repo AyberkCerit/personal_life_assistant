@@ -1,10 +1,11 @@
 <script lang="ts">
-  import { tick } from "svelte";
+  import { tick, untrack } from "svelte";
+  import ChevronRight from "@lucide/svelte/icons/chevron-right";
   import FileText from "@lucide/svelte/icons/file-text";
   import Folder from "@lucide/svelte/icons/folder";
   import type { TreeEntry } from "./api";
   import { t, tf } from "./i18n";
-  import { moveTargets, parentOf, type TreeActions } from "./tree";
+  import { ancestors, moveTargets, openAfterMove, parentOf, visibleEntries, type TreeActions } from "./tree";
   import Button from "./ui/Button.svelte";
   import Icon from "./ui/Icon.svelte";
 
@@ -17,6 +18,7 @@
     onOpen,
     actions,
     windowOpen = $bindable(false),
+    vault = "",
   }: {
     entries: TreeEntry[];
     selected: string | null;
@@ -25,6 +27,8 @@
     actions: TreeActions;
     /** Whether a tree dialog is open: the app opens no other window over it. */
     windowOpen?: boolean;
+    /** The vault's folder: its open folders are remembered apart from another vault's. */
+    vault?: string;
   } = $props();
 
   type Dialog =
@@ -44,6 +48,54 @@
   let list: HTMLUListElement | undefined = $state();
 
   const byPath = $derived(new Map(entries.map((e) => [e.path, e])));
+
+  // M6 performance: folders open and close, closed at first; only open folders' rows are drawn.
+  // The open ones are remembered per vault (a convenience: without storage they start closed).
+  const storeKey = $derived(`pla.tree.open:${vault}`);
+  let open = $state(new Set<string>());
+  $effect(() => {
+    let saved: string[] = [];
+    try {
+      saved = JSON.parse(localStorage.getItem(storeKey) ?? "[]");
+    } catch {
+      saved = [];
+    }
+    open = new Set(Array.isArray(saved) ? saved : []);
+  });
+  function setOpen(paths: string[], value: boolean) {
+    const next = new Set(open);
+    for (const p of paths) {
+      if (value) next.add(p);
+      else next.delete(p);
+    }
+    save(next);
+  }
+  /** A folder renamed or moved stays open where it went (and the old path is not kept). */
+  function keepOpen(from: string, to: string) {
+    if ([...open].some((p) => p === from || p.startsWith(`${from}/`))) save(openAfterMove(open, from, to));
+  }
+  function save(next: Set<string>) {
+    open = next;
+    try {
+      localStorage.setItem(storeKey, JSON.stringify([...next]));
+    } catch {
+      // no storage: the folders stay as they are for this session
+    }
+  }
+  // the open note's folders open with it (a note opened from search, a link or the assistant);
+  // only when another note opens (or in another vault): the user may close its folder afterwards,
+  // and leaving the editor and coming back (no selection, then the same one) does not reopen it
+  let revealed: string | null = null;
+  $effect(() => {
+    const key = selected ? `${storeKey}|${selected}` : null;
+    if (key === null || key === revealed) return;
+    revealed = key;
+    const above = ancestors(selected!);
+    untrack(() => {
+      if (above.some((a) => !open.has(a))) setOpen(above, true);
+    });
+  });
+  const shown = $derived(visibleEntries(entries, open));
   const stem = (name: string) => name.replace(/\.md$/i, "");
   /** New notes go into the focused folder (or the focused note's folder), else the inbox (FR-VLT-009). */
   const target = $derived.by(() => {
@@ -90,6 +142,16 @@
       e.preventDefault();
       const next = all[Math.min(Math.max(at + (e.key === "ArrowDown" ? 1 : -1), 0), all.length - 1)];
       void focusRow(next?.dataset.row ?? null);
+    } else if (e.key === "ArrowRight" && entry?.is_dir) {
+      // the tree pattern: open a closed folder, else go to its first row
+      e.preventDefault();
+      if (!open.has(entry.path)) setOpen([entry.path], true);
+      else if (all[at + 1] && parentOf(all[at + 1].dataset.row ?? "") === entry.path) void focusRow(all[at + 1].dataset.row ?? null);
+    } else if (e.key === "ArrowLeft" && entry) {
+      // close an open folder, else go to the folder above
+      e.preventDefault();
+      if (entry.is_dir && open.has(entry.path)) setOpen([entry.path], false);
+      else if (parentOf(entry.path)) void focusRow(parentOf(entry.path));
     } else if (e.key === "F2" && entry) {
       e.preventDefault();
       startRename(entry);
@@ -118,6 +180,7 @@
     if (!entry || !name || name === (entry.is_dir ? entry.name : stem(entry.name))) return;
     if (entry.is_dir) {
       await actions.renameFolder(path, name);
+      keepOpen(path, parentOf(path) ? `${parentOf(path)}/${name}` : name);
       return;
     }
     const count = await actions.linkCount(path).catch(() => 0);
@@ -127,6 +190,7 @@
 
   function startCreate(parent: string, kind: "note" | "folder") {
     menu = null;
+    if (parent) setOpen([...ancestors(parent), parent], true); // the field shows under the folder
     creating = { parent, kind, value: "" };
     void tick().then(() => list?.querySelector<HTMLInputElement>(".create")?.focus());
   }
@@ -193,14 +257,20 @@
     e.preventDefault();
     const path = dragging;
     dragging = dropOn = null;
-    if (path && moveTargets(entries, path).includes(folder)) await actions.move(path, folder);
+    if (path && moveTargets(entries, path).includes(folder)) await move(path, folder);
+  }
+
+  async function move(path: string, folder: string) {
+    await actions.move(path, folder);
+    const name = path.slice(path.lastIndexOf("/") + 1);
+    keepOpen(path, folder ? `${folder}/${name}` : name);
   }
 
   async function confirm() {
     const d = dialog;
     dialog = null;
     if (!d) return;
-    if (d.kind === "move") await actions.move(d.entry.path, d.choice);
+    if (d.kind === "move") await move(d.entry.path, d.choice);
     else if (d.kind === "delete") await actions.remove(d.entry.path);
     else if (d.kind === "template" && d.title.trim() && d.choice) await actions.createNote(d.folder, d.title.trim(), d.choice);
   }
@@ -242,7 +312,7 @@
     ondrop={(e) => e.target === list && void drop(e, "")}
     class:drop={dropOn === ""}
   >
-    {#each entries as entry (entry.path)}
+    {#each shown as entry (entry.path)}
       <li role="none" style:padding-left={`calc(${entry.depth} * var(--space-4))`}>
         {#if renaming?.path === entry.path}
           <input
@@ -264,13 +334,15 @@
             class:drop={dropOn === entry.path}
             role="treeitem"
             aria-selected={entry.path === selected}
+            aria-expanded={entry.is_dir ? open.has(entry.path) : undefined}
             data-row={entry.path}
-            tabindex={entry.path === (focused ?? entries[0]?.path) ? 0 : -1}
+            tabindex={entry.path === (focused ?? shown[0]?.path) ? 0 : -1}
             title={entry.is_dir ? entry.name : stem(entry.name)}
             draggable="true"
             onclick={() => {
               focused = entry.path;
-              if (!entry.is_dir) onOpen(entry.path);
+              if (entry.is_dir) setOpen([entry.path], !open.has(entry.path));
+              else onOpen(entry.path);
             }}
             onfocus={() => (focused = entry.path)}
             oncontextmenu={(e) => openMenu(e, entry)}
@@ -280,6 +352,7 @@
             ondragleave={() => dropOn === entry.path && (dropOn = null)}
             ondrop={(e) => entry.is_dir && void drop(e, entry.path)}
           >
+            {#if entry.is_dir}<span class="chevron" class:open={open.has(entry.path)}><Icon icon={ChevronRight} size="sm" /></span>{:else}<span class="chevron"></span>{/if}
             <Icon icon={entry.is_dir ? Folder : FileText} size="sm" /><span class="name">{entry.is_dir ? entry.name : stem(entry.name)}</span>
           </button>
         {/if}
@@ -401,6 +474,8 @@
   ul.drop { background: var(--color-accent-subtle); }
   .row { display: flex; align-items: center; gap: var(--space-2); min-height: 1.75rem; padding: 0 var(--space-2); box-sizing: border-box; }
   .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .chevron { display: inline-flex; flex: none; width: 1rem; margin-right: calc(-1 * var(--space-1)); transition: transform var(--duration-fast) var(--ease-standard); }
+  .chevron.open { transform: rotate(90deg); }
   button.row {
     width: 100%; background: none; border: 0; text-align: left; cursor: pointer; font: inherit;
     border-radius: var(--radius-md); color: var(--color-text-muted);

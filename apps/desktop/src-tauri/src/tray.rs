@@ -29,12 +29,67 @@ fn tray_icon() -> tauri::image::Image<'static> {
     tauri::image::Image::from_bytes(include_bytes!("../icons/tray.png")).expect("bundled tray icon")
 }
 
-pub fn show_main(app: &AppHandle) {
-    if let Some(window) = app.get_webview_window("main") {
-        crate::webview_memory::set_low(&window, false);
+/// What the window is asked to do while its page is not listening yet (being made, or loading
+/// after a reopen): it hears it once the page asks (`take_ui_events`), as an event emitted before
+/// then would be lost. The flag says the page listens; both live under one lock, so nothing falls
+/// between the page asking and the next request.
+#[derive(Default)]
+pub struct UiQueue(Mutex<(Vec<(String, serde_json::Value)>, bool)>);
+
+impl UiQueue {
+    /// Queues `event` unless the page listens; returns it back when it does (to emit at once).
+    pub fn offer(&self, event: &str, payload: serde_json::Value) -> Option<(String, serde_json::Value)> {
+        let mut q = self.0.lock().expect("ui queue lock");
+        if q.1 {
+            return Some((event.to_owned(), payload));
+        }
+        q.0.push((event.to_owned(), payload));
+        None
+    }
+
+    /// The page listens now: what waited for it.
+    pub fn take(&self) -> Vec<(String, serde_json::Value)> {
+        let mut q = self.0.lock().expect("ui queue lock");
+        q.1 = true;
+        std::mem::take(&mut q.0)
+    }
+
+    /// The page is gone or being made again: queue until it asks.
+    pub fn not_listening(&self) {
+        self.0.lock().expect("ui queue lock").1 = false;
+    }
+}
+
+/// The main window, made again when it is gone: in the tray PLA keeps no WebView at all (NFR-PERF-006,
+/// M6 performance decision a). Returns whether it was there already.
+pub fn show_main(app: &AppHandle) -> bool {
+    let existed = app.get_webview_window("main").is_some();
+    if !existed {
+        if let Some(queue) = app.try_state::<UiQueue>() {
+            queue.not_listening();
+        }
+    }
+    let window = match app.get_webview_window("main") {
+        Some(w) => Some(w),
+        None => app.config().app.windows.first().and_then(|cfg| tauri::WebviewWindowBuilder::from_config(app, cfg).ok()).and_then(|b| b.build().ok()),
+    };
+    if let Some(window) = window {
         let _ = window.show();
         let _ = window.unminimize();
         let _ = window.set_focus();
+    }
+    existed
+}
+
+/// Shows the window and tells it `event`: at once when its page listens, once it is up otherwise.
+pub fn to_ui(app: &AppHandle, event: &str, payload: serde_json::Value) {
+    show_main(app);
+    let ready = match app.try_state::<UiQueue>() {
+        Some(queue) => queue.offer(event, payload),
+        None => Some((event.to_owned(), payload)),
+    };
+    if let Some((event, payload)) = ready {
+        let _ = app.emit(&event, payload);
     }
 }
 
@@ -79,6 +134,7 @@ fn checked(app: &AppHandle, pick: impl Fn(&(CheckMenuItem<Wry>, CheckMenuItem<Wr
 
 pub fn build(app: &AppHandle) -> tauri::Result<()> {
     app.manage(TrayItems::default());
+    app.manage(UiQueue::default());
     let menu = menu(app)?;
     TrayIconBuilder::with_id("pla")
         .icon(tray_icon())
@@ -86,19 +142,12 @@ pub fn build(app: &AppHandle) -> tauri::Result<()> {
         .menu(&menu)
         .show_menu_on_left_click(false)
         .on_menu_event(move |app, event| match event.id.as_ref() {
-            "open" => show_main(app),
-            "new_note" => {
+            "open" => {
                 show_main(app);
-                let _ = app.emit("new-note", ());
             }
-            "quick_metric" => {
-                show_main(app);
-                let _ = app.emit("open-quick-metric", ());
-            }
-            "settings" => {
-                show_main(app);
-                let _ = app.emit("open-settings", ());
-            }
+            "new_note" => to_ui(app, "new-note", serde_json::Value::Null),
+            "quick_metric" => to_ui(app, "open-quick-metric", serde_json::Value::Null),
+            "settings" => to_ui(app, "open-settings", serde_json::Value::Null),
             "pause" => crate::commands::apply_pause(app, checked(app, |i| &i.0)),
             "autostart" => {
                 let on = checked(app, |i| &i.1);
@@ -111,9 +160,28 @@ pub fn build(app: &AppHandle) -> tauri::Result<()> {
         })
         .on_tray_icon_event(|tray, event| {
             if let TrayIconEvent::Click { button: MouseButton::Left, button_state: MouseButtonState::Up, .. } = event {
-                show_main(tray.app_handle());
+                let _ = show_main(tray.app_handle());
             }
         })
         .build(app)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::UiQueue;
+    use serde_json::json;
+
+    #[test]
+    fn a_request_waits_until_the_page_listens() {
+        // M6 final review: a click right after a reopen reached a page still loading and was lost
+        let q = UiQueue::default();
+        assert!(q.offer("open-note", json!(1)).is_none(), "no page yet");
+        assert_eq!(q.take(), vec![("open-note".to_owned(), json!(1))]);
+        assert_eq!(q.offer("new-note", json!(2)), Some(("new-note".to_owned(), json!(2))), "the page listens");
+        assert!(q.take().is_empty());
+        q.not_listening(); // to the tray, or made again
+        assert!(q.offer("open-settings", json!(3)).is_none());
+        assert_eq!(q.take().len(), 1);
+    }
 }

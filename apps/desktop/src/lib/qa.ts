@@ -111,3 +111,9 @@ export function qaError(code: string): Key {
   if (code === "no_vault") return "qa.error.no_vault";
   return "qa.error.model";
 }
+
+/** FR-QA-017: whether to ask the model to read ahead again (at most every 30 s; it stops after
+ *  60 s idle, so a long pause while typing starts it again). */
+export function warmDue(last: number | null, now: number, gap = 30_000): boolean {
+  return last === null || now - last >= gap;
+}

@@ -88,6 +88,7 @@ module.exports = [
     ["FR-EXT-027", "W", "IF an extracted task or reminder contains a time but no day information, THEN the system shall use the reference date as its date.", "Y", "T", "P5.2"],
     ["FR-EXT-028", "W", "IF an extracted item contains a weekday without `which`, THEN the system shall resolve it as `which = this`.", "Y", "T", "P5.2"],
     ["FR-EXT-029", "U", "In the extraction JSON schema, the metric properties shall be declared in the order kind, exercise, sets, reps, value, unit.", "Y", "İ", "P5.2"],
+    ["FR-EXT-030", "E", "WHEN the system queues the vault's notes at start or after a rescan, it shall queue a note that was never extracted only if the note was modified within the last 30 days.", "Y", "T", "P5.2"],
   ] },
 
   // ------------------------------------------------------------------ TSK

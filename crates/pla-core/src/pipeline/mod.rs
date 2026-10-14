@@ -73,16 +73,22 @@ pub fn enqueue(conn: &Connection, note_path: &str, now: DateTime<FixedOffset>) -
     Ok(())
 }
 
+/// A note PLA has never read is extracted only when it changed within this many days: an existing
+/// vault of 10 000 notes was days of model work on the reference machine (M6, owner decision a).
+pub const NEW_NOTE_DAYS: i64 = 30;
+
 /// Queues every user note (first run, or after the app was closed while notes changed), and every
 /// known note that is no longer on disk, so its items get marked (FR-VLT-019).
 pub fn enqueue_all(vault: &Vault, conn: &Connection, now: DateTime<FixedOffset>) -> Result<usize, PipelineError> {
     let mut notes = list_user_notes(vault)?;
     let known: std::collections::HashSet<String> =
         conn.prepare("SELECT DISTINCT note_path FROM block WHERE missing = 0")?.query_map([], |r| r.get(0))?.collect::<Result<_, _>>()?;
+    let since: std::time::SystemTime = (now - chrono::Duration::days(NEW_NOTE_DAYS)).into();
+    let recent = |n: &String| std::fs::metadata(vault.root.join(n)).and_then(|m| m.modified()).is_ok_and(|t| t >= since);
     // A note PLA wrote itself (FR-EXT-001) that never had blocks has nothing to extract: leaving it
     // out keeps "waiting for the model" honest. One that had blocks is still queued, so its items
     // are marked as having lost their source.
-    notes.retain(|n| known.contains(n) || !std::fs::read_to_string(vault.root.join(n)).is_ok_and(|t| is_generated(&t)));
+    notes.retain(|n| known.contains(n) || (recent(n) && !std::fs::read_to_string(vault.root.join(n)).is_ok_and(|t| is_generated(&t))));
     // gone from disk, or no longer the user's (moved into templates/, renamed to a conflict copy)
     notes.extend(known.into_iter().filter(|n| !vault.root.join(n).exists() || is_excluded(n, &vault.config.folders)));
     for note in &notes {
@@ -615,7 +621,9 @@ mod tests {
         let written = std::time::SystemTime::from(DateTime::parse_from_rfc3339("2025-03-01T09:00:00+03:00").unwrap());
         std::fs::File::options().write(true).open(vault.root.join("notes/eski.md")).unwrap().set_modified(written).unwrap();
         let mut x = Scripted::new(&[(DENTIST, DENTIST_JSON)]);
-        run(&vault, &mut conn, &mut x, T1);
+        // copied into the vault while PLA runs: the watcher queues it, old as it is
+        enqueue(&conn, "notes/eski.md", at(T1)).unwrap();
+        process_queue(&vault, &mut conn, &mut x, &PipelineSettings::default(), at(T1)).unwrap();
         assert_eq!(x.calls[0].0, d("2025-03-01"));
     }
     #[test]
@@ -641,7 +649,8 @@ mod tests {
         let old = std::time::SystemTime::from(DateTime::parse_from_rfc3339("2025-03-01T09:00:00+03:00").unwrap());
         std::fs::File::options().write(true).open(vault.root.join("notes/eski.md")).unwrap().set_modified(old).unwrap();
         let mut x = Scripted::new(&[(DENTIST, DENTIST_JSON)]);
-        let report = run(&vault, &mut conn, &mut x, T1);
+        enqueue(&conn, "notes/eski.md", at(T1)).unwrap(); // the watcher's way in (enqueue_all leaves it out)
+        let report = process_queue(&vault, &mut conn, &mut x, &PipelineSettings::default(), at(T1)).unwrap();
         assert!(tasks(&conn).is_empty());
         assert!(matches!(&report.outcomes[..], [(_, Outcome::SkippedPast)]));
     }
@@ -690,5 +699,31 @@ mod tests {
         process_queue_with(&vault, &mut conn, &mut x, &PipelineSettings::default(), at(T1), &mut |note, outcomes| seen.push((note.to_owned(), outcomes.len())))
             .unwrap();
         assert_eq!(seen, vec![("notes/a.md".to_owned(), 1), ("notes/b.md".to_owned(), 1)]);
+    }
+
+    #[test]
+    fn an_old_vault_is_extracted_from_its_last_month_only() {
+        // M6 owner decision a: 10 000 old notes were days of model work on the reference machine
+        let tmp = tempfile::tempdir().unwrap();
+        let vault = open_vault(tmp.path()).unwrap();
+        let mut conn = open_databases(&tmp.path().join(".data")).unwrap().pla;
+        let aged = |rel: &str, days: u64| {
+            write(&vault, rel, DENTIST.as_bytes());
+            let then = std::time::SystemTime::now() - std::time::Duration::from_secs(days * 86_400);
+            std::fs::File::options().write(true).open(vault.root.join(rel)).unwrap().set_modified(then).unwrap();
+        };
+        aged("notes/old.md", 45);
+        aged("notes/recent.md", 10);
+        let now = chrono::Local::now().fixed_offset();
+        assert_eq!(enqueue_all(&vault, &conn, now).unwrap(), 1);
+        assert_eq!(queued_notes(&conn).unwrap(), ["notes/recent.md"]);
+
+        // an old note changed today is new work; an old note PLA read before is checked as always
+        let mut x = Scripted::new(&[(DENTIST, DENTIST_JSON)]);
+        process_queue(&vault, &mut conn, &mut x, &PipelineSettings::default(), now).unwrap();
+        aged("notes/recent.md", 45);
+        aged("notes/old.md", 0);
+        enqueue_all(&vault, &conn, now).unwrap();
+        assert_eq!(queued_notes(&conn).unwrap(), ["notes/old.md", "notes/recent.md"]);
     }
 }

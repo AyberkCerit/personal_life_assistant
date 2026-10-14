@@ -237,6 +237,13 @@ fn with_vault<T>(state: &State<AppState>, f: impl FnOnce(&Vault) -> Result<T, Fi
 
 #[tauri::command]
 pub fn startup(app: AppHandle, state: State<AppState>) -> Result<StartupInfo, String> {
+    begin(&app, &state)
+}
+
+/// Opens the vault of the settings once (the session: worker, scheduler, watcher, reminders) and
+/// says what the page needs. The page calls it; a start in the tray (`--hidden`) calls it at
+/// setup, as no page loads there until the window opens (M6 final review C1).
+pub fn begin(app: &AppHandle, state: &AppState) -> Result<StartupInfo, String> {
     let root = app_root()?;
     let _settings_guard = state.settings_lock.lock().expect("settings lock");
     let loaded = load_settings(&root).map_err(|e| e.to_string())?;
@@ -263,7 +270,7 @@ pub fn startup(app: AppHandle, state: State<AppState>) -> Result<StartupInfo, St
         return Ok(info);
     }
     if let Some(path) = loaded.settings.vault_path.clone() {
-        match start_session(&app, &path, &loaded.settings, Arc::clone(&state.self_writes), state.paused.load(Ordering::SeqCst)) {
+        match start_session(app, &path, &loaded.settings, Arc::clone(&state.self_writes), state.paused.load(Ordering::SeqCst)) {
             Ok(session) => {
                 info.vault_path = Some(session.vault.root.to_string_lossy().into_owned());
                 info.inbox = Some(session.vault.config.folders.inbox.clone());
@@ -604,11 +611,19 @@ pub fn set_paused(app: AppHandle, paused: bool) -> Result<(), String> {
     Ok(())
 }
 
+/// What the tray or a notification asked of the window while it was being made (`tray::to_ui`).
+#[tauri::command]
+pub fn take_ui_events(queue: State<crate::tray::UiQueue>) -> Vec<(String, serde_json::Value)> {
+    queue.take()
+}
+
 /// FR-SCH-001: closing the window keeps PLA in the tray; the first time, say so.
 #[tauri::command]
-pub fn hide_to_tray(window: tauri::WebviewWindow, state: State<AppState>) -> Result<(), String> {
-    window.hide().map_err(|e| e.to_string())?;
-    crate::webview_memory::set_low(&window, true);
+pub fn hide_to_tray(window: tauri::WebviewWindow, state: State<AppState>, queue: State<crate::tray::UiQueue>) -> Result<(), String> {
+    // the WebView goes with the window: in the tray PLA keeps only its core (NFR-PERF-006, M6
+    // decision a); the page saved its note before asking (App.svelte onCloseRequested)
+    queue.not_listening();
+    window.destroy().map_err(|e| e.to_string())?;
     let mut first_time = false;
     update_settings(&app_root()?, &state.settings_lock, |s| {
         first_time = !s.tray_hint_shown;

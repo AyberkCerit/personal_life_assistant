@@ -8,7 +8,7 @@
   import Trash from "@lucide/svelte/icons/trash-2";
   import { api } from "./api";
   import { t, tf, type Key } from "./i18n";
-  import { answerParts, apply, qaError, shown, started, toolLine, type QaEvent, type ShownTurn } from "./qa";
+  import { answerParts, apply, qaError, shown, started, toolLine, warmDue, type QaEvent, type ShownTurn } from "./qa";
   import Button from "./ui/Button.svelte";
   import IconButton from "./ui/IconButton.svelte";
 
@@ -17,15 +17,26 @@
   // an answer goes on, and is seen, while the user looks at the tasks.
   let {
     modelMissing,
+    paused = false,
     onOpenNote,
     onOpenLink,
     onShowModel,
   }: {
     modelMissing: boolean;
+    /** Background AI paused: no read-ahead (and none counted, so it comes once resumed). */
+    paused?: boolean;
     onOpenNote: (path: string) => void;
     onOpenLink: (target: string) => void;
     onShowModel: () => void;
   } = $props();
+
+  // FR-QA-017: the model reads what every question shares while the user types
+  let lastWarm: number | null = null;
+  function warm() {
+    if (modelMissing || paused || !warmDue(lastWarm, Date.now())) return;
+    lastWarm = Date.now();
+    void api.qaWarm().catch(() => {});
+  }
 
   /** Ctrl+K: the question box. */
   export function focus() {
@@ -233,6 +244,8 @@
           placeholder={t("qa.placeholder")}
           aria-label={t("qa.placeholder")}
           onkeydown={keydown}
+          onfocus={warm}
+          oninput={warm}
           disabled={modelMissing}
         ></textarea>
         {#if live}

@@ -2824,8 +2824,6 @@ dependencies = [
  "tauri-plugin-single-instance",
  "tauri-winrt-notification",
  "tempfile",
- "webview2-com",
- "windows-core",
  "windows-sys 0.61.2",
 ]
 

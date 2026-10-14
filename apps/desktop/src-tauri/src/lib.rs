@@ -20,14 +20,15 @@ pub mod system;
 pub mod task_cmds;
 mod tray;
 pub mod watcher;
-mod webview_memory;
 pub mod wizard;
 pub mod worker;
 
 pub fn run() {
     let app = tauri::Builder::default()
         // FR-VLT-020: a second launch (e.g. while PLA sits in the tray) shows the running window.
-        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| tray::show_main(app)))
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            tray::show_main(app);
+        }))
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_autostart::init(tauri_plugin_autostart::MacosLauncher::LaunchAgent, Some(vec!["--hidden"])))
         .setup(|app| {
@@ -37,10 +38,16 @@ pub fn run() {
             }
             tray::build(app.handle())?;
             // FR-SET-016: started by Windows sign-in → stay in the tray.
-            if !std::env::args().any(|a| a == "--hidden") {
+            // started by Windows sign-in: no window and no WebView until it is opened (NFR-PERF-006)
+            if std::env::args().any(|a| a == "--hidden") {
+                // no page loads until the window opens: the session starts here, so reminders,
+                // extraction and the weekly report run from sign-in on
+                use tauri::Manager;
+                if let Err(e) = commands::begin(app.handle(), &app.state::<commands::AppState>()) {
+                    eprintln!("PLA: the vault did not open at sign-in: {e}");
+                }
+            } else {
                 tray::show_main(app.handle());
-            } else if let Some(window) = tauri::Manager::get_webview_window(app, "main") {
-                webview_memory::set_low(&window, true); // in the tray from the start (final review M7)
             }
             Ok(())
         })
@@ -80,6 +87,7 @@ pub fn run() {
             commands::inspect_vault_folder,
             commands::setup_vault,
             commands::set_language,
+            commands::take_ui_events,
             commands::weekly_report_settings,
             commands::set_weekly_report,
             commands::finish_setup,
@@ -100,6 +108,7 @@ pub fn run() {
             media_cmds::image_bytes,
             media_cmds::save_image,
             qa_cmds::qa_ask,
+            qa_cmds::qa_warm,
             qa_cmds::qa_stop,
             qa_cmds::qa_history,
             qa_cmds::qa_clear,
@@ -132,6 +141,15 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building PLA");
     app.run(|handle, event| {
+        // the window is destroyed in the tray (NFR-PERF-006): with no window left Tauri would end
+        // the process; only the tray's Quit (an explicit exit code) ends it. With no vault open
+        // (the first-run wizard) closing the window quits, as before (F4c decision)
+        if let tauri::RunEvent::ExitRequested { code: None, api, .. } = &event {
+            use tauri::Manager;
+            if handle.state::<commands::AppState>().session.lock().expect("session lock").is_some() {
+                api.prevent_exit();
+            }
+        }
         if let tauri::RunEvent::Exit = event {
             // Tauri ends the process without running destructors: stop the worker (and with it the
             // model) explicitly. The job object in pla-core is the backstop for crashes.

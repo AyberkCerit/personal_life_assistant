@@ -172,8 +172,7 @@ pub fn report_ready(app: &AppHandle, vault: &std::path::Path, week: pla_core::re
             .title(s.report_ready)
             .text1(&body)
             .on_activated(move |_| {
-                crate::tray::show_main(&app);
-                let _ = app.emit("open-note", &payload);
+                crate::tray::to_ui(&app, "open-note", payload.clone());
                 Ok(())
             })
             .show();

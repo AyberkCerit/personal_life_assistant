@@ -74,6 +74,7 @@ module.exports = [
     ["FR-QA-014", "U", "The system shall store each Q&A turn (question, answer, tool calls, timestamp) in `pla.db`.", "Y", "T", "E-B3"],
     ["FR-QA-015", "E", "WHEN the user clears the Q&A history, the system shall ask for confirmation and delete all stored turns.", "Y", "T", "E-B3"],
     ["FR-QA-016", "W", "IF a tool call has invalid arguments, THEN the system shall return the validation error to the model once and, if the second call is also invalid, show the error to the user.", "O", "T", "P5.5"],
+    ["FR-QA-017", "E", "WHEN the user moves into or types in the assistant's question field and background AI is not paused, the system shall start the language model and pre-process the part of the prompt shared by every question, at most once every 30 s.", "O", "T", "P5.5"],
   ] },
 
   // ------------------------------------------------------------------ SCH

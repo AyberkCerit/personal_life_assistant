@@ -366,7 +366,7 @@
 
   onMount(() => {
     document.documentElement.lang = lang;
-    void (async () => {
+    const started = (async () => {
       const info = await api.startup();
       if (info.language) switchLanguage(info.language);
       wizard = info.show_wizard;
@@ -399,6 +399,16 @@
       if (vaultPath && note.vault.replace(/[\\/]+$/, "").toLowerCase() === vaultPath.replace(/[\\/]+$/, "").toLowerCase()) void openNote(note.path);
     });
     const unQuick = api.onOpenQuickMetric(() => openQuickMetric());
+    // a window made from the tray or a notification hears now what it was asked for (NFR-PERF-006:
+    // in the tray there is no window, so the asking came before this page)
+    if (inTauri) {
+      void (async () => {
+        // a failed start still listens: the queue is taken either way (M6 final review)
+        await Promise.all([started.catch(() => {}), unNew, unSettings, unOpen, unQuick]);
+        const { emit } = await import("@tauri-apps/api/event");
+        for (const [event, payload] of await api.takeUiEvents()) void emit(event, payload);
+      })();
+    }
     const unAdded = api.onItemsAdded((items) => {
       if (items.some((i) => i.kind === "metric")) metricsVersion++;
     });
@@ -497,7 +507,7 @@
       {#if leftView === "search"}
         <SearchPanel bind:this={searchPanel} {entries} onOpen={(p, line) => void openNote(p, line)} onClose={() => (leftView = "tree")} />
       {:else}
-        <FileTree {entries} selected={center === "editor" ? current : null} {inbox} onOpen={openNote} actions={treeActions} bind:windowOpen={treeDialog} />
+        <FileTree {entries} selected={center === "editor" ? current : null} {inbox} vault={vaultPath ?? ""} onOpen={openNote} actions={treeActions} bind:windowOpen={treeDialog} />
       {/if}
     </aside>
     <section class="main">
@@ -536,6 +546,7 @@
           <AssistantPanel
             bind:this={assistant}
             modelMissing={status.model === "not_installed"}
+            paused={status.paused}
             onOpenNote={(p) => void openNote(p)}
             onOpenLink={(target) => void openCited(target)}
             onShowModel={() => (showModel = true)}

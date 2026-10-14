@@ -1,0 +1,130 @@
+[
+  {
+    "id": "NFR-PERF-011",
+    "what": "first index of 10001 notes (one run)",
+    "value": 164.5846991,
+    "unit": "s",
+    "limit": 300.0,
+    "pass": true
+  },
+  {
+    "id": "NFR-PERF-004",
+    "what": "search, first 20 results",
+    "value": 32.601600000000005,
+    "unit": "ms",
+    "limit": 300.0,
+    "pass": true
+  },
+  {
+    "id": "NFR-PERF-005",
+    "what": "tasks: today",
+    "value": 13.391200000000001,
+    "unit": "ms",
+    "limit": 100.0,
+    "pass": true
+  },
+  {
+    "id": "NFR-PERF-005",
+    "what": "tasks: upcoming",
+    "value": 2.7075,
+    "unit": "ms",
+    "limit": 100.0,
+    "pass": true
+  },
+  {
+    "id": "NFR-PERF-005",
+    "what": "tasks: completed",
+    "value": 2.5789,
+    "unit": "ms",
+    "limit": 100.0,
+    "pass": true
+  },
+  {
+    "id": "NFR-PERF-005",
+    "what": "measurements: overview",
+    "value": 1.3504999999999998,
+    "unit": "ms",
+    "limit": 100.0,
+    "pass": true
+  },
+  {
+    "id": "NFR-PERF-005",
+    "what": "measurements: sleep, 90 days",
+    "value": 2.0371,
+    "unit": "ms",
+    "limit": 100.0,
+    "pass": true
+  },
+  {
+    "id": "NFR-PERF-005",
+    "what": "measurements: steps, 365 days",
+    "value": 10.917100000000001,
+    "unit": "ms",
+    "limit": 100.0,
+    "pass": true
+  },
+  {
+    "id": "NFR-PERF-005",
+    "what": "weekly report numbers",
+    "value": 8.216899999999999,
+    "unit": "ms",
+    "limit": 100.0,
+    "pass": true
+  },
+  {
+    "id": "NFR-PERF-012",
+    "what": "model threads of 16 logical cores (indexer: 1)",
+    "value": 4.0,
+    "unit": "cores",
+    "limit": 15.0,
+    "pass": true
+  },
+  {
+    "id": "NFR-PERF-008",
+    "what": "model load to healthy (5 runs)",
+    "value": 2.5554491,
+    "unit": "s",
+    "limit": 5.0,
+    "pass": true
+  },
+  {
+    "id": "NFR-PERF-009",
+    "what": "extraction of a 10-block note, 3 threads (5 runs)",
+    "value": 46.5306204,
+    "unit": "s",
+    "limit": 60.0,
+    "pass": true
+  },
+  {
+    "id": "—",
+    "what": "read-ahead when the panel opens, model not loaded, 3 threads (10 runs)",
+    "value": 37.1493342,
+    "unit": "s",
+    "limit": null,
+    "pass": true
+  },
+  {
+    "id": "NFR-PERF-010",
+    "what": "first answer token after the read-ahead, no tool (4 runs)",
+    "value": 41.9717085,
+    "unit": "s",
+    "limit": 45.0,
+    "pass": true
+  },
+  {
+    "id": "NFR-PERF-010",
+    "what": "first answer token after the read-ahead, a tool (6 runs)",
+    "value": 64.0367394,
+    "unit": "s",
+    "limit": 70.0,
+    "pass": true
+  },
+  {
+    "id": "—",
+    "what": "first answer token with no read-ahead, model not loaded (one run)",
+    "value": 86.6669419,
+    "unit": "s",
+    "limit": null,
+    "pass": true
+  }
+]

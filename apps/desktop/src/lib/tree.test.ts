@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { followMove, moveTargets, parentOf, treeError } from "./tree";
+import { ancestors, followMove, moveTargets, openAfterMove, parentOf, treeError, visibleEntries } from "./tree";
+import type { TreeEntry } from "./api";
 
 describe("tree helpers", () => {
   it("reads the tree commands' error codes", () => {
@@ -32,5 +33,28 @@ describe("tree helpers", () => {
     ];
     expect(moveTargets(entries, "notes/a.md")).toEqual(["", "inbox", "notes/proje", "notes/proje/alt"]); // not where it already is
     expect(moveTargets(entries, "notes/proje")).toEqual(["", "inbox"]); // not into itself, not where it is
+  });
+
+  // M6 performance: 10 000 notes as one always-open list were 90 000 DOM nodes and 850 MB
+  const dir = (path: string, depth: number): TreeEntry => ({ path, name: path.split("/").pop()!, is_dir: true, depth });
+  const note = (path: string, depth: number): TreeEntry => ({ path, name: path.split("/").pop()!, is_dir: false, depth });
+  const vault = [dir("daily", 0), dir("daily/2026", 1), note("daily/2026/a.md", 2), note("daily/b.md", 1), dir("notes", 0), note("notes/c.md", 1), note("kök.md", 0)];
+
+  it("shows a folder's contents only when it and every folder above it are open", () => {
+    const paths = (open: string[]) => visibleEntries(vault, new Set(open)).map((e) => e.path);
+    expect(paths([])).toEqual(["daily", "notes", "kök.md"]);
+    expect(paths(["daily"])).toEqual(["daily", "daily/2026", "daily/b.md", "notes", "kök.md"]);
+    expect(paths(["daily/2026"])).toEqual(["daily", "notes", "kök.md"]); // a closed parent hides an open child
+    expect(paths(["daily", "daily/2026", "notes"])).toEqual(vault.map((e) => e.path));
+  });
+
+  it("names the folders above a path", () => {
+    expect(ancestors("daily/2026/a.md")).toEqual(["daily", "daily/2026"]);
+    expect(ancestors("kök.md")).toEqual([]);
+  });
+
+  it("keeps a renamed or moved folder open, with the folders inside it", () => {
+    const open = new Set(["proje", "proje/eski", "notes"]);
+    expect([...openAfterMove(open, "proje", "arşiv/proje")].sort()).toEqual(["arşiv/proje", "arşiv/proje/eski", "notes"]);
   });
 });

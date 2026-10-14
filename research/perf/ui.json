@@ -1,0 +1,58 @@
+[
+  {
+    "id": "NFR-PERF-001",
+    "what": "cold start to an editable note",
+    "value": 1722.9962999990676,
+    "unit": "ms",
+    "limit": 3000,
+    "pass": true
+  },
+  {
+    "id": "NFR-PERF-002",
+    "what": "open a 1 MB note",
+    "value": 71.69999998807907,
+    "unit": "ms",
+    "limit": 200,
+    "pass": true
+  },
+  {
+    "id": "NFR-PERF-003",
+    "what": "keystroke to frame while the model answers (177 keys, worst 46 ms; model idle: p95 7 ms)",
+    "value": 7.700000002980232,
+    "unit": "ms",
+    "limit": 16,
+    "pass": true
+  },
+  {
+    "id": "NFR-PERF-007",
+    "what": "language model while answering (private; working set 1711 MB)",
+    "value": 664.0,
+    "unit": "MB",
+    "limit": 2048,
+    "pass": true
+  },
+  {
+    "id": "NFR-PERF-006",
+    "what": "idle, window open (msedgewebview2=346/500 pla-desktop=27/52; working set 552 MB)",
+    "value": 374.0,
+    "unit": "MB",
+    "limit": 150,
+    "pass": false
+  },
+  {
+    "id": "NFR-PERF-006",
+    "what": "idle, in the tray (pla-desktop=27/52; working set 52 MB)",
+    "value": 27.0,
+    "unit": "MB",
+    "limit": 150,
+    "pass": true
+  },
+  {
+    "id": "—",
+    "what": "open the window from the tray (5 runs)",
+    "value": 641.1730999971041,
+    "unit": "ms",
+    "limit": 3000,
+    "pass": true
+  }
+]

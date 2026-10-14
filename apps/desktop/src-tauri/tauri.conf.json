@@ -11,7 +11,7 @@
   },
   "app": {
     "windows": [
-      { "label": "main", "title": "PLA", "width": 1280, "height": 720, "minWidth": 1024, "minHeight": 600, "center": true, "visible": false, "dragDropEnabled": false }
+      { "label": "main", "title": "PLA", "width": 1280, "height": 720, "minWidth": 1024, "minHeight": 600, "center": true, "visible": false, "dragDropEnabled": false, "create": false }
     ],
     "security": {
       "csp": "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:"

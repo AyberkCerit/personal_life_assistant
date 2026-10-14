@@ -148,6 +148,7 @@ export const api = {
   finishSetup: () => call<void>("finish_setup"),
   /** FR-QA-003: starts an answer; its progress comes as `qa-event`s with the returned turn id. */
   qaAsk: (question: string, newTopic: boolean) => call<string>("qa_ask", { question, newTopic }),
+  qaWarm: () => call<void>("qa_warm"),
   qaStop: () => call<void>("qa_stop"),
   qaHistory: () => call<QaTurn[]>("qa_history"),
   qaClear: () => call<void>("qa_clear"),
@@ -253,6 +254,8 @@ export const api = {
   onModelChanged: (cb: (m: InstalledModel) => void) => on<InstalledModel>("model-changed", cb),
   dismissMissed: () => call<void>("dismiss_missed"),
   hideToTray: () => call<void>("hide_to_tray"),
+  /** What the tray or a notification asked while this window was being made (it hears them now). */
+  takeUiEvents: () => call<[string, unknown][]>("take_ui_events"),
   onReminderDue: (cb: (r: DueReminder) => void) => on<DueReminder>("reminder-due", cb),
   onMissedReminders: (cb: (list: DueReminder[]) => void) => on<DueReminder[]>("missed-reminders", cb),
   onTasksChanged: (cb: () => void) => on<unknown>("tasks-changed", () => cb()),

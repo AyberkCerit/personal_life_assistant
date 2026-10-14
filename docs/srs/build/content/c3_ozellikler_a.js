@@ -111,7 +111,7 @@ module.exports = [
     ["FR-EDT-001", "U", "The system shall provide a Markdown editor with syntax highlighting and inline rendering of headings, emphasis, lists, links and code blocks.", "Y", "G", "P5.1"],
     ["FR-EDT-002", "U", "The editor shall support undo and redo of at least 100 steps per open note.", "Y", "T", "P5.1"],
     ["FR-EDT-003", "E", "WHEN the user stops typing for 2 seconds or the note loses focus, the system shall save the note.", "Y", "T", "E-D10"],
-    ["FR-EDT-004", "U", "The system shall show a folder tree of the vault with create, rename, move and delete actions.", "Y", "G", "P5.1"],
+    ["FR-EDT-004", "U", "The system shall show a folder tree of the vault with create, rename, move and delete actions; folders shall expand and collapse, start collapsed, open to show the open note, and keep their state per vault.", "Y", "G", "P5.1"],
     ["FR-EDT-005", "E", "WHEN the user presses Ctrl+O, the system shall open a quick switcher that fuzzy-searches note titles and aliases.", "Y", "T", "P5.1"],
     ["FR-EDT-006", "U", "The system shall parse YAML frontmatter and display `tags` and `aliases` separately from the note body.", "Y", "T", "P5.1"],
     ["FR-EDT-007", "W", "IF the frontmatter is not valid YAML, THEN the system shall keep it unchanged, show a warning marker and treat the note as having no frontmatter.", "Y", "T", "P5.1"],
