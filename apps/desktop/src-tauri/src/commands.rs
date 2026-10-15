@@ -112,7 +112,7 @@ pub enum SaveResult {
 }
 
 pub(crate) fn app_root() -> Result<PathBuf, String> {
-    default_app_root().ok_or_else(|| "APPDATA is not set; PLA cannot store its data.".to_owned())
+    default_app_root().ok_or_else(|| ue(crate::errors::UserError::new("no_app_data", "")))
 }
 
 /// The llama-server shipped next to PLA (tauri.conf.json resources), if present.
@@ -331,7 +331,7 @@ fn open_vault_locked(app: &AppHandle, state: &State<AppState>, path: &Path) -> R
     remembered.vault_path = Some(session.vault.root.clone());
     if let Err(e) = save_settings(&root, &remembered) {
         drop(session); // stop it before the old one opens again
-        return Err(restore(e.to_string()));
+        return Err(restore(crate::errors::ue(e)));
     }
     *state.session.lock().expect("session lock") = Some(session); // drops (and stops) the previous one
     Ok(opened)

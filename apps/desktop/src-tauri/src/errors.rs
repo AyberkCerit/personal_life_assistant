@@ -256,11 +256,22 @@ mod tests {
             ("summary_cmds.rs", include_str!("summary_cmds.rs")),
             ("task_cmds.rs", include_str!("task_cmds.rs")),
             ("tray.rs", include_str!("tray.rs")),
+            ("wizard.rs", include_str!("wizard.rs")),
+            ("worker.rs", include_str!("worker.rs")),
+            ("scheduler.rs", include_str!("scheduler.rs")),
+            ("notify.rs", include_str!("notify.rs")),
         ];
         for (name, src) in sources {
             let code = src.split("#[cfg(test)]").next().unwrap();
-            for bad in ["map_err(|e| e.to_string())", "ok_or(\"No vault", "ok_or(\"LOCALAPPDATA", "Err(format!(\"the Recycle", "Err(format!(\"no Recycle", "format!(\"io||"] {
+            for bad in ["map_err(|e| e.to_string())", "format!(\"io||"] {
                 assert!(!code.contains(bad), "{name} still sends `{bad}`");
+            }
+            // a sentence where an error is made: `Err("A…`, `ok_or("A…`, `ok_or_else(|| "A…`
+            for opener in ["Err(\"", "Err(format!(\"", "ok_or(\"", "ok_or_else(|| \""] {
+                for (at, _) in code.match_indices(opener) {
+                    let first = code[at + opener.len()..].chars().next().unwrap_or(' ');
+                    assert!(!first.is_uppercase(), "{name} sends a sentence: {}", &code[at..(at + 70).min(code.len())]);
+                }
             }
         }
     }

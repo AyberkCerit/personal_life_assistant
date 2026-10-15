@@ -16,6 +16,10 @@ const OWN_CODES = ["not_removed", "not_found", "model_busy", "invalid_setting", 
 /** Reads the commands' `<code>|<path>|<reason>` errors; folder errors share the wizard's texts. */
 export function settingsError(err: string): { key: Key; path: string; reason: string; reasonKey?: Key } {
   const [code, path = "", ...rest] = err.split("|");
+  // `missing` names a folder of its own; with none it is the general "not found" (M6 final review)
+  if (code === "missing" && !path) return { key: "settings.error.other", path: "", reason: err };
+  // the previous vault's own failure is a code too: said, not shown raw (M6 final review)
+  if (code === "vault_lost") return { key: "settings.error.vault_lost", path, reason: errorText(rest.join("|")).text };
   if (OWN_CODES.includes(code)) {
     const parsed = setupError(`not_writable|${path}|${rest.join("|")}`);
     return { ...parsed, key: `settings.error.${code}` as Key };

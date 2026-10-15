@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { t } from "./i18n";
 import { answerParts, apply, qaError, started, toolLine, warmDue, type ToolRecord } from "./qa";
 
 const added: ToolRecord = {
@@ -42,6 +43,10 @@ describe("assistant panel helpers", () => {
   it("says what each tool did", () => {
     expect(toolLine(added)).toEqual({ key: "qa.tool.reminder", values: { title: "Doktor randevusu", when: "2026-10-07 10:00" } });
     expect(toolLine({ ...added, ok: false, error: "a time needs a date" }).key).toBe("qa.tool.failed");
+    // M6 final review: the tool's own English check and its internal name stay out of the line
+    const refused = toolLine({ ...added, ok: false, error: "a time needs a date" });
+    expect(Object.values(refused.values).join(" ")).not.toContain("a time needs a date");
+    expect(refused.values.tool).toBe(t("qa.toolName.add_task"));
     // the owner's decision a: a note is offered, and written only on Save
     const offer = { tool: "suggest_note", args: {}, ok: true, result: { suggested: true, title: "Ders notu", body: "x" }, error: null, undo: null };
     expect(toolLine(offer)).toEqual({ key: "qa.tool.suggest", values: { title: "Ders notu" } });

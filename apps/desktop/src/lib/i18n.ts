@@ -35,13 +35,13 @@ const dict = {
     "error.network": "Ağ klasörleri desteklenmiyor ({detail}).",
     "error.bad_config": "Kasanın PLA ayar dosyası okunamadı.",
     "error.no_vault": "Açık bir kasa yok.",
-    "error.no_app_data": "Windows'un uygulama veri klasörü bulunamadı; model kaydedilemiyor.",
+    "error.no_app_data": "Windows'un uygulama veri klasörü bulunamadı; PLA verilerini kaydedemiyor.",
     "error.recycle_bin": "Geri Dönüşüm Kutusu'na taşınamadı ({detail}).",
     "error.model_server_missing": "Yapay zekâ sunucusu bulunamadı; PLA'yı yeniden kur ({detail}).",
     "error.model_file_missing": "Model dosyası bulunamadı; modeli Ayarlar > Yapay zekâ'dan yeniden indir ({detail}).",
     "error.model_start": "Yapay zekâ modeli başlatılamadı.",
     "error.model_timeout": "Yapay zekâ modeli zamanında cevap vermedi.",
-    "error.model": "Yapay zekâ modeli bir hata verdi; iş daha sonra yeniden denenecek.",
+    "error.model": "Yapay zekâ modeli bir hata verdi.",
     "error.unexpected": "Beklenmeyen bir hata oldu. Ayrıntıları kopyalayıp bildirebilirsin.",
     "error.copyDetails": "Ayrıntıları kopyala",
     "error.copied": "Kopyalandı",
@@ -239,7 +239,15 @@ const dict = {
     "qa.tool.searched": "Notlarda arandı: “{query}” ({n} sonuç)",
     "qa.tool.tasks": "Görevlere bakıldı ({n})",
     "qa.tool.metrics": "Ölçümlere bakıldı: {kind}, {days} gün",
-    "qa.tool.failed": "{tool} yapılamadı: {reason}",
+    "qa.tool.failed": "{tool} yapılamadı.",
+    "qa.toolName.add_task": "Görev ekleme",
+    "qa.toolName.complete_task": "Görevi tamamlama",
+    "qa.toolName.log_metric": "Ölçüm kaydetme",
+    "qa.toolName.create_note": "Not oluşturma",
+    "qa.toolName.suggest_note": "Not önerme",
+    "qa.toolName.search_notes": "Notlarda arama",
+    "qa.toolName.query_tasks": "Görev sorgulama",
+    "qa.toolName.query_metrics": "Ölçüm sorgulama",
     "qa.error.no_model": "Asistan için dil modeli gerekiyor; kurulu değil.",
     "qa.error.busy": "Önceki soru hâlâ cevaplanıyor.",
     "qa.error.no_vault": "Önce bir kasa aç.",
@@ -477,13 +485,13 @@ const dict = {
     "error.network": "Network folders are not supported ({detail}).",
     "error.bad_config": "The vault's PLA settings file could not be read.",
     "error.no_vault": "No vault is open.",
-    "error.no_app_data": "Windows' app data folder was not found; the model cannot be stored.",
+    "error.no_app_data": "Windows' app data folder was not found; PLA cannot store its data.",
     "error.recycle_bin": "Could not move it to the Recycle Bin ({detail}).",
     "error.model_server_missing": "The AI server was not found; reinstall PLA ({detail}).",
     "error.model_file_missing": "The model file was not found; download it again in Settings > AI ({detail}).",
     "error.model_start": "The AI model could not start.",
     "error.model_timeout": "The AI model did not answer in time.",
-    "error.model": "The AI model failed; the work will be tried again later.",
+    "error.model": "The AI model failed.",
     "error.unexpected": "Something unexpected went wrong. You can copy the details and report it.",
     "error.copyDetails": "Copy details",
     "error.copied": "Copied",
@@ -681,7 +689,15 @@ const dict = {
     "qa.tool.searched": "Searched the notes: “{query}” ({n} results)",
     "qa.tool.tasks": "Looked at the tasks ({n})",
     "qa.tool.metrics": "Looked at the measurements: {kind}, {days} days",
-    "qa.tool.failed": "{tool} could not be done: {reason}",
+    "qa.tool.failed": "{tool} did not work.",
+    "qa.toolName.add_task": "Adding a task",
+    "qa.toolName.complete_task": "Completing a task",
+    "qa.toolName.log_metric": "Logging a measurement",
+    "qa.toolName.create_note": "Creating a note",
+    "qa.toolName.suggest_note": "Suggesting a note",
+    "qa.toolName.search_notes": "Searching the notes",
+    "qa.toolName.query_tasks": "Looking up tasks",
+    "qa.toolName.query_metrics": "Looking up measurements",
     "qa.error.no_model": "The assistant needs a language model; none is installed.",
     "qa.error.busy": "The previous question is still being answered.",
     "qa.error.no_vault": "Open a vault first.",
@@ -907,16 +923,27 @@ export function lookup(key: string): string | null {
   const here = (dict[lang] as Record<string, string>)[key];
   if (here !== undefined) return here;
   const english = (dict.en as Record<string, string>)[key];
-  console.warn(`PLA: no ${lang} text for ${key}`);
+  console.warn(english === undefined ? `PLA: no text for ${key}` : `PLA: no ${lang} text for ${key}, English shown`);
   return english ?? null;
 }
 
 /** What a failure says, and what "Copy details" copies (empty: nothing to copy). */
-export interface Failure { text: string; details: string }
+export interface Failure {
+  text: string;
+  details: string;
+  /** What the command sent, to say it again in another language (FR-SET-012). */
+  raw?: string;
+  area?: string;
+}
 
 /** A failure as plain text, where there is no room for "Copy details". */
 export function say(e: string | Failure): string {
   return typeof e === "string" ? e : e.text;
+}
+
+/** A message said earlier, in the language chosen now (FR-SET-012: a switch applies at once). */
+export function sayAgain<T extends string | Failure | null>(e: T): T | Failure {
+  return e !== null && typeof e !== "string" && e.raw !== undefined ? errorText(e.raw, e.area) : e;
 }
 
 /** A caught error, said in the chosen language (`errorText` on its text). */
@@ -931,9 +958,10 @@ export function errorText(raw: string, area?: string): Failure {
   const [code, detail = "", ...rest] = raw.split("|");
   const has = (key: string) => (dict[lang] as Record<string, string>)[key] !== undefined || (dict.en as Record<string, string>)[key] !== undefined;
   const key = [area && `${area}.error.${code}`, `error.${code}`].find((k): k is string => !!k && /^[a-z_.]+$/.test(k) && has(k));
-  if (!key || !raw.includes("|")) return { text: t("error.unexpected"), details: raw };
+  // a plain sentence (or an unknown code) is not ours to say: shown as unexpected, copied whole
+  if (!key) return { text: t("error.unexpected"), details: raw, raw, area };
   const text = (lookup(key) ?? "").replace(/\{(\w+)\}/g, (_, k: string) => (k === "detail" || k === "path" || k === "name" ? detail : ""));
-  return { text: text.replace(/\s*\(\)/g, ""), details: rest.join("|") };
+  return { text: text.replace(/\s*\(\)/g, ""), details: rest.join("|"), raw, area };
 }
 
 /** `t` with `{name}` placeholders filled. */

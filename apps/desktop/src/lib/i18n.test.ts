@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { errorText, lookup, setLang } from "./i18n";
+import { errorText, lookup, sayAgain, setLang } from "./i18n";
 
 // M6 translations (FR-I18N-001/002/007): a command's `code|detail|reason` said in the chosen language
 describe("errorText", () => {
@@ -52,5 +52,21 @@ describe("errorText detail", () => {
     setLang("tr");
     expect(errorText("missing|C:/Notlar|os error 2").text).toContain("(C:/Notlar)");
     expect(errorText("missing||os error 2").text).not.toContain("()");
+  });
+});
+
+describe("final review (M6 translations)", () => {
+  it("knows an area's code that has no detail and no pipe", () => {
+    setLang("tr");
+    expect(errorText("not_found", "metrics").text).toBe(lookup("metrics.error.not_found"));
+  });
+
+  it("says an open message again in the new language", () => {
+    setLang("tr");
+    const tr = errorText("disk_full||x");
+    setLang("en");
+    expect(sayAgain(tr)).toEqual(errorText("disk_full||x"));
+    expect(sayAgain("already said")).toBe("already said");
+    setLang("tr");
   });
 });

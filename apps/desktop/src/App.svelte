@@ -38,7 +38,7 @@
   import type { MetricRecord } from "./lib/api";
   import { describeError, type Section } from "./lib/settings";
   import type { Progress } from "./lib/wizard";
-  import { failure, t, tf, lang, setLang, type Failure, type Lang } from "./lib/i18n";
+  import { failure, sayAgain, t, tf, lang, setLang, type Failure, type Lang } from "./lib/i18n";
   import ErrorBanner from "./lib/ui/ErrorBanner.svelte";
   import type { VaultInfo } from "./lib/api";
 
@@ -109,6 +109,7 @@
   function switchLanguage(l: Lang) {
     setLang(l);
     uiLang = l;
+    error = sayAgain(error); // the banner lives outside the re-keyed views (FR-SET-012)
   }
 
   function anyWindowOpen() {

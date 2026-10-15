@@ -146,12 +146,12 @@ pub fn strings() -> &'static Strings {
     pick(UI_LANG.load(Ordering::SeqCst), os_turkish())
 }
 
-/// The language PLA speaks, `tr` or `en`, as `strings` picks it (the assistant's fallback).
 /// The interface language for the texts PLA writes itself (reports, summaries).
 pub fn ui_language() -> pla_core::lang::Lang {
     pla_core::lang::Lang::from_code(ui_lang())
 }
 
+/// The language PLA speaks, `tr` or `en`, as `strings` picks it (the assistant's fallback).
 pub fn ui_lang() -> &'static str {
     // not by comparing `strings()` with `&TR`: references to a const need not share an address
     lang_code(UI_LANG.load(Ordering::SeqCst), os_turkish())

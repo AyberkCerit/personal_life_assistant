@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { fold, frontmatterLines, ImageCache, imageEmbeds, isImageFile, mediaError } from "./media";
+import { errorText } from "./i18n";
 
 describe("media helpers", () => {
   it("finds the frontmatter block only when it closes", () => {
@@ -32,7 +33,9 @@ describe("media helpers", () => {
   it("reads save errors", () => {
     expect(mediaError("too_big|20|")).toEqual({ key: "image.error.too_big", reason: "" });
     expect(mediaError("not_image||")).toEqual({ key: "image.error.not_image", reason: "" });
-    expect(mediaError("io||disk dolu")).toEqual({ key: "image.error.io", reason: "disk dolu" });
+    // M6 final review: the reason is the general message, never the raw code or English text
+    expect(mediaError("io||disk dolu")).toEqual({ key: "image.error.io", reason: errorText("io||").text });
+    expect(mediaError("permission||Access is denied.")).toEqual({ key: "image.error.io", reason: errorText("permission||").text });
   });
 
   it("fetches each image once and forgets the missing ones", async () => {

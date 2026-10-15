@@ -753,7 +753,7 @@ impl Worker {
         };
         let cache = match pla_core::db::connect(&cache_path) {
             Ok(c) => c,
-            Err(e) => return fail("db", e.to_string()),
+            Err(e) => return fail("db", ue(e)),
         };
         let turns = qa::follow_up(&self.conn, new_topic).unwrap_or_default();
         // FR-MEM-003: chunks still waiting are embedded first, at most 10 s (the rest later), then
@@ -806,8 +806,9 @@ impl Worker {
         let (saved, sources, failure) = match result {
             Ok(a) => (turn(a.text, a.tools, "done"), a.sources, None),
             Err(QaError::Stopped { partial, tools }) => (turn(partial, tools, "stopped"), Vec::new(), None),
-            Err(QaError::Model { error, tools }) => (turn(String::new(), tools, "failed"), Vec::new(), Some(("model", error.to_string()))),
-            Err(QaError::Db(e)) => (turn(String::new(), Vec::new(), "failed"), Vec::new(), Some(("db", e.to_string()))),
+            // the reason as a code too: the panel says it (M6 final review)
+            Err(QaError::Model { error, tools }) => (turn(String::new(), tools, "failed"), Vec::new(), Some(("model", ue(error)))),
+            Err(QaError::Db(e)) => (turn(String::new(), Vec::new(), "failed"), Vec::new(), Some(("db", ue(e)))),
         };
         let _ = qa::save_turn(&self.conn, &saved); // FR-QA-014, also a stopped or failed one
         match failure {
@@ -1141,7 +1142,6 @@ mod tests {
         handle.shutdown();
     }
 
-    /// A model that is there but does not answer (llama-server would not start).
     /// A model server that died.
     struct Silent;
     impl Extractor for Silent {
@@ -1159,6 +1159,7 @@ mod tests {
         assert!(error.starts_with("model|"), "{error}");
     }
 
+    /// A model that is there but does not answer (llama-server would not start).
     struct Down;
     impl Extractor for Down {
         fn extract_raw(&mut self, _: NaiveDate, _: &str) -> Result<String, LlmError> {
@@ -1175,6 +1176,16 @@ mod tests {
         fn stream(&mut self, _: &serde_json::Value, _: &AtomicBool, _: &mut dyn FnMut(&str)) -> Result<String, LlmError> {
             Err(LlmError::Http("connection refused".into()))
         }
+    }
+
+    #[test]
+    fn a_failed_answer_carries_a_code_not_an_english_sentence() {
+        // M6 final review: "request to llama-server failed: connection refused" reached the panel
+        let (_tmp, handle, _statuses, data) = setup(Some(Box::new(Down)));
+        let events = until_end(&ask(&handle, &data, "Bu hafta ne yaptım?"));
+        let Some(QaEvent::Failed { code, detail, .. }) = events.last() else { panic!("{events:?}") };
+        assert_eq!(code, "model");
+        assert!(detail.starts_with("model|"), "{detail}");
     }
 
     #[test]

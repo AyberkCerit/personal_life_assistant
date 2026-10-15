@@ -6,7 +6,7 @@
   import Pause from "@lucide/svelte/icons/pause";
   import Play from "@lucide/svelte/icons/play";
   import { api, inTauri, type DownloadState, type ModelStatus } from "./api";
-  import { lang, say, t, type Key } from "./i18n";
+  import { failure, lang, say, t, type Key } from "./i18n";
   import { failureKey, formatBytes, progressLine } from "./modelText";
   import { describeError } from "./settings";
   import Button from "./ui/Button.svelte";
@@ -50,9 +50,9 @@
       await api.modelUseLocal(picked);
       onDone();
     } catch (e) {
-      const text = String(e);
-      const code = text.includes("not_found") ? "not_found" : text.includes("incomplete") ? "incomplete" : "not_gguf";
-      localError = t(`model.error.${code}` as Key);
+      // its own codes say what is wrong with the file; anything else (saving the choice) is general
+      const code = ["not_found", "incomplete", "not_gguf"].find((c) => String(e).startsWith(c));
+      localError = code ? t(`model.error.${code}` as Key) : say(failure(e));
     }
   }
 
