@@ -11,6 +11,7 @@ use tauri::{AppHandle, Emitter, State};
 
 use crate::commands::{AppState, NO_VAULT};
 use crate::scheduler::PendingLists;
+use crate::errors::ue;
 
 /// A task error as a code the UI turns into a sentence in its language (architecture review A2).
 pub fn task_code(e: tasks::TaskError) -> String {
@@ -21,7 +22,7 @@ pub fn task_code(e: tasks::TaskError) -> String {
         TaskError::BadTime(t) => format!("bad_time|{t}|"),
         TaskError::NotFound => "not_found||".into(),
         TaskError::NotAnAction => "not_an_action||".into(),
-        TaskError::Db(e) => format!("io||{e}"),
+        TaskError::Db(e) => ue(e),
     }
 }
 
@@ -143,7 +144,8 @@ mod tests {
         assert_eq!(task_code(TaskError::BadTime("25:00".into())), "bad_time|25:00|");
         assert_eq!(task_code(TaskError::NotFound), "not_found||");
         assert_eq!(task_code(TaskError::NotAnAction), "not_an_action||");
-        assert!(task_code(TaskError::Db(rusqlite::Error::InvalidQuery)).starts_with("io||"));
+        // a database failure is a general one, said by `error.db` (M6 translations)
+        assert!(task_code(TaskError::Db(rusqlite::Error::InvalidQuery)).starts_with("db||"));
         assert_eq!(NO_VAULT, "no_vault||", "one spelling in every command module");
     }
 }

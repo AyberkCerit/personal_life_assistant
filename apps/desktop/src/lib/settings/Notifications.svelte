@@ -1,20 +1,20 @@
 <script lang="ts">
+  import type { Failure } from "../i18n";
+  import ErrorBanner from "../ui/ErrorBanner.svelte";
   import { onMount } from "svelte";
   import Bell from "@lucide/svelte/icons/bell";
   import BellOff from "@lucide/svelte/icons/bell-off";
-  import CircleAlert from "@lucide/svelte/icons/circle-alert";
   import ExternalLink from "@lucide/svelte/icons/external-link";
   import { api } from "../api";
   import { t } from "../i18n";
   import { describeError } from "../settings";
-  import Banner from "../ui/Banner.svelte";
   import Button from "../ui/Button.svelte";
   import Icon from "../ui/Icon.svelte";
 
   // FR-TSK-015: say when Windows hides PLA's notifications, and where to turn them on.
   let on = $state<boolean | null>(null);
   let sent = $state(false);
-  let error = $state<string | null>(null);
+  let error = $state<string | Failure | null>(null);
 
   async function act(action: () => Promise<void>) {
     error = null;
@@ -41,7 +41,7 @@
   <Button onclick={() => void act(async () => { await api.sendTestNotification(); sent = true; })}>{t("settings.notify.test")}</Button>
 </div>
 {#if sent}<p class="hint" role="status">{t("settings.notify.sent")}</p>{/if}
-{#if error}<Banner kind="danger" icon={CircleAlert} role="alert">{error}</Banner>{/if}
+{#if error}<ErrorBanner {error} />{/if}
 
 <style>
   .state { display: flex; gap: var(--space-2); align-items: flex-start; margin: var(--space-2) 0 var(--space-3); font-size: var(--text-md); }

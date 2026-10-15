@@ -8,6 +8,7 @@ use rusqlite::Connection;
 use tauri::{AppHandle, Emitter, State};
 
 use crate::commands::AppState;
+use crate::errors::ue;
 
 /// The periods the detail view offers (FR-MET-009); anything else is refused.
 pub fn period(days: i64) -> Result<i64, String> {
@@ -26,7 +27,16 @@ fn with_db<T>(state: &State<AppState>, f: impl FnOnce(&Connection) -> Result<T, 
     let guard = state.session.lock().expect("session lock");
     let session = guard.as_ref().ok_or(crate::commands::NO_VAULT)?;
     let db = session.db.lock().expect("db lock");
-    f(&db).map_err(|e| e.to_string())
+    f(&db).map_err(metric_code)
+}
+
+/// The measurements screen reads these codes itself (`metrics.error.<code>`, metrics.ts); a
+/// database failure is a general one.
+fn metric_code(e: MetricError) -> String {
+    match e {
+        MetricError::Db(e) => ue(e),
+        other => other.to_string(),
+    }
 }
 
 fn changed(app: &AppHandle) {

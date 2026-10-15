@@ -8,6 +8,7 @@ pub mod files;
 pub mod fs_atomic;
 pub mod index;
 pub mod jobs;
+pub mod lang;
 pub mod llm;
 pub mod markdown;
 pub mod media;

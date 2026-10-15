@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { failure, type Failure } from "./i18n";
+  import ErrorBanner from "./ui/ErrorBanner.svelte";
   import { onMount } from "svelte";
   import CircleAlert from "@lucide/svelte/icons/circle-alert";
   import Lock from "@lucide/svelte/icons/lock";
@@ -101,12 +103,12 @@
   let destroyed = false;
   let readOnly = $state(false);
   let problem = $state<"conflict" | "missing" | null>(null);
-  let error = $state<string | null>(null);
+  let error = $state<string | Failure | null>(null);
   let imageError = $state<string | null>(null);
 
   function sync() {
     problem = doc?.problem ?? null;
-    error = doc?.error ?? null;
+    error = doc?.error ? failure(doc.error) : null; // the save model keeps the raw code; it is said here
   }
 
   async function load(): Promise<void> {
@@ -192,12 +194,12 @@
       if (copy) onSavedCopy(copy);
       if (problem === "conflict") await load();
     } catch (e) {
-      error = String(e);
+      error = failure(e);
     }
   }
 
   onMount(() => {
-    load().catch((e) => (error = String(e)));
+    load().catch((e) => (error = failure(e)));
     const unChanged = api.onNoteChanged((changed) => {
       if (changed !== path || !doc) return;
       if (doc.externalChange() === "reload") void load(); // clean: show the outside version at once
@@ -229,7 +231,7 @@
     {/snippet}
   </Banner>
 {/if}
-{#if error}<Banner kind="danger" icon={CircleAlert} role="alert">{t("error.generic")}: {error}</Banner>{/if}
+{#if error}<ErrorBanner {error} />{/if}
 {#if imageError}
   <Banner kind="warning" icon={CircleAlert} role="alert">
     {imageError}

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { failure, say, type Failure } from "./i18n";
   import { onMount } from "svelte";
   import CalendarDays from "@lucide/svelte/icons/calendar-days";
   import FileText from "@lucide/svelte/icons/file-text";
@@ -14,7 +15,7 @@
   let day = $state<DayInfo | null>(null);
   const summary = $derived(day?.summary ?? null);
   let working = $state(false);
-  let error = $state<string | null>(null);
+  let error = $state<string | Failure | null>(null);
 
   async function load() {
     day = await api.daySummary(path).catch(() => null);
@@ -27,7 +28,7 @@
       await api.summaryRegenerate(path);
     } catch (e) {
       working = false;
-      error = String(e);
+      error = failure(e);
     }
   }
 
@@ -80,7 +81,7 @@
       {:else if !working}
         <p class="muted">{t("summary.none")}</p>
       {/if}
-      {#if error}<p class="error" role="alert">{error}</p>{/if}
+      {#if error}<p class="error" role="alert">{say(error)}</p>{/if}
       <div class="actions">
         {#if working}
           <span class="muted" role="status">{t("summary.working")}</span>

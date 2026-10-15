@@ -5,6 +5,7 @@
 </script>
 
 <script lang="ts">
+  import { failure, say, type Failure } from "../i18n";
   import { onMount, tick } from "svelte";
   import { fade } from "svelte/transition";
   import X from "@lucide/svelte/icons/x";
@@ -32,7 +33,7 @@
   let exercise = $state(start?.exercise ?? "");
   let sets = $state(start?.sets != null ? String(start.sets) : "");
   let reps = $state(start?.reps != null ? String(start.reps) : "");
-  let error = $state<string | null>(null);
+  let error = $state<string | Failure | null>(null);
   let askConfirm = $state<number | null>(null); // the out-of-range value awaiting a yes
   let busy = $state(false);
   let dialog: HTMLDivElement | undefined = $state();
@@ -86,7 +87,7 @@
         error = tf(key, { value: formatField(kind, field ?? "value", value, lang) });
         askConfirm = value; // after the reset above: this value is the one to confirm
       } else {
-        error = tf(key, { detail: detail ?? "" });
+        error = key === "metrics.error.other" ? failure(e) : tf(key, { detail: detail ?? "" });
       }
     } finally {
       busy = false;
@@ -136,7 +137,7 @@
       </div>
     {/if}
     <label>{t("metrics.date")}<input type="date" bind:value={date} max={todayIso()} /></label>
-    {#if error}<p class="error" role="alert">{error}</p>{/if}
+    {#if error}<p class="error" role="alert">{say(error)}</p>{/if}
     <footer>
       <Button variant="quiet" onclick={onClose}>{t("metrics.cancel")}</Button>
       <Button variant="primary" type="submit" disabled={busy}>{askConfirm !== null ? t("metrics.confirm") : t("metrics.save")}</Button>

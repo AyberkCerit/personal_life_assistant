@@ -7,12 +7,13 @@ use tauri::State;
 
 use crate::commands::AppState;
 use crate::indexer::IndexCommand;
+use crate::errors::ue;
 
 fn with_cache<T>(state: &State<AppState>, f: impl FnOnce(&rusqlite::Connection) -> rusqlite::Result<T>) -> Result<T, String> {
     let guard = state.session.lock().expect("session lock");
     let session = guard.as_ref().ok_or(crate::commands::NO_VAULT)?;
     let cache = session.cache.lock().expect("cache lock");
-    f(&cache).map_err(|e| e.to_string())
+    f(&cache).map_err(ue)
 }
 
 #[tauri::command(async)]
@@ -63,7 +64,7 @@ pub struct OpenedLink {
 pub fn open_link(state: State<AppState>, target: String) -> Result<OpenedLink, String> {
     let guard = state.session.lock().expect("session lock");
     let session = guard.as_ref().ok_or(crate::commands::NO_VAULT)?;
-    if let Some(path) = index::resolve_link(&session.cache.lock().expect("cache lock"), &target).map_err(|e| e.to_string())? {
+    if let Some(path) = index::resolve_link(&session.cache.lock().expect("cache lock"), &target).map_err(ue)? {
         return Ok(OpenedLink { path, created: false });
     }
     // Not indexed yet (first open, a long sync, a note made a moment ago): the disk decides (I1).
@@ -81,7 +82,7 @@ pub fn open_link(state: State<AppState>, target: String) -> Result<OpenedLink, S
     if files::resolve(&session.vault, &existing).is_ok_and(|p| p.is_file()) {
         return Ok(OpenedLink { path: existing, created: false });
     }
-    let path = files::create_note(&session.vault, inbox, &title).map_err(|e| e.to_string())?;
+    let path = files::create_note(&session.vault, inbox, &title).map_err(ue)?;
     state.self_writes.record_text(&path, "");
     session.indexer.send(IndexCommand::Touch(path.clone()));
     Ok(OpenedLink { path, created: true })

@@ -20,6 +20,13 @@ pub enum PrepareError {
     NotWritable { path: PathBuf, reason: String },
 }
 
+/// The wizard reads these codes itself (`wizard.error.<code>` in wizard.ts).
+impl From<PrepareError> for String {
+    fn from(e: PrepareError) -> String {
+        e.to_string()
+    }
+}
+
 impl std::fmt::Display for PrepareError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {

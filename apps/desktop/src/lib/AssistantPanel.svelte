@@ -7,7 +7,7 @@
   import Square from "@lucide/svelte/icons/square";
   import Trash from "@lucide/svelte/icons/trash-2";
   import { api } from "./api";
-  import { t, tf, type Key } from "./i18n";
+  import { failure, say, t, tf, type Key } from "./i18n";
   import { answerParts, apply, qaError, shown, started, toolLine, warmDue, type QaEvent, type ShownTurn } from "./qa";
   import Button from "./ui/Button.svelte";
   import IconButton from "./ui/IconButton.svelte";
@@ -81,7 +81,7 @@
       newTopic = false;
       void scrollDown();
     } catch (e) {
-      notice = t(qaError(String(e).split("|")[0]));
+      notice = say(failure(e, "qa")); // its own codes (no model, busy) or a general one (M6)
     }
   }
 
@@ -99,7 +99,7 @@
         x.turn_id !== turn.turn_id ? x : { ...x, tools: x.tools.map((r, i) => (i === index ? { ...r, undo: null, result: { ...r.result, undone: true } } : r)) },
       );
     } catch (e) {
-      notice = tf("qa.error.undo", { reason: String(e).split("|").pop() || String(e) });
+      notice = tf("qa.error.undo", { reason: say(failure(e)) });
     }
   }
 
@@ -117,7 +117,7 @@
         x.turn_id !== turn.turn_id ? x : { ...x, tools: x.tools.map((r, i) => (i === index ? { ...r, undo: { kind: "note", id: note }, result: { ...r.result, saved: note } } : r)) },
       );
     } catch (e) {
-      notice = tf("qa.error.save", { reason: String(e).split("|").pop() || String(e) });
+      notice = tf("qa.error.save", { reason: say(failure(e)) });
     } finally {
       saving = saving.filter((k) => k !== key);
     }
@@ -129,7 +129,7 @@
       await api.qaClear();
       turns = [];
     } catch (e) {
-      notice = t(qaError(String(e).split("|")[0]));
+      notice = say(failure(e, "qa")); // its own codes (no model, busy) or a general one (M6)
     }
   }
 
@@ -146,7 +146,8 @@
   }
 
   const name = (path: string) => path.split("/").pop()!.replace(/\.md$/i, "");
-  const failure = (turn: ShownTurn) => (turn.error ? tf(qaError(turn.error.code), { detail: turn.error.detail }) : "");
+  // the reason comes as a code too (M6 final review): said, never the model server's English
+  const turnFailure = (turn: ShownTurn) => (turn.error ? tf(qaError(turn.error.code), { detail: say(failure(turn.error.detail)) }) : "");
 
   onMount(() => {
     void load();
@@ -191,7 +192,7 @@
               {#if record.result?.saved && !record.result?.undone}
                 <button class="link" onclick={() => onOpenNote(String(record.result?.saved))}>{tf(line.key, line.values)}</button>
               {:else}
-                <span>{tf(line.key, line.values)}</span>
+                <span title={record.ok ? undefined : (record.error ?? undefined)}>{tf(line.key, line.values)}</span>
               {/if}
               {#if record.tool === "suggest_note" && !record.result?.saved && !record.result?.undone && turn.status !== "running"}
                 <Button variant="primary" icon={FileText} disabled={saving.includes(`${turn.turn_id}:${i}`)} onclick={() => void save(turn, i)}>{t("qa.save")}</Button>
@@ -213,7 +214,7 @@
             <p class="working">{turn.working ? t(`qa.using.${turn.working}` as Key) : t("qa.thinking")}</p>
           {/if}
           {#if turn.status === "stopped"}<p class="muted">{t("qa.stopped")}</p>{/if}
-          {#if turn.status === "failed"}<p class="error"><CircleAlert size={14} strokeWidth={2} aria-hidden="true" />{failure(turn)}</p>{/if}
+          {#if turn.status === "failed"}<p class="error"><CircleAlert size={14} strokeWidth={2} aria-hidden="true" />{turnFailure(turn)}</p>{/if}
           {#if turn.sources.length}
             <div class="sources">
               <span>{t("qa.sources")}</span>

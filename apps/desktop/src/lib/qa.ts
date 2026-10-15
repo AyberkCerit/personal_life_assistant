@@ -1,6 +1,6 @@
 // The assistant panel (FR-QA-001…016): turns as the panel shows them, the events that build the
 // live one, answer text with its [[links]], and what each tool did in the user's words.
-import { t, type Key } from "./i18n";
+import { lookup, t, type Key } from "./i18n";
 
 export interface Undo { kind: string; id: string }
 export interface ToolRecord {
@@ -81,7 +81,9 @@ const s = (v: unknown) => (v === null || v === undefined ? "" : String(v));
 
 /** What a tool call did, as an i18n key and its values (FR-QA-008: shown with Undo). */
 export function toolLine(r: ToolRecord): { key: Key; values: Record<string, string> } {
-  if (!r.ok) return { key: "qa.tool.failed", values: { tool: r.tool, reason: s(r.error) } };
+  // the tool's own check is written for the model, in English: the line names the tool only, the
+  // check shows as its tooltip (M6 final review)
+  if (!r.ok) return { key: "qa.tool.failed", values: { tool: lookup(`qa.toolName.${r.tool}`) ?? r.tool } };
   const res = r.result ?? {};
   const when = [s(res.date), s(res.time)].filter(Boolean).join(" ");
   switch (r.tool) {

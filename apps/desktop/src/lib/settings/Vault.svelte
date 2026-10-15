@@ -1,4 +1,6 @@
 <script lang="ts">
+  import type { Failure } from "../i18n";
+  import ErrorBanner from "../ui/ErrorBanner.svelte";
   import { onMount } from "svelte";
   import { open } from "@tauri-apps/plugin-dialog";
   import CircleAlert from "@lucide/svelte/icons/circle-alert";
@@ -21,7 +23,7 @@
   let picked = $state<string | null>(null);
   let advice = $state<Advice[]>([]);
   let busy = $state(false);
-  let error = $state<string | null>(null);
+  let error = $state<string | Failure | null>(null);
 
   async function choose() {
     error = null;
@@ -78,7 +80,7 @@
     {/if}
   </div>
 {/if}
-{#if error}<Banner kind="danger" icon={CircleAlert} role="alert">{error}</Banner>{/if}
+{#if error}<ErrorBanner {error} />{/if}
 
 <style>
   .confirm { display: flex; flex-direction: column; gap: var(--space-2); padding: var(--space-3) 0; }

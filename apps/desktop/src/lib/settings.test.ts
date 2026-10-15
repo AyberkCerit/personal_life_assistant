@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { SECTIONS, WEEKDAYS, backupLine, reportLine, settingsError, trapIndex } from "./settings";
+import { SECTIONS, WEEKDAYS, backupLine, describeError, reportLine, settingsError, trapIndex } from "./settings";
+import { errorText } from "./i18n";
 
 describe("settings screen", () => {
   it("has the seven sections of FR-SET-011 in order", () => {
@@ -22,13 +23,19 @@ describe("settings screen", () => {
       reasonKey: "wizard.reason.access_denied",
     });
     expect(settingsError("model_busy")).toMatchObject({ key: "settings.error.model_busy" });
+    // M6 final review: the old vault's own failure is said, not shown as its raw code
+    expect(settingsError(String.raw`vault_lost|C:\Eski|missing|C:\Yeni|os error 2`)).toMatchObject({
+      key: "settings.error.vault_lost",
+      path: String.raw`C:\Eski`,
+      reason: errorText(String.raw`missing|C:\Yeni|`).text,
+    });
     expect(settingsError(String.raw`network|\\s\p`)).toMatchObject({ key: "wizard.error.network", path: String.raw`\\s\p` });
     expect(settingsError("boom")).toEqual({ key: "settings.error.other", path: "", reason: "boom" });
     // settings final review M8: no English text from the backend in a Turkish UI
     expect(settingsError("no_vault")).toMatchObject({ key: "settings.error.no_vault" });
     expect(settingsError("download_running")).toMatchObject({ key: "settings.error.download_running" });
     expect(settingsError("missing|Notlar|")).toMatchObject({ key: "settings.error.missing", path: "Notlar" });
-    expect(settingsError("vault_lost|C:/Kasa|disk")).toMatchObject({ key: "settings.error.vault_lost", path: "C:/Kasa", reason: "disk" });
+    expect(settingsError("vault_lost|C:/Kasa|disk")).toMatchObject({ key: "settings.error.vault_lost", path: "C:/Kasa", reason: errorText("disk").text }); // an old plain reason reads as unexpected (M6)
   });
 
   it("says when the weekly report last ran or why it failed", () => {
@@ -44,10 +51,16 @@ describe("settings screen", () => {
     const none = { last_success_at: null, last_attempt_at: null, last_error: null };
     expect(backupLine(none)).toEqual({ key: "settings.backup.never" });
     expect(backupLine({ ...none, last_success_at: "2026-10-06T23:10:00+03:00", last_attempt_at: "2026-10-06T23:10:00+03:00" })).toEqual({ key: "settings.backup.last", at: "2026-10-06T23:10:00+03:00" });
-    expect(backupLine({ last_success_at: "2026-10-05T23:10:00+03:00", last_attempt_at: "2026-10-06T23:00:00+03:00", last_error: "disk full" })).toEqual({
+    expect(backupLine({ last_success_at: "2026-10-05T23:10:00+03:00", last_attempt_at: "2026-10-06T23:00:00+03:00", last_error: "disk_full||No space left on device" })).toEqual({
       key: "settings.backup.failed",
       at: "2026-10-06T23:00:00+03:00",
-      error: "disk full",
+      error: errorText("disk_full||").text, // M6 translations: said, not the stored English reason
     });
+  });
+});
+
+describe("settings errors (M6 final review)", () => {
+  it("a missing thing with no folder named reads as the general message", () => {
+    expect(describeError("missing||os error 2")).toMatchObject({ text: errorText("missing||").text, details: "os error 2" });
   });
 });

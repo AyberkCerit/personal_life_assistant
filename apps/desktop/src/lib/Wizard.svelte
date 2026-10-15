@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { failure, type Failure } from "./i18n";
+  import ErrorBanner from "./ui/ErrorBanner.svelte";
   import { onMount, tick, untrack } from "svelte";
   import { open } from "@tauri-apps/plugin-dialog";
   import ArrowLeft from "@lucide/svelte/icons/arrow-left";
@@ -24,7 +26,7 @@
   // backend still refuses a bad folder when the button is pressed.
   let checked = $state<{ path: string; advice: Advice[] }>({ path: "", advice: [] });
   const advice = $derived(checked.path === progress.path.trim() ? checked.advice : []);
-  let error = $state<string | null>(null);
+  let error = $state<string | Failure | null>(null);
   let busy = $state(false);
   let model = $state<ModelStatus | null>(null);
   let download = $state<DownloadState | null>(null);
@@ -46,7 +48,7 @@
       model = await api.modelStatus();
       download = model.download;
     } catch (e) {
-      error = String(e); // the step itself still works: the user can skip the model
+      error = failure(e); // the step itself still works: the user can skip the model
     }
   }
 
@@ -54,7 +56,7 @@
     try {
       await api.setLanguage(l);
     } catch (e) {
-      error = String(e);
+      error = failure(e);
       return false;
     }
     if (l !== lang) {
@@ -77,7 +79,7 @@
       await go(nextStep("vault"));
     } catch (e) {
       const { key, path, reason, reasonKey } = setupError(String(e));
-      error = tf(key, { path, reason: reasonKey ? t(reasonKey) : reason });
+      error = key === "wizard.error.other" ? failure(e) : tf(key, { path, reason: reasonKey ? t(reasonKey) : reason });
     } finally {
       busy = false;
     }
@@ -90,7 +92,7 @@
       await api.finishSetup();
       onFinish(progress.opened);
     } catch (e) {
-      error = String(e);
+      error = failure(e);
       busy = false;
     }
   }
@@ -181,7 +183,7 @@
     </dl>
   {/if}
 
-  {#if error}<Banner kind="danger" icon={CircleAlert} role="alert">{error}</Banner>{/if}
+  {#if error}<ErrorBanner {error} />{/if}
 
   <footer>
     {#if progress.step !== "language"}

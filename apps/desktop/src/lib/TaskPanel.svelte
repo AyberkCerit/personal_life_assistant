@@ -1,15 +1,15 @@
 <script lang="ts">
+  import { failure, type Failure } from "./i18n";
+  import ErrorBanner from "./ui/ErrorBanner.svelte";
   import { api, type ReviewItem, type Task, type TaskInput } from "./api";
   import { onMount } from "svelte";
   import { filterByOrigin, groupTasks, msUntilNextDay, taskError, todayIso, type OriginFilter, type TaskList } from "./tasks";
   import TaskRow from "./TaskRow.svelte";
   import { lang, t, tf } from "./i18n";
   import CalendarCheck from "@lucide/svelte/icons/calendar-check";
-  import CircleAlert from "@lucide/svelte/icons/circle-alert";
   import CircleCheck from "@lucide/svelte/icons/circle-check";
   import Inbox from "@lucide/svelte/icons/inbox";
   import Sparkles from "@lucide/svelte/icons/sparkles";
-  import Banner from "./ui/Banner.svelte";
   import Button from "./ui/Button.svelte";
   import Checkbox from "./ui/Checkbox.svelte";
   import EmptyState from "./ui/EmptyState.svelte";
@@ -37,7 +37,7 @@
   let filter = $state<OriginFilter>("all");
   let tasks = $state<Task[]>([]);
   let review = $state<ReviewItem[]>([]);
-  let error = $state<string | null>(null);
+  let error = $state<string | Failure | null>(null);
   let newTitle = $state("");
   let newDate = $state("");
   let newTime = $state("");
@@ -48,9 +48,9 @@
   const groups = $derived(tab === "review" ? [] : groupTasks(filterByOrigin(tasks, filter), tab, today, labels, lang));
 
   /** The commands' error codes in the UI language (architecture review A2). */
-  function errorText(e: unknown): string {
+  function errorText(e: unknown): string | Failure {
     const { key, detail } = taskError(String(e));
-    return tf(key, { detail });
+    return key === "tasks.error.other" ? failure(e) : tf(key, { detail }); // M6: no English inline
   }
 
   async function run(action: () => Promise<unknown>): Promise<boolean> {
@@ -128,7 +128,7 @@
     <span class="indicator" aria-hidden="true" style:transform={`translateX(${indicator.x}px)`} style:width={`${indicator.w}px`}></span>
   </div>
 
-  {#if error}<Banner kind="danger" icon={CircleAlert} role="alert">{t("error.generic")}: {error}</Banner>{/if}
+  {#if error}<ErrorBanner {error} />{/if}
 
   {#if tab !== "review"}
     <div class="tools">

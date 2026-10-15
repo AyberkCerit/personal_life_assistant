@@ -173,7 +173,7 @@ const DAYS: [&str; 7] = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday",
 const DAYS_TR: [&str; 7] = ["Pazartesi", "Salı", "Çarşamba", "Perşembe", "Cuma", "Cumartesi", "Pazar"];
 
 /// The request that summarises one day.
-pub fn request(day: &DaySources) -> Value {
+pub fn request(day: &DaySources, lang: crate::lang::Lang) -> Value {
     let share = INPUT_TOKENS / day.notes.len().max(1);
     let mut text = format!("Day: {} ({})\n\n", day.date, DAYS[day.date.weekday().num_days_from_monday() as usize]);
     for n in &day.notes {
@@ -185,7 +185,8 @@ pub fn request(day: &DaySources) -> Value {
     }
     json!({
         "messages": [
-            { "role": "system", "content": "You summarise one day of the user's own notes for their personal search. Write 2 to 5 short bullet points, each starting with \"- \", in the language the notes are written in. Use only what the notes say: never add, guess or judge. After each point name the note it comes from as [[Note title]]. No heading, no introduction." },
+            // FR-I18N-006: in PLA's language, whatever the notes are written in (M6 translations)
+            { "role": "system", "content": format!("You summarise one day of the user's own notes for their personal search. Write 2 to 5 short bullet points, each starting with \"- \", in {}. Use only what the notes say: never add, guess or judge. After each point name the note it comes from as [[Note title]]. No heading, no introduction.", lang.name()) },
             { "role": "user", "content": text }
         ],
         "temperature": 0.2,
@@ -196,8 +197,8 @@ pub fn request(day: &DaySources) -> Value {
 }
 
 /// FR-MEM-006: the model's summary of `day`.
-pub fn summarize(model: &mut dyn ChatModel, day: &DaySources, cancel: &AtomicBool) -> Result<String, LlmError> {
-    Ok(model.complete(&request(day), cancel)?.trim().to_owned())
+pub fn summarize(model: &mut dyn ChatModel, day: &DaySources, lang: crate::lang::Lang, cancel: &AtomicBool) -> Result<String, LlmError> {
+    Ok(model.complete(&request(day, lang), cancel)?.trim().to_owned())
 }
 
 fn day_number(date: NaiveDate) -> i64 {
@@ -365,6 +366,18 @@ mod tests {
     }
 
     #[test]
+    fn a_summary_is_written_in_the_interface_language() {
+        // FR-I18N-006, owner decision (M6 translations): not in the notes' language
+        let day = DaySources { date: d("2026-10-06"), notes: Vec::new(), signature: String::new() };
+        for (lang, name) in [(crate::lang::Lang::Tr, "in Turkish"), (crate::lang::Lang::En, "in English")] {
+            let body = request(&day, lang);
+            let system = body["messages"][0]["content"].as_str().unwrap();
+            assert!(system.contains(name), "{system}");
+            assert!(!system.contains("language the notes are written in"), "{system}");
+        }
+    }
+
+    #[test]
     fn a_day_is_its_daily_note_and_the_notes_changed_that_day() {
         // FR-MEM-006/011
         let (_t, conn) = cache();
@@ -424,7 +437,7 @@ mod tests {
         let mut model = Says("- Bir şey [[N1]]");
         for day in &first {
             let src = sources(&conn, &f, *day).unwrap();
-            save(&conn, &src, &summarize(&mut model, &src, &AtomicBool::new(false)).unwrap(), now()).unwrap();
+            save(&conn, &src, &summarize(&mut model, &src, crate::lang::Lang::Tr, &AtomicBool::new(false)).unwrap(), now()).unwrap();
         }
         let second = plan(&conn, &f, today).unwrap();
         assert_eq!(second.len(), 20);

@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { failure, type Failure } from "../i18n";
+  import ErrorBanner from "../ui/ErrorBanner.svelte";
   import { onMount } from "svelte";
   import ArrowLeft from "@lucide/svelte/icons/arrow-left";
   import CircleAlert from "@lucide/svelte/icons/circle-alert";
@@ -32,7 +34,7 @@
   let summary = $state<Summary | null>(null);
   let records = $state<MetricRecord[]>([]);
   let confirming = $state<string | null>(null);
-  let error = $state<string | null>(null);
+  let error = $state<string | Failure | null>(null);
 
   function addDays(iso: string, n: number): string {
     const [y, m, d] = iso.split("-").map(Number);
@@ -49,7 +51,7 @@
       if (mine !== request) return;
       [summary, records] = [s, r];
     } catch (e) {
-      if (mine === request) error = tf(metricError(String(e)).key, { detail: String(e) });
+      if (mine === request) error = failure(e, "metrics");
     }
   }
 
@@ -59,7 +61,7 @@
       await action();
     } catch (e) {
       const parsed = metricError(String(e));
-      error = tf(parsed.key, { detail: parsed.detail ?? "" });
+      error = parsed.key === "metrics.error.other" ? failure(e) : tf(parsed.key, { detail: parsed.detail ?? "" });
     }
     confirming = null;
     await load();
@@ -109,7 +111,7 @@
       </div>
     </Banner>
   {/each}
-  {#if error}<Banner kind="danger" icon={CircleAlert} role="alert">{error}</Banner>{/if}
+  {#if error}<ErrorBanner {error} />{/if}
 
   {#if summary}
     {#if summary.days.length === 0}

@@ -19,7 +19,34 @@ const dict = {
     "status.busy": "çıkarım yapılıyor…",
     "status.added": "öğe eklendi",
     "error.generic": "Bir hata oldu",
-    "background.problem": "Arka plan işi bugün ikinci kez başarısız oldu: {reason}",
+    "error.missing": "Dosya ya da klasör bulunamadı ({detail}); PLA dışında silinmiş ya da taşınmış olabilir.",
+    "error.permission": "Windows erişime izin vermedi ({detail}). Dosyanın başka bir programda açık olmadığından ve klasöre yazma iznin olduğundan emin ol.",
+    "error.disk_full": "Diskte yer kalmadı. Biraz yer açıp yeniden dene.",
+    "error.read_only": "Dosya salt okunur, değişiklik kaydedilemedi ({detail}).",
+    "error.io": "Dosya işlemi tamamlanamadı.",
+    "error.db": "PLA'nın veritabanına ulaşılamadı. Uygulamayı yeniden başlatmayı dene.",
+    "error.newer_schema": "Bu veriler PLA'nın daha yeni bir sürümüyle yazılmış. PLA'yı güncelle.",
+    "error.bad_path": "Geçersiz konum ({detail}).",
+    "error.bad_name": "Adda kullanılamayan bir karakter var ({detail}).",
+    "error.reserved": "Bu ad Windows'ta ayrılmış, başka bir ad seç ({detail}).",
+    "error.exists": "Bu adla bir dosya zaten var ({detail}).",
+    "error.conflict": "Dosya PLA dışında değişti; değişikliklerin kaydedilmedi.",
+    "error.not_folder": "Bu bir klasör değil ({detail}).",
+    "error.network": "Ağ klasörleri desteklenmiyor ({detail}).",
+    "error.bad_config": "Kasanın PLA ayar dosyası okunamadı.",
+    "error.no_vault": "Açık bir kasa yok.",
+    "error.no_app_data": "Windows'un uygulama veri klasörü bulunamadı; PLA verilerini kaydedemiyor.",
+    "error.recycle_bin": "Geri Dönüşüm Kutusu'na taşınamadı ({detail}).",
+    "error.model_server_missing": "Yapay zekâ sunucusu bulunamadı; PLA'yı yeniden kur ({detail}).",
+    "error.model_file_missing": "Model dosyası bulunamadı; modeli Ayarlar > Yapay zekâ'dan yeniden indir ({detail}).",
+    "error.model_start": "Yapay zekâ modeli başlatılamadı.",
+    "error.model_timeout": "Yapay zekâ modeli zamanında cevap vermedi.",
+    "error.model": "Yapay zekâ modeli bir hata verdi.",
+    "error.unexpected": "Beklenmeyen bir hata oldu. Ayrıntıları kopyalayıp bildirebilirsin.",
+    "error.copyDetails": "Ayrıntıları kopyala",
+    "error.copied": "Kopyalandı",
+    "background.error.backup": "Günlük yedek bugün iki kez alınamadı; yarın yeniden denenecek.",
+    "background.error.report": "Haftalık rapor bugün iki kez yazılamadı; yarın yeniden denenecek.",
     "tasks.today": "Bugün",
     "tasks.upcoming": "Yaklaşan",
     "tasks.completed": "Tamamlanan",
@@ -130,7 +157,7 @@ const dict = {
     "tree.error.conflict": "Not PLA dışında değişti; önce onu çöz.",
     "tree.error.no_vault": "Önce bir kasa aç.",
     "tree.error.reserved": "“{detail}” Windows'un kendine ayırdığı bir ad; başka bir ad seç.",
-    "tree.error.io": "İşlem yapılamadı: {reason}",
+    "tree.error.io": "İşlem yapılamadı.",
     "links.tab.tasks": "Görevler",
     "links.tab.links": "Bağlantılar",
     "links.backlinks": "Bu nota bağlananlar",
@@ -212,7 +239,15 @@ const dict = {
     "qa.tool.searched": "Notlarda arandı: “{query}” ({n} sonuç)",
     "qa.tool.tasks": "Görevlere bakıldı ({n})",
     "qa.tool.metrics": "Ölçümlere bakıldı: {kind}, {days} gün",
-    "qa.tool.failed": "{tool} yapılamadı: {reason}",
+    "qa.tool.failed": "{tool} yapılamadı.",
+    "qa.toolName.add_task": "Görev ekleme",
+    "qa.toolName.complete_task": "Görevi tamamlama",
+    "qa.toolName.log_metric": "Ölçüm kaydetme",
+    "qa.toolName.create_note": "Not oluşturma",
+    "qa.toolName.suggest_note": "Not önerme",
+    "qa.toolName.search_notes": "Notlarda arama",
+    "qa.toolName.query_tasks": "Görev sorgulama",
+    "qa.toolName.query_metrics": "Ölçüm sorgulama",
     "qa.error.no_model": "Asistan için dil modeli gerekiyor; kurulu değil.",
     "qa.error.busy": "Önceki soru hâlâ cevaplanıyor.",
     "qa.error.no_vault": "Önce bir kasa aç.",
@@ -434,7 +469,34 @@ const dict = {
     "status.busy": "extracting…",
     "status.added": "items added",
     "error.generic": "Something went wrong",
-    "background.problem": "A background job failed for the second time today: {reason}",
+    "error.missing": "The file or folder was not found ({detail}); it may have been deleted or moved outside PLA.",
+    "error.permission": "Windows denied access ({detail}). Make sure the file is not open in another program and that you can write to the folder.",
+    "error.disk_full": "The disk is full. Free some space and try again.",
+    "error.read_only": "The file is read-only; the change was not saved ({detail}).",
+    "error.io": "The file operation could not be completed.",
+    "error.db": "PLA could not reach its database. Try restarting the app.",
+    "error.newer_schema": "This data was written by a newer version of PLA. Update PLA.",
+    "error.bad_path": "Invalid location ({detail}).",
+    "error.bad_name": "The name has a character that cannot be used ({detail}).",
+    "error.reserved": "Windows reserves this name; choose another ({detail}).",
+    "error.exists": "A file with this name already exists ({detail}).",
+    "error.conflict": "The file changed outside PLA; your changes were not saved.",
+    "error.not_folder": "This is not a folder ({detail}).",
+    "error.network": "Network folders are not supported ({detail}).",
+    "error.bad_config": "The vault's PLA settings file could not be read.",
+    "error.no_vault": "No vault is open.",
+    "error.no_app_data": "Windows' app data folder was not found; PLA cannot store its data.",
+    "error.recycle_bin": "Could not move it to the Recycle Bin ({detail}).",
+    "error.model_server_missing": "The AI server was not found; reinstall PLA ({detail}).",
+    "error.model_file_missing": "The model file was not found; download it again in Settings > AI ({detail}).",
+    "error.model_start": "The AI model could not start.",
+    "error.model_timeout": "The AI model did not answer in time.",
+    "error.model": "The AI model failed.",
+    "error.unexpected": "Something unexpected went wrong. You can copy the details and report it.",
+    "error.copyDetails": "Copy details",
+    "error.copied": "Copied",
+    "background.error.backup": "The daily backup failed twice today; it will be tried again tomorrow.",
+    "background.error.report": "The weekly report could not be written twice today; it will be tried again tomorrow.",
     "tasks.today": "Today",
     "tasks.upcoming": "Upcoming",
     "tasks.completed": "Completed",
@@ -545,7 +607,7 @@ const dict = {
     "tree.error.conflict": "The note changed outside PLA; resolve that first.",
     "tree.error.no_vault": "Open a vault first.",
     "tree.error.reserved": "“{detail}” is a name Windows keeps for itself; choose another name.",
-    "tree.error.io": "That did not work: {reason}",
+    "tree.error.io": "That did not work.",
     "links.tab.tasks": "Tasks",
     "links.tab.links": "Links",
     "links.backlinks": "Linked from",
@@ -627,7 +689,15 @@ const dict = {
     "qa.tool.searched": "Searched the notes: “{query}” ({n} results)",
     "qa.tool.tasks": "Looked at the tasks ({n})",
     "qa.tool.metrics": "Looked at the measurements: {kind}, {days} days",
-    "qa.tool.failed": "{tool} could not be done: {reason}",
+    "qa.tool.failed": "{tool} did not work.",
+    "qa.toolName.add_task": "Adding a task",
+    "qa.toolName.complete_task": "Completing a task",
+    "qa.toolName.log_metric": "Logging a measurement",
+    "qa.toolName.create_note": "Creating a note",
+    "qa.toolName.suggest_note": "Suggesting a note",
+    "qa.toolName.search_notes": "Searching the notes",
+    "qa.toolName.query_tasks": "Looking up tasks",
+    "qa.toolName.query_metrics": "Looking up measurements",
     "qa.error.no_model": "The assistant needs a language model; none is installed.",
     "qa.error.busy": "The previous question is still being answered.",
     "qa.error.no_vault": "Open a vault first.",
@@ -840,11 +910,58 @@ export let lang: Lang = osLang;
 
 export function setLang(next: Lang) {
   lang = next;
-  document.documentElement.lang = next;
+  if (typeof document !== "undefined") document.documentElement.lang = next;
 }
 
 export function t(key: Key): string {
   return dict[lang][key];
+}
+
+/** A key built at run time (an error code): the chosen language, else English (FR-I18N-007, the
+ *  miss is logged), else `null`. */
+export function lookup(key: string): string | null {
+  const here = (dict[lang] as Record<string, string>)[key];
+  if (here !== undefined) return here;
+  const english = (dict.en as Record<string, string>)[key];
+  console.warn(english === undefined ? `PLA: no text for ${key}` : `PLA: no ${lang} text for ${key}, English shown`);
+  return english ?? null;
+}
+
+/** What a failure says, and what "Copy details" copies (empty: nothing to copy). */
+export interface Failure {
+  text: string;
+  details: string;
+  /** What the command sent, to say it again in another language (FR-SET-012). */
+  raw?: string;
+  area?: string;
+}
+
+/** A failure as plain text, where there is no room for "Copy details". */
+export function say(e: string | Failure): string {
+  return typeof e === "string" ? e : e.text;
+}
+
+/** A message said earlier, in the language chosen now (FR-SET-012: a switch applies at once). */
+export function sayAgain<T extends string | Failure | null>(e: T): T | Failure {
+  return e !== null && typeof e !== "string" && e.raw !== undefined ? errorText(e.raw, e.area) : e;
+}
+
+/** A caught error, said in the chosen language (`errorText` on its text). */
+export function failure(e: unknown, area?: string): Failure {
+  return errorText(String(e), area);
+}
+
+/** A command's `code|detail|reason` as the user reads it (M6 translations): the area's own message
+ *  (`<area>.error.<code>`), else the general one (`error.<code>`), else "something unexpected". The
+ *  reason, or the whole text when it is not a code, is only for "Copy details". */
+export function errorText(raw: string, area?: string): Failure {
+  const [code, detail = "", ...rest] = raw.split("|");
+  const has = (key: string) => (dict[lang] as Record<string, string>)[key] !== undefined || (dict.en as Record<string, string>)[key] !== undefined;
+  const key = [area && `${area}.error.${code}`, `error.${code}`].find((k): k is string => !!k && /^[a-z_.]+$/.test(k) && has(k));
+  // a plain sentence (or an unknown code) is not ours to say: shown as unexpected, copied whole
+  if (!key) return { text: t("error.unexpected"), details: raw, raw, area };
+  const text = (lookup(key) ?? "").replace(/\{(\w+)\}/g, (_, k: string) => (k === "detail" || k === "path" || k === "name" ? detail : ""));
+  return { text: text.replace(/\s*\(\)/g, ""), details: rest.join("|"), raw, area };
 }
 
 /** `t` with `{name}` placeholders filled. */

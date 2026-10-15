@@ -1,9 +1,11 @@
 <script lang="ts">
+  import type { Failure } from "../i18n";
+  import ErrorBanner from "../ui/ErrorBanner.svelte";
   import { onMount } from "svelte";
   import CircleAlert from "@lucide/svelte/icons/circle-alert";
   import FolderOpen from "@lucide/svelte/icons/folder-open";
   import { api, type BackupStatus, type WeeklyReportView } from "../api";
-  import { lang, t, tf } from "../i18n";
+  import { lang, say, t, tf } from "../i18n";
   import { WEEKDAYS, backupLine, describeError, reportLine } from "../settings";
   import Row from "./Row.svelte";
   import Banner from "../ui/Banner.svelte";
@@ -27,13 +29,13 @@
       await api.setWeeklyReport(report.schedule);
     } catch (e) {
       report = before;
-      reportError = describeError(e);
+      reportError = say(describeError(e));
     } finally {
       savingReport = false;
     }
   }
   let running = $state(false);
-  let error = $state<string | null>(null);
+  let error = $state<string | Failure | null>(null);
 
   const when = (iso: string) => new Intl.DateTimeFormat(lang, { dateStyle: "medium", timeStyle: "short" }).format(new Date(iso));
 
@@ -66,7 +68,7 @@
 
   onMount(() => {
     void refresh();
-    void api.weeklyReportSettings().then((r) => (report = r)).catch((e) => (reportError = describeError(e)));
+    void api.weeklyReportSettings().then((r) => (report = r)).catch((e) => (reportError = say(describeError(e))));
     const un = api.onBackupChanged(() => {
       running = false;
       void refresh();
@@ -108,7 +110,7 @@
   <Button variant="primary" disabled={running} onclick={() => void backupNow()}>{running ? t("settings.backup.running") : t("settings.backup.now")}</Button>
   {#if status && status.backups.length > 0}<Button icon={FolderOpen} onclick={() => void openFolder()}>{t("settings.backup.open")}</Button>{/if}
 </div>
-{#if error}<Banner kind="danger" icon={CircleAlert} role="alert">{error}</Banner>{/if}
+{#if error}<ErrorBanner {error} />{/if}
 
 <style>
   h4 { margin: var(--space-2) 0 var(--space-1); font-size: var(--text-md); font-weight: 600; }

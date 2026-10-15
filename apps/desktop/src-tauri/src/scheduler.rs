@@ -184,9 +184,11 @@ impl Scheduler {
                 }
             }
             Err(e) => {
-                let attempts = record_failure(&self.conn, DAILY, now, &e.to_string()).unwrap_or(MAX_ATTEMPTS_PER_DAY);
+                // stored as a code: the settings screen says it in PLA's language (M6 translations)
+                let reason = crate::errors::ue(e);
+                let attempts = record_failure(&self.conn, DAILY, now, &reason).unwrap_or(MAX_ATTEMPTS_PER_DAY);
                 if attempts >= MAX_ATTEMPTS_PER_DAY {
-                    self.notifier.problem(&e.to_string());
+                    self.notifier.problem(&reason);
                 }
             }
         }
@@ -637,6 +639,10 @@ mod tests {
         let seen = r.seen();
         assert_eq!(seen.len(), 1);
         assert!(seen[0].starts_with("problem"), "{seen:?}");
+        // M6 translations: kept as a code the settings screen says in PLA's language
+        let job = pla_core::jobs::status(&r.sched.conn, DAILY).unwrap();
+        let stored = job.last_error.unwrap();
+        assert!(crate::errors::CODES.iter().any(|c| stored.starts_with(&format!("{c}|"))), "{stored}");
         r.at("2026-10-06T22:01:00+03:00");
         assert!(r.seen().is_empty(), "given up for today");
     }

@@ -1,18 +1,18 @@
 <script lang="ts">
+  import type { Failure } from "../i18n";
+  import ErrorBanner from "../ui/ErrorBanner.svelte";
   import { open } from "@tauri-apps/plugin-dialog";
-  import CircleAlert from "@lucide/svelte/icons/circle-alert";
   import Download from "@lucide/svelte/icons/download";
   import FolderOpen from "@lucide/svelte/icons/folder-open";
   import { api, inTauri } from "../api";
   import { lang, t } from "../i18n";
   import { describeError } from "../settings";
-  import Banner from "../ui/Banner.svelte";
   import Button from "../ui/Button.svelte";
   import Row from "./Row.svelte";
 
   let saved = $state<string[]>([]);
   let busy = $state(false);
-  let error = $state<string | null>(null);
+  let error = $state<string | Failure | null>(null);
 
   // NFR-SEC-008: tasks and measurements as CSV files the user keeps.
   async function exportData() {
@@ -53,7 +53,7 @@
   <Button icon={FolderOpen} onclick={() => void act(() => api.openPlace("app_data"))}>{t("settings.privacy.appData")}</Button>
   <Button icon={FolderOpen} onclick={() => void act(() => api.openPlace("local_data"))}>{t("settings.privacy.localData")}</Button>
 </div>
-{#if error}<Banner kind="danger" icon={CircleAlert} role="alert">{error}</Banner>{/if}
+{#if error}<ErrorBanner {error} />{/if}
 
 <style>
   .statement { margin: var(--space-2) 0; font-size: var(--text-md); color: var(--color-text); }
