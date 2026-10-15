@@ -21,6 +21,7 @@ use pla_core::qa::{self, ToolRecord, Turn};
 use pla_core::vault::Vault;
 use rusqlite::Connection;
 use serde::Serialize;
+use crate::errors::{ue, UserError};
 
 const TICK: Duration = Duration::from_secs(1);
 /// Decision 5: an outside change is extracted after this long without further changes to the note.
@@ -220,6 +221,11 @@ impl Stops {
     }
 }
 
+/// The status bar's message for a model that failed (FR-I18N-002): `model`, its text to copy.
+fn model_failure(reason: String) -> String {
+    UserError::new("model", "").because(reason).into()
+}
+
 /// Lets a closing session interrupt a long run: once stopped, the next model call fails like an
 /// outage, so the pipeline stops and keeps the rest queued (FR-EXT-022).
 struct Cancellable<'a> {
@@ -377,7 +383,7 @@ impl Worker {
         // Catch-up: notes changed while PLA was closed (FR-VLT-014), unfinished work (FR-EXT-022).
         let now = (self.clock)();
         if let Err(e) = enqueue_all(&self.vault, &self.conn, now) {
-            self.status.last_error = Some(e.to_string());
+            self.status.last_error = Some(ue(e));
         }
         self.process();
         loop {
@@ -438,7 +444,7 @@ impl Worker {
                 }
                 Ok(Command::Rescan) => {
                     if let Err(e) = enqueue_all(&self.vault, &self.conn, (self.clock)()) {
-                        self.status.last_error = Some(e.to_string());
+                        self.status.last_error = Some(ue(e));
                     }
                     self.process();
                 }
@@ -476,7 +482,7 @@ impl Worker {
 
     fn enqueue_now(&mut self, note: &str) {
         if let Err(e) = enqueue(&self.conn, note, (self.clock)()) {
-            self.status.last_error = Some(e.to_string());
+            self.status.last_error = Some(ue(e));
         }
     }
 
@@ -511,8 +517,9 @@ impl Worker {
                 }
             };
             match process_queue_with(&self.vault, &mut self.conn, &mut guarded, &PipelineSettings::default(), now, &mut on_note) {
-                Ok(report) => self.status.last_error = report.model_error,
-                Err(e) => self.status.last_error = Some(e.to_string()),
+                // pla-core hands the model's failure over as text: the code says what, the text is copied
+                Ok(report) => self.status.last_error = report.model_error.map(model_failure),
+                Err(e) => self.status.last_error = Some(ue(e)),
             }
             if self.stops.pause.load(Ordering::SeqCst) {
                 self.status.paused = true; // stopped by a pause, not by a failure
@@ -532,6 +539,7 @@ impl Worker {
     /// (the model reads summaries, not notes, FR-SCH-008); without a model, or when it fails, the
     /// report still comes with the numbers. Never overwrites (FR-SCH-010).
     fn weekly_report(&mut self, week: pla_core::report::Week, cache_path: &std::path::Path, lang: &str) -> ReportOutcome {
+        let lang = pla_core::lang::Lang::from_code(lang);
         use pla_core::report::{self, NoHighlights};
         if report::report_exists(&self.vault, week) {
             return ReportOutcome::Exists;
@@ -571,7 +579,7 @@ impl Worker {
                 let fresh = pla_core::summary::get(&cache, &folders, day).ok().flatten().is_some_and(|s| !s.stale);
                 if let Ok(sources) = pla_core::summary::sources(&cache, &folders, day) {
                     if !fresh && !sources.notes.is_empty() {
-                        match pla_core::summary::summarize(model, &sources, &self.interrupt) {
+                        match pla_core::summary::summarize(model, &sources, crate::notify::ui_language(), &self.interrupt) {
                             Ok(text) if !text.is_empty() => {
                                 if pla_core::summary::save(&cache, &sources, &text, now).is_ok() {
                                     summarised.push(day.format("%Y-%m-%d").to_string());
@@ -628,7 +636,7 @@ impl Worker {
         } else if let (true, Some(reason)) = (first_failure, model_error.clone()) {
             // a model that fails once is asked again later; the second time the numbers come alone
             // (final review I2), so a passing hiccup never leaves a report without its points
-            self.status.last_error = Some(reason.clone());
+            self.status.last_error = Some(model_failure(reason.clone()));
             fail(&self.conn, reason)
         } else {
             match report::week_stats(&self.conn, week) {
@@ -692,7 +700,7 @@ impl Worker {
             self.status.busy = true;
             (self.notify)(&self.status);
             // a question, a model removal or closing stops the request itself (final review I3)
-            match pla_core::summary::summarize(model, &sources, &self.interrupt) {
+            match pla_core::summary::summarize(model, &sources, crate::notify::ui_language(), &self.interrupt) {
                 Ok(text) if !text.is_empty() => {
                     if pla_core::summary::save(&cache, &sources, &text, (self.clock)()).is_ok() {
                         if let Some(listener) = &self.on_summary {
@@ -707,7 +715,7 @@ impl Worker {
                 }
                 Err(e) => {
                     // the model is not answering: the next maintenance tries again, and it shows
-                    self.status.last_error = Some(e.to_string());
+                    self.status.last_error = Some(ue(e));
                     tell(&self.on_summary, "model");
                     break;
                 }
@@ -1134,6 +1142,23 @@ mod tests {
     }
 
     /// A model that is there but does not answer (llama-server would not start).
+    /// A model server that died.
+    struct Silent;
+    impl Extractor for Silent {
+        fn extract_raw(&mut self, _: NaiveDate, _: &str) -> Result<String, LlmError> {
+            Err(LlmError::Exited("exit code 1".into()))
+        }
+    }
+
+    #[test]
+    fn the_status_bar_hears_a_code_not_an_english_sentence() {
+        // FR-I18N-002 (M6 translations): "llama-server exited during startup: …" reached the status bar
+        let (_tmp, _handle, statuses, _data) = setup(Some(Box::new(Silent)));
+        let s = wait_for(&statuses, |s| s.last_error.is_some());
+        let error = s.last_error.unwrap();
+        assert!(error.starts_with("model|"), "{error}");
+    }
+
     struct Down;
     impl Extractor for Down {
         fn extract_raw(&mut self, _: NaiveDate, _: &str) -> Result<String, LlmError> {

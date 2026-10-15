@@ -26,6 +26,7 @@ use crate::scheduler::{Pending, SchedCommand, Scheduler, SchedulerHandle};
 use crate::system::WindowsProbe;
 use crate::watcher::{watch, SelfWrites, WatchHandle};
 use crate::worker::{Command, Worker, WorkerHandle};
+use crate::errors::ue;
 
 /// One open vault. Fields drop in order: the scheduler stops first, then the watcher, then the
 /// worker (which ends the model).
@@ -69,9 +70,9 @@ pub struct AppState {
 /// Load, change and save settings.json under `lock`.
 pub(crate) fn update_settings(root: &Path, lock: &Mutex<()>, change: impl FnOnce(&mut AppSettings)) -> Result<AppSettings, String> {
     let _guard = lock.lock().expect("settings lock");
-    let mut settings = load_settings(root).map_err(|e| e.to_string())?.settings;
+    let mut settings = load_settings(root).map_err(ue)?.settings;
     change(&mut settings);
-    save_settings(root, &settings).map_err(|e| e.to_string())?;
+    save_settings(root, &settings).map_err(ue)?;
     Ok(settings)
 }
 
@@ -129,10 +130,10 @@ fn extractor(app: &AppHandle, settings: &AppSettings) -> Option<Box<dyn Extracto
 }
 
 fn start_session(app: &AppHandle, root: &Path, settings: &AppSettings, own: Arc<SelfWrites>, paused: bool) -> Result<Session, String> {
-    let mut vault = open_vault_dir(root).map_err(|e| e.to_string())?;
-    let dir = resolve_data_dir(&app_root()?, &mut vault).map_err(|e| e.to_string())?;
-    let dbs = open_databases(&dir).map_err(|e| e.to_string())?;
-    let ui_db = connect(&dir.join("pla.db")).map_err(|e| e.to_string())?;
+    let mut vault = open_vault_dir(root).map_err(ue)?;
+    let dir = resolve_data_dir(&app_root()?, &mut vault).map_err(ue)?;
+    let dbs = open_databases(&dir).map_err(ue)?;
+    let ui_db = connect(&dir.join("pla.db")).map_err(ue)?;
     let status =
         Arc::new(Mutex::new(WorkerStatus { queued: 0, model: crate::worker::ModelState::Off, busy: false, last_error: None, added: 0, paused: false }));
     let (status_app, status_copy) = (app.clone(), Arc::clone(&status));
@@ -161,8 +162,7 @@ fn start_session(app: &AppHandle, root: &Path, settings: &AppSettings, own: Arc<
             crate::worker::ReportOutcome::Written(rel) => crate::notify::report_ready(&report_app, &report_vault, week, rel),
             // FR-SCH-015: the second failure of a day is shown; the first is tried again
             crate::worker::ReportOutcome::Failed { attempts, reason } if *attempts >= pla_core::jobs::MAX_ATTEMPTS_PER_DAY => {
-                show_info(strings().problem_title, reason);
-                let _ = report_app.emit("background-problem", reason);
+                crate::notify::job_failed(&report_app, "report", reason);
             }
             _ => {}
         })
@@ -194,7 +194,7 @@ fn start_session(app: &AppHandle, root: &Path, settings: &AppSettings, own: Arc<
     );
     let cache = dbs.cache;
     let watch_handle = watch(vault.clone(), own, handle.sender(), indexer.sender(), app.clone()).ok();
-    let sched_db = connect(&dir.join("pla.db")).map_err(|e| e.to_string())?;
+    let sched_db = connect(&dir.join("pla.db")).map_err(ue)?;
     let (cmd_tx, cmd_rx) = std::sync::mpsc::channel::<SchedCommand>();
     let notifier = AppNotifier::new(app.clone(), cmd_tx.clone());
     let weekly = Arc::new(Mutex::new(settings.weekly_report.clone()));
@@ -232,7 +232,7 @@ fn start_session(app: &AppHandle, root: &Path, settings: &AppSettings, own: Arc<
 fn with_vault<T>(state: &State<AppState>, f: impl FnOnce(&Vault) -> Result<T, FileError>) -> Result<T, String> {
     let guard = state.session.lock().expect("session lock");
     let session = guard.as_ref().ok_or(NO_VAULT)?;
-    f(&session.vault).map_err(|e| e.to_string())
+    f(&session.vault).map_err(ue)
 }
 
 #[tauri::command]
@@ -246,7 +246,7 @@ pub fn startup(app: AppHandle, state: State<AppState>) -> Result<StartupInfo, St
 pub fn begin(app: &AppHandle, state: &AppState) -> Result<StartupInfo, String> {
     let root = app_root()?;
     let _settings_guard = state.settings_lock.lock().expect("settings lock");
-    let loaded = load_settings(&root).map_err(|e| e.to_string())?;
+    let loaded = load_settings(&root).map_err(ue)?;
     let theme = match loaded.settings.theme {
         Theme::Dark => "dark",
         Theme::Light => "light",
@@ -277,7 +277,7 @@ pub fn begin(app: &AppHandle, state: &AppState) -> Result<StartupInfo, String> {
                 info.vault_in_app_data = pla_core::vault::inside_app_data(&session.vault.root, &pla_core::vault::app_data_roots());
                 *state.session.lock().expect("session lock") = Some(session);
             }
-            Err(e) => info.error = Some(format!("{}: {e}", path.display())),
+            Err(e) => info.error = Some(crate::errors::naming(&e, &path.display().to_string())),
         }
     }
     Ok(info)
@@ -296,7 +296,7 @@ fn open_vault_locked(app: &AppHandle, state: &State<AppState>, path: &Path) -> R
         return Err(format!("app_data|{}", path.display()));
     }
     let root = app_root()?;
-    let settings = load_settings(&root).map_err(|e| e.to_string())?.settings;
+    let settings = load_settings(&root).map_err(ue)?.settings;
     // Stop the previous vault before opening the next, outside the lock: one writer per pla.db.
     let previous = state.session.lock().expect("session lock").take();
     let mut old_root = None;
@@ -342,10 +342,10 @@ fn open_vault_locked(app: &AppHandle, state: &State<AppState>, path: &Path) -> R
 fn write_welcome_note(vault: &Vault, own: &SelfWrites, lang: &str) -> Result<String, String> {
     let (title, body) = crate::wizard::welcome_note(lang);
     let rel = format!("{}/{title}.md", vault.config.folders.inbox);
-    let path = files::resolve(vault, &rel).map_err(|e| e.to_string())?;
+    let path = files::resolve(vault, &rel).map_err(ue)?;
     if !path.exists() {
         own.record_text(&rel, body);
-        pla_core::fs_atomic::write_atomic(&path, body.as_bytes()).map_err(|e| e.to_string())?;
+        pla_core::fs_atomic::write_atomic(&path, body.as_bytes()).map_err(ue)?;
     }
     Ok(rel)
 }
@@ -381,7 +381,7 @@ pub fn inspect_vault_folder(path: String) -> FolderReport {
 pub fn setup_vault(app: AppHandle, state: State<AppState>, path: String, lang: String) -> Result<VaultInfo, String> {
     let _settings_guard = state.settings_lock.lock().expect("settings lock");
     let path = crate::wizard::clean_path(&path);
-    let fresh = crate::wizard::prepare_folder(&path).map_err(|e| e.to_string())?;
+    let fresh = crate::wizard::prepare_folder(&path).map_err(String::from)?;
     let info = open_vault_locked(&app, &state, &path)?;
     if fresh {
         if let Some(session) = state.session.lock().expect("session lock").as_ref() {
@@ -406,10 +406,10 @@ pub struct WeeklyReportView {
 
 #[tauri::command]
 pub fn weekly_report_settings(state: State<AppState>) -> Result<WeeklyReportView, String> {
-    let settings = load_settings(&app_root()?).map_err(|e| e.to_string())?.settings;
+    let settings = load_settings(&app_root()?).map_err(ue)?.settings;
     let guard = state.session.lock().expect("session lock");
     let job = match guard.as_ref() {
-        Some(session) => pla_core::jobs::status(&session.db.lock().expect("db lock"), pla_core::jobs::WEEKLY_REPORT).map_err(|e| e.to_string())?,
+        Some(session) => pla_core::jobs::status(&session.db.lock().expect("db lock"), pla_core::jobs::WEEKLY_REPORT).map_err(ue)?,
         None => pla_core::jobs::JobStatus::default(),
     };
     Ok(WeeklyReportView { schedule: settings.weekly_report, job })
@@ -464,7 +464,7 @@ fn settings_view(app: &AppHandle, state: &State<AppState>, settings: &AppSetting
 
 #[tauri::command]
 pub fn settings_get(app: AppHandle, state: State<AppState>) -> Result<SettingsView, String> {
-    let settings = load_settings(&app_root()?).map_err(|e| e.to_string())?.settings;
+    let settings = load_settings(&app_root()?).map_err(ue)?.settings;
     Ok(settings_view(&app, &state, &settings))
 }
 
@@ -563,7 +563,7 @@ pub fn create_note(state: State<AppState>, folder: String, title: String) -> Res
 pub fn queue_note(state: State<AppState>, path: String) -> Result<(), String> {
     let guard = state.session.lock().expect("session lock");
     let session = guard.as_ref().ok_or(NO_VAULT)?;
-    files::resolve(&session.vault, &path).map_err(|e| e.to_string())?;
+    files::resolve(&session.vault, &path).map_err(ue)?;
     session.worker.send(Command::Enqueue(path));
     Ok(())
 }
@@ -623,7 +623,7 @@ pub fn hide_to_tray(window: tauri::WebviewWindow, state: State<AppState>, queue:
     // the WebView goes with the window: in the tray PLA keeps only its core (NFR-PERF-006, M6
     // decision a); the page saved its note before asking (App.svelte onCloseRequested)
     queue.not_listening();
-    window.destroy().map_err(|e| e.to_string())?;
+    window.destroy().map_err(ue)?;
     let mut first_time = false;
     update_settings(&app_root()?, &state.settings_lock, |s| {
         first_time = !s.tray_hint_shown;

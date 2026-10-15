@@ -6,6 +6,7 @@ use tauri::State;
 
 use crate::commands::AppState;
 use crate::worker::Command;
+use crate::errors::ue;
 
 #[derive(Serialize)]
 pub struct DayInfo {
@@ -22,7 +23,7 @@ pub fn day_summary(state: State<AppState>, path: String) -> Result<Option<DayInf
     let session = guard.as_ref().ok_or(crate::commands::NO_VAULT)?;
     let Some(date) = pla_core::notes::daily_note_date(&path, &session.vault.config.folders) else { return Ok(None) };
     let cache = session.cache.lock().expect("cache lock");
-    let found = summary::get(&cache, &session.vault.config.folders, date).map_err(|e| format!("io||{e}"))?;
+    let found = summary::get(&cache, &session.vault.config.folders, date).map_err(ue)?;
     Ok(Some(DayInfo { date: date.format("%Y-%m-%d").to_string(), past: date < chrono::Local::now().date_naive(), summary: found }))
 }
 

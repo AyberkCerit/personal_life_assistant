@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { say, type Failure } from "./i18n";
   import { onMount } from "svelte";
   import Download from "@lucide/svelte/icons/download";
   import Pause from "@lucide/svelte/icons/pause";
@@ -14,7 +15,7 @@
   let { status }: { status: MemoryStatus } = $props();
   let download = $state<DownloadState | null>(null);
   let progress = $state<{ pending: number; total: number } | null>(null);
-  let error = $state<string | null>(null);
+  let error = $state<string | Failure | null>(null);
 
   $effect(() => {
     download = status.download;
@@ -69,7 +70,7 @@
   {:else}
     {#if download?.state === "paused"}<p class="line">{formatBytes(download.received, lang)} {t("memory.paused")}</p>{/if}
     {#if failure}<p class="error" role="alert">{failure}</p>{/if}
-    {#if error}<p class="error" role="alert">{error}</p>{/if}
+    {#if error}<p class="error" role="alert">{say(error)}</p>{/if}
     <div class="actions">
       {#if download?.state === "paused" || download?.state === "failed"}
         <Button variant="primary" icon={Play} onclick={() => void start()}>{t("memory.resume")}</Button>

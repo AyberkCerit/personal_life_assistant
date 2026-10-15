@@ -6,6 +6,7 @@ use tauri::menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Emitter, Manager, Wry};
 use tauri_plugin_autostart::ManagerExt;
+use crate::errors::ue;
 
 /// The check items of the current menu, so a change made in the window also updates the tray
 /// (final review I4); replaced when the menu is rebuilt in another language.
@@ -96,7 +97,7 @@ pub fn to_ui(app: &AppHandle, event: &str, payload: serde_json::Value) {
 /// FR-SET-016: one path for the tray item and the settings screen, so both agree.
 pub fn apply_autostart(app: &AppHandle, on: bool) -> Result<(), String> {
     let manager = app.autolaunch();
-    if on { manager.enable() } else { manager.disable() }.map_err(|e| e.to_string())?;
+    if on { manager.enable() } else { manager.disable() }.map_err(ue)?;
     set_autostart_checked(app, on);
     let _ = app.emit("autostart-changed", on);
     Ok(())

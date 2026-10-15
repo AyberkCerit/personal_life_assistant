@@ -1,5 +1,5 @@
 // Settings screen rules that need no backend (FR-SET-011).
-import { t, tf, type Key } from "./i18n";
+import { t, tf, type Key, failure, type Failure } from "./i18n";
 import { setupError } from "./wizard";
 
 export const SECTIONS = ["general", "vault", "ai", "scheduler", "notifications", "privacy", "about"] as const;
@@ -44,7 +44,8 @@ export function reportLine(job: JobStatus): { key: Key; at?: string; error?: str
 export const WEEKDAYS: Key[] = ["day.mon", "day.tue", "day.wed", "day.thu", "day.fri", "day.sat", "day.sun"];
 
 /** An error from a settings command as text for the user, naming the folder and the reason. */
-export function describeError(e: unknown): string {
+export function describeError(e: unknown): string | Failure {
   const { key, path, reason, reasonKey } = settingsError(String(e));
+  if (key === "settings.error.other") return failure(e); // M6 translations: no English reason inline
   return tf(key, { path, reason: reasonKey ? t(reasonKey) : reason });
 }

@@ -13,20 +13,11 @@ use tauri::{AppHandle, Emitter, State};
 
 use crate::commands::{AppState, Session};
 use crate::indexer::IndexCommand;
+use crate::errors::{ue, UserError};
 
 /// A file error as a code the UI turns into a sentence in its language.
 pub fn code(e: FileError) -> String {
-    match e {
-        FileError::BadPath(p) => format!("bad_path|{p}|"),
-        FileError::BadName(c) => format!("bad_name|{c}|"),
-        FileError::Exists(p) => format!("exists|{p}|"),
-        FileError::Reserved(n) => format!("reserved|{n}|"),
-        FileError::Missing => "missing||".into(),
-        FileError::ReadOnly(p) => format!("read_only|{p}|"),
-        FileError::Conflict { .. } => "conflict||".into(),
-        FileError::Io(e) => format!("io||{e}"),
-        FileError::Db(e) => format!("io||{e}"),
-    }
+    ue(e)
 }
 
 fn parent_of(rel: &str) -> &str {
@@ -49,7 +40,7 @@ fn with_session<T>(state: &State<AppState>, f: impl FnOnce(&Session) -> Result<T
 
 /// Notes (other than `rel`) with a link to it, by the index.
 fn linking_notes(session: &Session, rel: &str) -> Result<Vec<String>, String> {
-    let links = index::backlinks(&session.cache.lock().expect("cache lock"), rel).map_err(|e| format!("io||{e}"))?;
+    let links = index::backlinks(&session.cache.lock().expect("cache lock"), rel).map_err(ue)?;
     let mut sources: Vec<String> = links.into_iter().map(|b| b.source_path).collect();
     sources.dedup();
     Ok(sources)
@@ -186,7 +177,7 @@ pub fn deletable(vault: &Vault, rel: &str) -> Result<std::path::PathBuf, String>
 pub fn delete_entry(app: AppHandle, state: State<AppState>, path: String) -> Result<(), String> {
     with_session(&state, |s| {
         let abs = deletable(&s.vault, &path)?;
-        to_recycle_bin(&abs).map_err(|e| format!("io||{e}"))?;
+        to_recycle_bin(&abs)?;
         s.indexer.send(IndexCommand::Rescan);
         Ok(())
     })?;
@@ -216,14 +207,14 @@ pub(crate) fn to_recycle_bin(path: &Path) -> Result<(), String> {
     // SAFETY: a valid, double-NUL-terminated path list that outlives the call.
     let result = unsafe { SHFileOperationW(&mut op) };
     if result != 0 || op.fAnyOperationsAborted != 0 {
-        return Err(format!("the Recycle Bin refused it (code {result})"));
+        return Err(ue(UserError::new("recycle_bin", path.display().to_string()).because(format!("SHFileOperationW {result}"))));
     }
     Ok(())
 }
 
 #[cfg(not(windows))]
 pub(crate) fn to_recycle_bin(path: &Path) -> Result<(), String> {
-    Err(format!("no Recycle Bin here for {}", path.display()))
+    Err(ue(UserError::new("recycle_bin", path.display().to_string())))
 }
 
 #[tauri::command]
@@ -236,7 +227,7 @@ pub fn create_folder(app: AppHandle, state: State<AppState>, parent: String, nam
         if path.exists() {
             return Err(format!("exists|{rel}|"));
         }
-        std::fs::create_dir_all(&path).map_err(|e| format!("io||{e}"))
+        std::fs::create_dir_all(&path).map_err(ue)
     })?;
     let _ = app.emit("tree-changed", ());
     Ok(rel)
@@ -269,10 +260,10 @@ fn write_new(state: &State<AppState>, vault: &Vault, rel: &str, text: &str) -> R
         return Err(format!("exists|{rel}|"));
     }
     if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| format!("io||{e}"))?;
+        std::fs::create_dir_all(parent).map_err(ue)?;
     }
     state.self_writes.record_text(rel, text);
-    write_atomic(&path, text.as_bytes()).map_err(|e| format!("io||{e}"))
+    write_atomic(&path, text.as_bytes()).map_err(ue)
 }
 
 /// FR-VLT-009/FR-EDT-018: a note in `folder`, empty or from a template.

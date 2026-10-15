@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, State};
 
 use crate::commands::{app_root, AppState};
+use crate::errors::ue;
 
 /// The region's list separator and decimal mark, as Windows reports them, made safe for CSV.
 pub fn csv_style(list: &str, decimal: &str) -> CsvStyle {
@@ -150,7 +151,7 @@ pub struct BackupStatus {
 pub fn backup_status(state: State<AppState>) -> Result<BackupStatus, String> {
     let guard = state.session.lock().expect("session lock");
     let session = guard.as_ref().ok_or(crate::commands::NO_VAULT)?;
-    let job = pla_core::jobs::status(&session.db.lock().expect("db lock"), pla_core::jobs::DAILY).map_err(|e| e.to_string())?;
+    let job = pla_core::jobs::status(&session.db.lock().expect("db lock"), pla_core::jobs::DAILY).map_err(ue)?;
     Ok(BackupStatus { job, backups: pla_core::jobs::backups(&session.vault.root) })
 }
 
@@ -166,8 +167,8 @@ pub fn export_data(state: State<AppState>, dir: String, lang: String) -> Result<
         let guard = state.session.lock().expect("session lock");
         let session = guard.as_ref().ok_or(crate::commands::NO_VAULT)?;
         let db = session.db.lock().expect("db lock");
-        let tasks = pla_core::export::tasks_csv(&db, &lang, style).map_err(|e| e.to_string())?;
-        (tasks, pla_core::export::metrics_csv(&db, &lang, style).map_err(|e| e.to_string())?)
+        let tasks = pla_core::export::tasks_csv(&db, &lang, style).map_err(ue)?;
+        (tasks, pla_core::export::metrics_csv(&db, &lang, style).map_err(ue)?)
     };
     let (tasks_name, metrics_name) = export_names(&lang, &chrono::Local::now().format("%Y-%m-%d").to_string());
     let mut written = Vec::new();
@@ -188,7 +189,7 @@ pub fn notification_status() -> bool {
 /// Opens one of PLA's own places in Explorer (or Windows' notification settings).
 #[tauri::command]
 pub fn open_place(state: State<AppState>, kind: PlaceKind) -> Result<(), String> {
-    let settings = pla_core::settings::load_settings(&app_root()?).map_err(|e| e.to_string())?.settings;
+    let settings = pla_core::settings::load_settings(&app_root()?).map_err(ue)?.settings;
     let places = Places {
         vault: state.session.lock().expect("session lock").as_ref().map(|s| s.vault.root.clone()),
         app_root: app_root().ok(),
@@ -209,7 +210,7 @@ pub fn open_place(state: State<AppState>, kind: PlaceKind) -> Result<(), String>
     }
     #[cfg(not(windows))]
     explorer.arg(&target);
-    explorer.spawn().map_err(|e| e.to_string())?;
+    explorer.spawn().map_err(ue)?;
     Ok(())
 }
 
@@ -224,7 +225,7 @@ pub struct About {
 /// FR-SET-017: version, active model and the bundled parts' licences.
 #[tauri::command]
 pub fn about_info(app: AppHandle) -> Result<About, String> {
-    let settings = pla_core::settings::load_settings(&app_root()?).map_err(|e| e.to_string())?.settings;
+    let settings = pla_core::settings::load_settings(&app_root()?).map_err(ue)?.settings;
     let entry = settings.model_id.as_deref().and_then(pla_core::models::catalog::by_id);
     let model = settings.model_path.as_deref().and_then(|p| crate::model_cmds::describe_model(p, settings.model_id.as_deref())).map(|m| m.name);
     Ok(About { version: app.package_info().version.to_string(), model_licence: model.as_ref().and(entry.map(|e| e.licence)), model, components: COMPONENTS })

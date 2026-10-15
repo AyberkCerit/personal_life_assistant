@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { errorText } from "./i18n";
   import CircleAlert from "@lucide/svelte/icons/circle-alert";
   import Play from "@lucide/svelte/icons/play";
   import SettingsIcon from "@lucide/svelte/icons/settings";
@@ -41,7 +42,8 @@
   <span>{status.added} {t("status.added")}</span>
   {#if memory && memory.pending > 0}<span>{tf("memory.status", { done: memory.total - memory.pending, total: memory.total })}{#if status.paused} ({t("memory.paused")}){/if}</span>{/if}
   {#if status.last_error}
-    <span class="error" title={status.last_error}><Icon icon={CircleAlert} size="sm" />{status.last_error}</span>
+    {@const problem = errorText(status.last_error)}
+    <span class="error" title={problem.details}><Icon icon={CircleAlert} size="sm" />{problem.text}</span>
   {/if}
   <span class="end">
     <IconButton icon={SettingsIcon} label={t("status.settings")} onclick={onSettings} />

@@ -12,6 +12,7 @@ use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::commands::{bundled_server, AppState};
+use crate::errors::{ue, UserError};
 
 /// The embedding server both the indexer (in the background) and the worker (for a question) use.
 pub type Embeds = Arc<Mutex<Option<Box<dyn Embedder + Send>>>>;
@@ -66,7 +67,7 @@ pub fn memory_status(state: State<AppState>) -> Result<MemoryStatus, String> {
 
 /// Starts (or resumes) the embedding model's download; done, the open session starts using it.
 pub fn start_download(app: &AppHandle) -> Result<(), String> {
-    let dir = models::models_dir().ok_or("LOCALAPPDATA is not set; PLA cannot store the model.")?;
+    let dir = models::models_dir().ok_or_else(|| ue(UserError::new("no_app_data", "")))?;
     let entry = catalog::embedding();
     let (events, done_app) = (app.clone(), app.clone());
     app.state::<AppState>()

@@ -14,7 +14,7 @@
   import { api, inTauri, type DownloadState, type TreeEntry, type WorkerStatus } from "./lib/api";
   import FileTree from "./lib/FileTree.svelte";
   import CalendarDays from "@lucide/svelte/icons/calendar-days";
-  import { followMove, treeError, type TreeActions } from "./lib/tree";
+  import { followMove, type TreeActions } from "./lib/tree";
   import TaskPanel from "./lib/TaskPanel.svelte";
   import Editor from "./lib/Editor.svelte";
   import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -38,7 +38,8 @@
   import type { MetricRecord } from "./lib/api";
   import { describeError, type Section } from "./lib/settings";
   import type { Progress } from "./lib/wizard";
-  import { t, tf, lang, setLang, type Lang } from "./lib/i18n";
+  import { failure, t, tf, lang, setLang, type Failure, type Lang } from "./lib/i18n";
+  import ErrorBanner from "./lib/ui/ErrorBanner.svelte";
   import type { VaultInfo } from "./lib/api";
 
   let loaded = $state(false);
@@ -55,7 +56,7 @@
   let showModel = $state(false);
   let reveal = $state<string | null>(null);
   let editor: ReturnType<typeof Editor> | undefined = $state();
-  let error = $state<string | null>(null);
+  let error = $state<string | Failure | null>(null);
   let vaultInAppData = $state(false);
   let settingsOpen = $state(false);
   // The middle pane: the note editor or the metrics view (SRS S-06).
@@ -157,7 +158,7 @@
       await openNote(opened.path);
     } catch (e) {
       const [code, what] = String(e).split("|");
-      error = code === "not_a_note" ? tf("links.notANote", { target: what ?? target }) : tf("links.error", { reason: String(e) });
+      error = code === "not_a_note" ? tf("links.notANote", { target: what ?? target }) : failure(e);
     }
   }
 
@@ -246,7 +247,7 @@
     try {
       await editor?.close(); // the note is saved before the editor leaves the middle pane
     } catch (e) {
-      error = String(e);
+      error = failure(e);
       return;
     }
     center = "metrics";
@@ -271,7 +272,7 @@
     try {
       await editor?.close(); // save, queue if edited (FR-EXT-002); text is never dropped
     } catch (e) {
-      error = String(e); // stay on the note rather than lose what could not be saved
+      error = failure(e); // stay on the note rather than lose what could not be saved
       return;
     }
     reveal = text;
@@ -289,8 +290,7 @@
 
 
   function treeFailed(e: unknown) {
-    const { key, detail, reason } = treeError(String(e));
-    error = tf(key, { detail, reason });
+    error = failure(e, "tree");
   }
 
   /**
@@ -301,7 +301,7 @@
     try {
       await editor?.close();
     } catch (e) {
-      error = String(e); // never lose what could not be saved
+      error = failure(e); // never lose what could not be saved
       return;
     }
     const open = current;
@@ -371,7 +371,7 @@
       if (info.language) switchLanguage(info.language);
       wizard = info.show_wizard;
       document.documentElement.dataset.theme = info.theme;
-      error = info.error;
+      error = info.error ? failure(info.error) : null;
       vaultInAppData = info.vault_in_app_data;
       vaultPath = info.vault_path;
       inbox = info.inbox ?? "inbox";
@@ -413,7 +413,7 @@
       if (items.some((i) => i.kind === "metric")) metricsVersion++;
     });
     // FR-SCH-015: Windows shows it as a notification; the window says it too (architecture review M9)
-    const unProblem = api.onBackgroundProblem((message) => (error = tf("background.problem", { reason: message })));
+    const unProblem = api.onBackgroundProblem((message) => (error = failure(message, "background")));
     const shortcut = (e: KeyboardEvent) => {
       if (e.ctrlKey && e.key === ",") {
         e.preventDefault();
@@ -485,7 +485,7 @@
     <h1>{t("welcome.title")}</h1>
     <p class="pitch">{t("welcome.pitch")}</p>
     <p class="body">{t("welcome.body")}</p>
-    {#if error}<Banner kind="danger" icon={CircleAlert} role="alert">{error}</Banner>{/if}
+    {#if error}<ErrorBanner {error} />{/if}
     <Button variant="primary" icon={FolderOpen} onclick={chooseVault}>{t("welcome.open")}</Button>
   </main>
 {:else}
@@ -514,7 +514,7 @@
       <ModelBanner queued={status.queued} forceOpen={showModel} onOpened={() => (showModel = false)} />
       <MemoryBanner languageModel={status.model !== "not_installed"} />
       <ReminderBanner version={tasksVersion + panelEdits} onChanged={() => tasksVersion++} />
-      {#if error}<Banner kind="danger" icon={CircleAlert} role="alert">{t("error.generic")}: {error}</Banner>{/if}
+      {#if error}<ErrorBanner {error} />{/if}
       {#if vaultInAppData}<Banner kind="warning" icon={CircleAlert} role="alert">{t("vault.inAppData")}</Banner>{/if}
       {#if center === "metrics"}
         <MetricsView

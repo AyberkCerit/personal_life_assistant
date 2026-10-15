@@ -6,7 +6,7 @@
   import Pause from "@lucide/svelte/icons/pause";
   import Play from "@lucide/svelte/icons/play";
   import { api, inTauri, type DownloadState, type ModelStatus } from "./api";
-  import { lang, t, type Key } from "./i18n";
+  import { lang, say, t, type Key } from "./i18n";
   import { failureKey, formatBytes, progressLine } from "./modelText";
   import { describeError } from "./settings";
   import Button from "./ui/Button.svelte";
@@ -38,7 +38,7 @@
     try {
       await api.modelDownloadStart();
     } catch (e) {
-      localError = describeError(e); // e.g. "already running" (final review I4)
+      localError = say(describeError(e)); // e.g. "already running" (final review I4)
     }
   }
 

@@ -10,6 +10,7 @@ use tauri::{AppHandle, Emitter, State};
 
 use crate::commands::AppState;
 use crate::worker::{AskJob, QaEvent};
+use crate::errors::{unexpected, ue};
 
 /// The question being answered: its turn and its Stop switch. One at a time.
 static CURRENT: Mutex<Option<(String, Arc<AtomicBool>)>> = Mutex::new(None);
@@ -108,8 +109,7 @@ pub fn qa_history(state: State<AppState>) -> Result<Vec<Turn>, String> {
     let guard = state.session.lock().expect("session lock");
     let session = guard.as_ref().ok_or(crate::commands::NO_VAULT)?;
     let db = session.db.lock().expect("db lock");
-    let turns = qa::history(&db, 100).map_err(|e| format!("io||{e}"));
-    turns
+    qa::history(&db, 100).map_err(ue)
 }
 
 /// M6 performance: the assistant panel opened; the model reads ahead what every question shares.
@@ -129,8 +129,7 @@ pub fn qa_clear(state: State<AppState>) -> Result<(), String> {
     let guard = state.session.lock().expect("session lock");
     let session = guard.as_ref().ok_or(crate::commands::NO_VAULT)?;
     let db = session.db.lock().expect("db lock");
-    let cleared = qa::clear_history(&db).map(|_| ()).map_err(|e| format!("io||{e}"));
-    cleared
+    qa::clear_history(&db).map(|_| ()).map_err(ue)
 }
 
 /// The owner's decision a: the user pressed Save on a suggested note. Returns the note's path.
@@ -139,7 +138,7 @@ pub fn qa_save_suggestion(app: AppHandle, state: State<AppState>, turn_id: Strin
     let guard = state.session.lock().expect("session lock");
     let session = guard.as_ref().ok_or(crate::commands::NO_VAULT)?;
     let db = session.db.lock().expect("db lock");
-    let rel = qa::save_suggestion(&db, &session.vault, &turn_id, index).map_err(|e| format!("io||{e}"))?.ok_or("missing||")?;
+    let rel = qa::save_suggestion(&db, &session.vault, &turn_id, index).map_err(unexpected)?.ok_or("missing||")?;
     let _ = app.emit("tree-changed", ());
     Ok(rel)
 }
@@ -150,11 +149,11 @@ pub fn qa_undo(app: AppHandle, state: State<AppState>, turn_id: String, index: u
     let guard = state.session.lock().expect("session lock");
     let session = guard.as_ref().ok_or(crate::commands::NO_VAULT)?;
     let db = session.db.lock().expect("db lock");
-    let undo = qa::take_undo(&db, &turn_id, index).map_err(|e| format!("io||{e}"))?.ok_or("missing||")?;
+    let undo = qa::take_undo(&db, &turn_id, index).map_err(ue)?.ok_or("missing||")?;
     let done = if undo.kind == "note" {
-        crate::fileops_cmds::deletable(&session.vault, &undo.id).and_then(|abs| crate::fileops_cmds::to_recycle_bin(&abs).map_err(|e| format!("io||{e}")))
+        crate::fileops_cmds::deletable(&session.vault, &undo.id).and_then(|abs| crate::fileops_cmds::to_recycle_bin(&abs))
     } else {
-        qa::undo(&db, &undo, Local::now().fixed_offset()).map_err(|e| format!("io||{e}"))
+        qa::undo(&db, &undo, Local::now().fixed_offset()).map_err(unexpected)
     };
     if let Err(e) = done {
         let _ = qa::restore_undo(&db, &turn_id, index, undo);

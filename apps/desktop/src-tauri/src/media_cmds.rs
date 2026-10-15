@@ -13,13 +13,14 @@ use tauri::{AppHandle, Emitter, State};
 
 use crate::commands::AppState;
 use crate::fileops_cmds::code;
+use crate::errors::ue;
 
 fn media_code(e: MediaError) -> String {
     match e {
         MediaError::NotImage => "not_image||".into(),
         MediaError::TooBig => "too_big|20|".into(),
         MediaError::File(e) => code(e),
-        MediaError::Io(e) => format!("io||{e}"),
+        MediaError::Io(e) => ue(e),
     }
 }
 

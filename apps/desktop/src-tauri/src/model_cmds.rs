@@ -11,6 +11,7 @@ use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::commands::{app_root, bundled_server, update_settings, AppState};
 use crate::worker::Command;
+use crate::errors::{ue, UserError};
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct InstalledModel {
@@ -74,7 +75,7 @@ fn install_model(app: &AppHandle, model_path: &Path, model_id: Option<&str>, ins
 pub fn model_remove(app: AppHandle, state: State<AppState>) -> Result<(), String> {
     crate::qa_cmds::qa_stop(); // a question in progress would hold the model (final review)
     let root = app_root()?;
-    let settings = load_settings(&root).map_err(|e| e.to_string())?.settings;
+    let settings = load_settings(&root).map_err(ue)?.settings;
     let models_dir = models::models_dir();
     let Some(plan) = crate::model_paths::removal(&settings, models_dir.as_deref()) else { return Ok(()) };
     let (ack, done) = std::sync::mpsc::channel();
@@ -115,7 +116,7 @@ pub fn model_remove(app: AppHandle, state: State<AppState>) -> Result<(), String
 
 #[tauri::command]
 pub fn model_status(state: State<AppState>) -> Result<ModelStatus, String> {
-    let settings = load_settings(&app_root()?).map_err(|e| e.to_string())?.settings;
+    let settings = load_settings(&app_root()?).map_err(ue)?.settings;
     let path = crate::model_paths::first_existing([settings.model_path.clone(), crate::model_paths::process_env("PLA_MODEL")]);
     Ok(ModelStatus {
         installed: path.as_deref().and_then(|p| describe_model(p, settings.model_id.as_deref())),
@@ -156,7 +157,7 @@ impl models::policy::UrlPolicy for DevLocal {
 
 #[tauri::command]
 pub fn model_download_start(app: AppHandle, state: State<AppState>) -> Result<(), String> {
-    let dir = models::models_dir().ok_or("LOCALAPPDATA is not set; PLA cannot store the model.")?;
+    let dir = models::models_dir().ok_or_else(|| ue(UserError::new("no_app_data", "")))?;
     let (entry, policy) = download_source();
     let (events, done_app) = (app.clone(), app.clone());
     state

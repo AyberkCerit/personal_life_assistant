@@ -17,6 +17,8 @@ pub struct Strings {
     pub missed_title: &'static str,
     pub missed_body: &'static str,
     pub problem_title: &'static str,
+    pub backup_failed: &'static str,
+    pub report_failed: &'static str,
     pub tray_title: &'static str,
     pub tray_body: &'static str,
     pub model_ready_title: &'static str,
@@ -41,6 +43,8 @@ const TR: Strings = Strings {
     missed_title: "Kaçırılan hatırlatıcılar",
     missed_body: "PLA kapalıyken zamanı gelen hatırlatıcılar var. Listeyi uygulamada görebilirsin.",
     problem_title: "PLA arka plan işi başarısız oldu",
+    backup_failed: "Günlük yedek iki kez alınamadı; yarın yeniden denenecek. Ayrıntılar Ayarlar > Zamanlayıcı'da.",
+    report_failed: "Haftalık rapor iki kez yazılamadı; yarın yeniden denenecek.",
     tray_title: "PLA çalışmaya devam ediyor",
     tray_body: "Pencere kapandı ama hatırlatıcılar çalışıyor. Tamamen kapatmak için tepsi simgesinden Çık'ı seç.",
     model_ready_title: "PLA: model hazır",
@@ -65,6 +69,8 @@ const EN: Strings = Strings {
     missed_title: "Missed reminders",
     missed_body: "Some reminders came due while PLA was closed. See the list in the app.",
     problem_title: "A PLA background job failed",
+    backup_failed: "The daily backup failed twice; it will be tried again tomorrow. Details in Settings > Scheduler.",
+    report_failed: "The weekly report could not be written twice; it will be tried again tomorrow.",
     tray_title: "PLA keeps running",
     tray_body: "The window is closed but reminders still work. To quit, choose Quit from the tray icon.",
     model_ready_title: "PLA: model ready",
@@ -128,11 +134,24 @@ fn os_turkish() -> bool {
     }
 }
 
+/// FR-SCH-015: a background job failed twice today. The toast says so in PLA's language (no page is
+/// needed); the window hears `<job>||<reason>` and says it itself, the reason only for copying.
+pub fn job_failed(app: &AppHandle, job: &str, reason: &str) {
+    let s = strings();
+    show_info(s.problem_title, if job == "backup" { s.backup_failed } else { s.report_failed });
+    let _ = app.emit("background-problem", format!("{job}||{reason}"));
+}
+
 pub fn strings() -> &'static Strings {
     pick(UI_LANG.load(Ordering::SeqCst), os_turkish())
 }
 
 /// The language PLA speaks, `tr` or `en`, as `strings` picks it (the assistant's fallback).
+/// The interface language for the texts PLA writes itself (reports, summaries).
+pub fn ui_language() -> pla_core::lang::Lang {
+    pla_core::lang::Lang::from_code(ui_lang())
+}
+
 pub fn ui_lang() -> &'static str {
     // not by comparing `strings()` with `&TR`: references to a const need not share an address
     lang_code(UI_LANG.load(Ordering::SeqCst), os_turkish())
@@ -163,7 +182,7 @@ pub fn show_info(title: &str, body: &str) {
 /// FR-SCH-007: "Your weekly report is ready"; a click shows PLA with the report open.
 pub fn report_ready(app: &AppHandle, vault: &std::path::Path, week: pla_core::report::Week, rel: &str) {
     let s = strings();
-    let body = format!("{} {} · {}", s.report_week, week.number, pla_core::report::span(week, ui_lang()));
+    let body = format!("{} {} · {}", s.report_week, week.number, pla_core::report::span(week, ui_language()));
     #[cfg(windows)]
     {
         // the vault goes with it: another may be open by the time of the click (final review M6)
@@ -256,9 +275,9 @@ impl Notifier for AppNotifier {
         show_info(&format!("{} ({})", s.missed_title, reminders.len()), s.missed_body);
     }
 
+    /// The scheduler's only job that can fail is the daily backup.
     fn problem(&self, message: &str) {
-        let _ = self.app.emit("background-problem", message);
-        show_info(strings().problem_title, message);
+        job_failed(&self.app, "backup", message);
     }
 
     fn tasks_changed(&self) {

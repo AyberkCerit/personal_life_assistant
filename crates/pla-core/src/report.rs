@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 use crate::extraction::MetricKind;
+use crate::lang::Lang;
 use crate::vault::{Folders, Vault};
 
 /// When the report is written (FR-SCH-016). The default is Sunday 20:00.
@@ -177,12 +178,12 @@ pub fn week_summaries(cache: &Connection, week: Week) -> rusqlite::Result<Vec<(N
 const DAY_EN: [&str; 7] = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
 
 /// The request for the week's highlights, from the daily summaries.
-pub fn highlights_request(week: Week, summaries: &[(NaiveDate, String)], lang: &str) -> Value {
+pub fn highlights_request(week: Week, summaries: &[(NaiveDate, String)], lang: Lang) -> Value {
     let mut text = format!("Week {} ({} to {})\n\n", week.label(), week.monday(), week.sunday());
     for (date, summary) in summaries {
         text.push_str(&format!("{date} {}:\n{}\n\n", DAY_EN[date.weekday().num_days_from_monday() as usize], summary.trim()));
     }
-    let language = if lang == "en" { "English" } else { "Turkish" };
+    let language = lang.name();
     json!({
         "messages": [
             { "role": "system", "content": format!("You write the highlights of the user's week from their daily summaries. Write 3 to 5 short bullet points, each starting with \"- \", in {language}. Use only what the summaries say: never add, guess or judge. Keep the [[Note title]] links they name. No heading, no introduction.") },
@@ -224,8 +225,8 @@ const DAY_SHORT_TR: [&str; 7] = ["Pzt", "Sal", "Çar", "Per", "Cum", "Cmt", "Paz
 const DAY_SHORT_EN: [&str; 7] = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
 /// "5–11 Ekim 2026", "29 Eylül – 5 Ekim 2026", "29 December 2025 – 4 January 2026".
-pub fn span(week: Week, lang: &str) -> String {
-    let months = if lang == "en" { MONTHS_EN } else { MONTHS_TR };
+pub fn span(week: Week, lang: Lang) -> String {
+    let months = if lang.is_en() { MONTHS_EN } else { MONTHS_TR };
     let (a, b) = (week.monday(), week.sunday());
     let m = |d: NaiveDate| months[d.month0() as usize];
     if a.year() != b.year() {
@@ -238,27 +239,27 @@ pub fn span(week: Week, lang: &str) -> String {
 }
 
 /// A number as the language writes it: "6,8" in Turkish, "6.8" in English; thousands grouped.
-fn number(v: f64, decimals: usize, lang: &str) -> String {
+fn number(v: f64, decimals: usize, lang: Lang) -> String {
     let s = format!("{v:.decimals$}");
     let (int, frac) = s.split_once('.').map_or((s.as_str(), None), |(i, f)| (i, Some(f)));
     let (sign, digits) = int.strip_prefix('-').map_or(("", int), |d| ("-", d));
     let mut grouped = String::new();
     for (i, c) in digits.chars().enumerate() {
         if i > 0 && (digits.len() - i) % 3 == 0 {
-            grouped.push(if lang == "en" { ',' } else { '.' });
+            grouped.push(if lang.is_en() { ',' } else { '.' });
         }
         grouped.push(c);
     }
     match frac {
         Some(f) if f.trim_end_matches('0').is_empty() => format!("{sign}{grouped}"),
-        Some(f) => format!("{sign}{grouped}{}{f}", if lang == "en" { '.' } else { ',' }),
+        Some(f) => format!("{sign}{grouped}{}{f}", if lang.is_en() { '.' } else { ',' }),
         None => format!("{sign}{grouped}"),
     }
 }
 
-fn metric_cell(kind: MetricKind, v: Option<f64>, lang: &str) -> String {
+fn metric_cell(kind: MetricKind, v: Option<f64>, lang: Lang) -> String {
     let Some(v) = v else { return "–".into() };
-    let tr = lang != "en";
+    let tr = !lang.is_en();
     match kind {
         MetricKind::Sleep => format!("{} {}", number(v, 1, lang), if tr { "sa" } else { "h" }),
         MetricKind::Steps => number(v, 0, lang),
@@ -280,8 +281,8 @@ fn metric_cell(kind: MetricKind, v: Option<f64>, lang: &str) -> String {
     }
 }
 
-fn metric_name(kind: MetricKind, lang: &str) -> &'static str {
-    match (kind, lang == "en") {
+fn metric_name(kind: MetricKind, lang: Lang) -> &'static str {
+    match (kind, lang.is_en()) {
         (MetricKind::Sleep, false) => "Uyku (günlük ort.)",
         (MetricKind::Sleep, true) => "Sleep (daily avg.)",
         (MetricKind::Steps, false) => "Adım (günlük ort.)",
@@ -296,8 +297,8 @@ fn metric_name(kind: MetricKind, lang: &str) -> &'static str {
 }
 
 /// The report's Markdown (FR-SCH-009: `pla_generated`, so it is never mined for tasks).
-pub fn render(week: Week, lang: &str, highlights: Result<&str, NoHighlights>, stats: &WeekStats) -> String {
-    let en = lang == "en";
+pub fn render(week: Week, lang: Lang, highlights: Result<&str, NoHighlights>, stats: &WeekStats) -> String {
+    let en = lang.is_en();
     let t = |tr: &'static str, e: &'static str| if en { e } else { tr };
     let mut s = format!("---\npla_generated: true\nweek: {}\n---\n# {} {} · {}\n\n", week.label(), t("Hafta", "Week"), week.number, span(week, lang));
     s.push_str(&format!("## {}\n\n", t("Haftanın özeti", "The week in brief")));
@@ -518,7 +519,7 @@ mod tests {
                 MetricLine { kind: MetricKind::Steps, this_week: Some(8420.0), last_week: None },
             ],
         };
-        let tr = render(week, "tr", Ok("- Bütçe onaylandı [[Toplantı]]"), &stats);
+        let tr = render(week, Lang::Tr, Ok("- Bütçe onaylandı [[Toplantı]]"), &stats);
         assert!(tr.starts_with("---\npla_generated: true\nweek: 2026-W41\n---\n# Hafta 41 · 5–11 Ekim 2026"), "{tr}");
         for want in [
             "- Bütçe onaylandı [[Toplantı]]",
@@ -529,10 +530,10 @@ mod tests {
         ] {
             assert!(tr.contains(want), "{want}\n{tr}");
         }
-        let en = render(week, "en", Err(NoHighlights::NoModel), &WeekStats::default());
+        let en = render(week, Lang::En, Err(NoHighlights::NoModel), &WeekStats::default());
         assert!(en.contains("# Week 41 · 5–11 October 2026") && en.contains("No summary without the language model"), "{en}");
-        assert_eq!(span(Week::of(d("2026-10-01")), "tr"), "28 Eylül – 4 Ekim 2026");
-        assert_eq!(span(Week::of(d("2026-12-31")), "en"), "28 December 2026 – 3 January 2027");
+        assert_eq!(span(Week::of(d("2026-10-01")), Lang::Tr), "28 Eylül – 4 Ekim 2026");
+        assert_eq!(span(Week::of(d("2026-12-31")), Lang::En), "28 December 2026 – 3 January 2027");
     }
 
     #[test]

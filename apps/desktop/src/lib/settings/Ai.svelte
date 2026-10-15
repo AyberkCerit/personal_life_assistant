@@ -1,6 +1,7 @@
 <script lang="ts">
+  import type { Failure } from "../i18n";
+  import ErrorBanner from "../ui/ErrorBanner.svelte";
   import { onMount } from "svelte";
-  import CircleAlert from "@lucide/svelte/icons/circle-alert";
   import FolderOpen from "@lucide/svelte/icons/folder-open";
   import Trash2 from "@lucide/svelte/icons/trash-2";
   import { api, type ModelStatus } from "../api";
@@ -10,7 +11,6 @@
   import ModelCard from "../ModelCard.svelte";
   import MemoryCard from "../MemoryCard.svelte";
   import type { MemoryStatus } from "../api";
-  import Banner from "../ui/Banner.svelte";
   import Button from "../ui/Button.svelte";
   import Checkbox from "../ui/Checkbox.svelte";
   import Row from "./Row.svelte";
@@ -20,7 +20,7 @@
   let confirming = $state(false);
   let busy = $state(false);
   let notice = $state<string | null>(null);
-  let error = $state<string | null>(null);
+  let error = $state<string | Failure | null>(null);
 
   let memoryStatus = $state<MemoryStatus | null>(null);
 
@@ -104,7 +104,7 @@
 <Row label={t("settings.ai.pause")} hint={t("settings.ai.pause.hint")}>
   <Checkbox checked={paused} label={t("settings.ai.pause")} hideLabel onchange={(on) => void act(() => api.setPaused(on))} />
 </Row>
-{#if error}<Banner kind="danger" icon={CircleAlert} role="alert">{error}</Banner>{/if}
+{#if error}<ErrorBanner {error} />{/if}
 
 <style>
   dl { display: grid; grid-template-columns: max-content 1fr; gap: var(--space-1) var(--space-3); margin: var(--space-2) 0; font-size: var(--text-md); }

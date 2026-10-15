@@ -1,10 +1,10 @@
 <script lang="ts">
+  import type { Failure } from "../i18n";
+  import ErrorBanner from "../ui/ErrorBanner.svelte";
   import { onMount, tick } from "svelte";
-  import CircleAlert from "@lucide/svelte/icons/circle-alert";
   import { api, type SettingsView } from "../api";
   import { lang, t, type Lang } from "../i18n";
   import { describeError } from "../settings";
-  import Banner from "../ui/Banner.svelte";
   import Checkbox from "../ui/Checkbox.svelte";
   import Row from "./Row.svelte";
 
@@ -16,7 +16,7 @@
   let languageSelect: HTMLSelectElement | undefined = $state();
 
   let view = $state<SettingsView | null>(null);
-  let error = $state<string | null>(null);
+  let error = $state<string | Failure | null>(null);
   let revision = $state(0); // bumped after a refused change: the controls are drawn again from what is saved
 
   async function run(action: () => Promise<void>) {
@@ -60,4 +60,4 @@
   </Row>
   {/key}
 {/if}
-{#if error}<Banner kind="danger" icon={CircleAlert} role="alert">{error}</Banner>{/if}
+{#if error}<ErrorBanner {error} />{/if}
