@@ -1,5 +1,5 @@
 // Settings screen rules that need no backend (FR-SET-011).
-import { t, tf, type Key, failure, type Failure } from "./i18n";
+import { t, tf, type Key, errorText, failure, type Failure } from "./i18n";
 import { setupError } from "./wizard";
 
 export const SECTIONS = ["general", "vault", "ai", "scheduler", "notifications", "privacy", "about"] as const;
@@ -28,14 +28,15 @@ export interface JobStatus { last_success_at: string | null; last_attempt_at: st
 
 /** The Scheduler section's line about the daily backup. */
 export function backupLine(job: JobStatus): { key: Key; at?: string; error?: string } {
-  if (job.last_error && job.last_attempt_at) return { key: "settings.backup.failed", at: job.last_attempt_at, error: job.last_error };
+  // the job keeps a code (M6 translations); an older English reason reads as unexpected
+  if (job.last_error && job.last_attempt_at) return { key: "settings.backup.failed", at: job.last_attempt_at, error: errorText(job.last_error).text };
   if (job.last_success_at) return { key: "settings.backup.last", at: job.last_success_at };
   return { key: "settings.backup.never" };
 }
 
 /** FR-SCH-011: when the weekly report was last written, or why it failed. */
 export function reportLine(job: JobStatus): { key: Key; at?: string; error?: string } {
-  if (job.last_error && job.last_attempt_at) return { key: "settings.report.failed", at: job.last_attempt_at, error: job.last_error };
+  if (job.last_error && job.last_attempt_at) return { key: "settings.report.failed", at: job.last_attempt_at, error: errorText(job.last_error).text };
   if (job.last_success_at) return { key: "settings.report.last", at: job.last_success_at };
   return { key: "settings.report.never" };
 }

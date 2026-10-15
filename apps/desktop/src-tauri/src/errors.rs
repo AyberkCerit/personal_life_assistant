@@ -127,6 +127,24 @@ impl From<pla_core::pipeline::PipelineError> for UserError {
     }
 }
 
+impl From<pla_core::jobs::JobError> for UserError {
+    fn from(e: pla_core::jobs::JobError) -> Self {
+        match e {
+            pla_core::jobs::JobError::Db(e) => e.into(),
+            pla_core::jobs::JobError::Io(e) => e.into(),
+        }
+    }
+}
+
+impl From<pla_core::report::ReportError> for UserError {
+    fn from(e: pla_core::report::ReportError) -> Self {
+        match e {
+            pla_core::report::ReportError::Io(e) => e.into(),
+            pla_core::report::ReportError::Path(p) => Self::new("bad_path", p),
+        }
+    }
+}
+
 impl From<FileError> for UserError {
     fn from(e: FileError) -> Self {
         match e {
@@ -146,6 +164,8 @@ impl From<FileError> for UserError {
 impl From<VaultError> for UserError {
     fn from(e: VaultError) -> Self {
         match e {
+            // pla-core says so for a folder that is gone, too: the user deleted or renamed the vault
+            VaultError::NotADirectory(p) if !p.exists() => Self::new("missing", p.display().to_string()),
             VaultError::NotADirectory(p) => Self::new("not_folder", p.display().to_string()),
             VaultError::NetworkPathUnsupported(p) => Self::new("network", p.display().to_string()),
             VaultError::Io(e) => e.into(),
@@ -194,6 +214,10 @@ mod tests {
         assert_eq!(ue(LlmError::MissingModel("C:/m.gguf".into())), "model_file_missing|C:/m.gguf|");
         assert_eq!(ue(LlmError::Timeout), "model_timeout||");
         assert_eq!(String::from(UserError::unexpected("boom")), "unexpected||boom");
+        let gone = std::env::temp_dir().join("pla-no-such-vault-here");
+        assert!(ue(VaultError::NotADirectory(gone.clone())).starts_with("missing|"), "a deleted vault folder is missing");
+        let file = std::env::current_exe().unwrap();
+        assert!(ue(VaultError::NotADirectory(file)).starts_with("not_folder|"));
     }
 
     #[test]

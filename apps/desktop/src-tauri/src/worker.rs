@@ -554,7 +554,7 @@ impl Worker {
         };
         let cache = match pla_core::db::connect(cache_path) {
             Ok(c) => c,
-            Err(e) => return fail(&self.conn, e.to_string()),
+            Err(e) => return fail(&self.conn, ue(e)),
         };
         self.interrupt.store(false, Ordering::SeqCst);
         self.status.busy = true;
@@ -637,10 +637,10 @@ impl Worker {
             // a model that fails once is asked again later; the second time the numbers come alone
             // (final review I2), so a passing hiccup never leaves a report without its points
             self.status.last_error = Some(model_failure(reason.clone()));
-            fail(&self.conn, reason)
+            fail(&self.conn, model_failure(reason))
         } else {
             match report::week_stats(&self.conn, week) {
-                Err(e) => fail(&self.conn, e.to_string()),
+                Err(e) => fail(&self.conn, ue(e)),
                 Ok(stats) => {
                     let text = report::render(week, lang, highlights.as_deref().map_err(|e| *e), &stats);
                     match report::write_report(&self.vault, week, &text) {
@@ -649,7 +649,7 @@ impl Worker {
                             ReportOutcome::Written(rel)
                         }
                         Ok(None) => ReportOutcome::Exists,
-                        Err(e) => fail(&self.conn, e.to_string()),
+                        Err(e) => fail(&self.conn, ue(e)),
                     }
                 }
             }

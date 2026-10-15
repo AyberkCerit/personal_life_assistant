@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { SECTIONS, WEEKDAYS, backupLine, reportLine, settingsError, trapIndex } from "./settings";
+import { errorText } from "./i18n";
 
 describe("settings screen", () => {
   it("has the seven sections of FR-SET-011 in order", () => {
@@ -44,10 +45,10 @@ describe("settings screen", () => {
     const none = { last_success_at: null, last_attempt_at: null, last_error: null };
     expect(backupLine(none)).toEqual({ key: "settings.backup.never" });
     expect(backupLine({ ...none, last_success_at: "2026-10-06T23:10:00+03:00", last_attempt_at: "2026-10-06T23:10:00+03:00" })).toEqual({ key: "settings.backup.last", at: "2026-10-06T23:10:00+03:00" });
-    expect(backupLine({ last_success_at: "2026-10-05T23:10:00+03:00", last_attempt_at: "2026-10-06T23:00:00+03:00", last_error: "disk full" })).toEqual({
+    expect(backupLine({ last_success_at: "2026-10-05T23:10:00+03:00", last_attempt_at: "2026-10-06T23:00:00+03:00", last_error: "disk_full||No space left on device" })).toEqual({
       key: "settings.backup.failed",
       at: "2026-10-06T23:00:00+03:00",
-      error: "disk full",
+      error: errorText("disk_full||").text, // M6 translations: said, not the stored English reason
     });
   });
 });

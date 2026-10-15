@@ -108,7 +108,7 @@
 
   function sync() {
     problem = doc?.problem ?? null;
-    error = doc?.error ?? null;
+    error = doc?.error ? failure(doc.error) : null; // the save model keeps the raw code; it is said here
   }
 
   async function load(): Promise<void> {
