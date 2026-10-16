@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ancestors, followMove, moveTargets, openAfterMove, parentOf, treeError, visibleEntries } from "./tree";
+import { ancestors, followMove, moveTargets, openAfterMove, parentOf, systemFolder, treeError, visibleEntries } from "./tree";
 import type { TreeEntry } from "./api";
 
 describe("tree helpers", () => {
@@ -56,5 +56,15 @@ describe("tree helpers", () => {
   it("keeps a renamed or moved folder open, with the folders inside it", () => {
     const open = new Set(["proje", "proje/eski", "notes"]);
     expect([...openAfterMove(open, "proje", "arşiv/proje")].sort()).toEqual(["arşiv/proje", "arşiv/proje/eski", "notes"]);
+  });
+
+  // FR-I18N-004 (M6 acceptance): system folders keep English names on disk, the tree says them in
+  // the interface language
+  it("knows the vault's own folders by their configured names, at the top only", () => {
+    const folders = { daily: "daily", inbox: "Gelen", notes: "notes", reports: "reports", attachments: "attachments", templates: "templates" };
+    expect(systemFolder("daily", folders)).toBe("daily");
+    expect(systemFolder("Gelen", folders)).toBe("inbox");
+    expect(systemFolder("daily/2026", folders)).toBeNull();
+    expect(systemFolder("projeler", folders)).toBeNull();
   });
 });

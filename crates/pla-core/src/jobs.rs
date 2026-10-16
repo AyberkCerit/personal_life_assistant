@@ -130,6 +130,57 @@ pub fn backup(conn: &Connection, vault_root: &Path, today: NaiveDate) -> Result<
     }
     Ok(target)
 }
+#[derive(Debug, thiserror::Error)]
+pub enum RestoreError {
+    /// Not one of PLA's backup names in the vault's backup folder (no path ever comes from outside).
+    #[error("no such backup: {0}")]
+    Unknown(String),
+    /// FR-BKP-006: the file fails SQLite's integrity check; nothing was changed.
+    #[error("the backup {0} is damaged")]
+    Damaged(String),
+    #[error(transparent)]
+    Db(#[from] crate::db::DbError),
+    #[error(transparent)]
+    Io(#[from] std::io::Error),
+}
+
+/// FR-BKP-005/008: puts the vault's backup `name` in place of `data_dir/pla.db`. The backup is
+/// checked first (FR-BKP-006); the current pla.db, with its WAL, is moved aside as
+/// `pla-before-restore-<time>.db` (returned; `None` where there was none, as on another computer);
+/// the copy goes in under a temporary name and is renamed, then brought to the current schema.
+/// No session may have pla.db open meanwhile.
+pub fn restore(data_dir: &Path, vault_root: &Path, name: &str, now: DateTime<FixedOffset>) -> Result<Option<PathBuf>, RestoreError> {
+    if !is_backup_name(name) || !backups(vault_root).iter().any(|b| b == name) {
+        return Err(RestoreError::Unknown(name.to_owned()));
+    }
+    let source = vault_root.join(".pla").join("backup").join(name);
+    let ok = Connection::open_with_flags(&source, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+        .and_then(|c| c.query_row("PRAGMA integrity_check", [], |r| r.get::<_, String>(0)))
+        .is_ok_and(|check| check == "ok");
+    if !ok {
+        return Err(RestoreError::Damaged(name.to_owned()));
+    }
+    std::fs::create_dir_all(data_dir)?;
+    let current = data_dir.join("pla.db");
+    let kept = if current.exists() {
+        let base = format!("pla-before-restore-{}.db", now.format("%Y%m%d-%H%M%S"));
+        for suffix in ["", "-wal", "-shm"] {
+            let file = data_dir.join(format!("pla.db{suffix}"));
+            if file.exists() {
+                std::fs::rename(&file, data_dir.join(format!("{base}{suffix}")))?;
+            }
+        }
+        Some(data_dir.join(base))
+    } else {
+        None
+    };
+    let partial = data_dir.join("pla.db.restoring");
+    std::fs::copy(&source, &partial)?;
+    std::fs::rename(&partial, &current)?;
+    drop(crate::db::open_databases(data_dir)?); // an older backup gets the current schema
+    Ok(kept)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -238,5 +289,71 @@ mod tests {
         backup(&conn, &vault, d("2026-10-02")).unwrap();
         assert!(!vault.join(".pla/backup/pla-2026-10-01.db.partial").exists());
         assert!(vault.join(".pla/backup/benim.db.partial").exists(), "only PLA's own names");
+    }
+
+    fn titles(dir: &Path) -> Vec<String> {
+        let conn = Connection::open(dir.join("pla.db")).unwrap();
+        let mut t: Vec<String> = conn.prepare("SELECT title FROM task ORDER BY title").unwrap().query_map([], |r| r.get(0)).unwrap().map(Result::unwrap).collect();
+        t.sort();
+        t
+    }
+
+    fn add(conn: &Connection, title: &str) {
+        crate::tasks::add_task(conn, &crate::tasks::TaskInput { title: title.into(), ..Default::default() }, at("2026-10-05T09:00:00+03:00")).unwrap();
+    }
+
+    #[test]
+    fn a_backup_comes_back_and_what_was_there_is_kept() {
+        // FR-BKP-005, M6 acceptance: restore, keeping the current pla.db beside it
+        let tmp = tempfile::tempdir().unwrap();
+        let (data, vault) = (tmp.path().join("data"), tmp.path().join("kasa"));
+        {
+            let conn = open_databases(&data).unwrap().pla;
+            add(&conn, "Dişçi");
+            backup(&conn, &vault, d("2026-10-05")).unwrap();
+            add(&conn, "Sonradan eklenen");
+        }
+        let kept = restore(&data, &vault, "pla-2026-10-05.db", at("2026-10-06T10:00:00+03:00")).unwrap();
+        assert_eq!(titles(&data), ["Dişçi"]);
+        let kept = kept.expect("the current pla.db is kept");
+        assert_eq!(kept.file_name().unwrap(), "pla-before-restore-20261006-100000.db");
+        let before = Connection::open(&kept).unwrap();
+        let n: i64 = before.query_row("SELECT count(*) FROM task", [], |r| r.get(0)).unwrap();
+        assert_eq!(n, 2, "nothing of the replaced data is lost");
+    }
+
+    #[test]
+    fn a_vault_copied_alone_brings_its_tasks_to_another_computer() {
+        // FR-BKP-008: on the other computer there is no pla.db at all; the vault's backup restores it
+        let tmp = tempfile::tempdir().unwrap();
+        let vault = tmp.path().join("kasa");
+        {
+            let conn = open_databases(&tmp.path().join("pc1")).unwrap().pla;
+            add(&conn, "Fatura öde");
+            backup(&conn, &vault, d("2026-10-05")).unwrap();
+        }
+        let pc2 = tmp.path().join("pc2");
+        assert_eq!(restore(&pc2, &vault, &backups(&vault)[0], at("2026-10-06T10:00:00+03:00")).unwrap(), None, "nothing to keep there");
+        assert_eq!(titles(&pc2), ["Fatura öde"]);
+    }
+
+    #[test]
+    fn a_damaged_or_foreign_backup_is_refused_and_nothing_changes() {
+        // FR-BKP-006
+        let tmp = tempfile::tempdir().unwrap();
+        let (data, vault) = (tmp.path().join("data"), tmp.path().join("kasa"));
+        {
+            let conn = open_databases(&data).unwrap().pla;
+            add(&conn, "Dişçi");
+        }
+        std::fs::create_dir_all(vault.join(".pla/backup")).unwrap();
+        std::fs::write(vault.join(".pla/backup/pla-2026-10-04.db"), b"not a database at all".repeat(100)).unwrap();
+        let err = restore(&data, &vault, "pla-2026-10-04.db", at("2026-10-06T10:00:00+03:00")).unwrap_err();
+        assert!(matches!(&err, RestoreError::Damaged(name) if name == "pla-2026-10-04.db"), "{err:?}");
+        for bad in ["../../data/pla.db", "pla-2026-10-99.db", "benim.db"] {
+            assert!(matches!(restore(&data, &vault, bad, at("2026-10-06T10:00:00+03:00")), Err(RestoreError::Unknown(_))), "{bad}");
+        }
+        assert_eq!(titles(&data), ["Dişçi"], "the current data is untouched");
+        assert!(std::fs::read_dir(&data).unwrap().all(|e| !e.unwrap().file_name().to_string_lossy().contains("before-restore")));
     }
 }

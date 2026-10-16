@@ -16,6 +16,16 @@ export function parentOf(path: string): string {
   return i < 0 ? "" : path.slice(0, i);
 }
 
+/** The vault's own folders as `.pla/config` names them (pla-core `Folders`). */
+export interface Folders { daily: string; inbox: string; notes: string; reports: string; attachments: string; templates: string }
+
+/** Which of the vault's own folders `path` is, at the vault's top (FR-I18N-004: the tree says it in
+ *  the interface language; on disk it keeps its name). */
+export function systemFolder(path: string, folders: Folders): keyof Folders | null {
+  const kinds = Object.keys(folders) as (keyof Folders)[];
+  return kinds.find((k) => folders[k] === path) ?? null;
+}
+
 /** The folders above `path`, outermost first. */
 export function ancestors(path: string): string[] {
   const parts = path.split("/").slice(0, -1);

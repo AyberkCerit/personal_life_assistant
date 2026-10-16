@@ -54,3 +54,19 @@ export function describeError(e: unknown): string | Failure {
   if (key === "settings.error.other") return failure(e); // M6 translations: no English reason inline
   return tf(key, { path, reason: reasonKey ? t(reasonKey) : reason });
 }
+
+/** What the vault offers when it opens (FR-BKP-004/008, FR-LOG-007). */
+export interface RestoreOffer { backup: string | null; damaged: boolean }
+
+/** The day a backup was taken, from its name `pla-<YYYY-MM-DD>.db`. */
+export function backupDay(name: string): string | null {
+  const m = /^pla-(\d{4}-\d{2}-\d{2})\.db$/.exec(name);
+  return m ? m[1] : null;
+}
+
+/** The restore dialog's message: no data here, or data damaged by an unclean stop. */
+export function offerText(offer: RestoreOffer): { key: Key; day: string; canRestore: boolean } {
+  const day = offer.backup ? (backupDay(offer.backup) ?? "") : "";
+  if (!offer.damaged) return { key: "restore.missing", day, canRestore: true };
+  return offer.backup ? { key: "restore.damaged", day, canRestore: true } : { key: "restore.damagedNone", day: "", canRestore: false };
+}

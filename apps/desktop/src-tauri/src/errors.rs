@@ -30,6 +30,7 @@ pub const CODES: &[&str] = &[
     "no_vault",
     "no_app_data",
     "recycle_bin",
+    "backup_damaged",
     "model_server_missing",
     "model_file_missing",
     "model_start",
