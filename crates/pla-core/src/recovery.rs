@@ -23,7 +23,7 @@ pub struct RestoreOffer {
 
 /// Run before the databases open. After an unclean stop a damaged `pla.db` (with its WAL) is moved
 /// aside as `pla-damaged-<time>.db`, never deleted; then, when there is no `pla.db` and the vault
-/// has a backup, the newest one is offered. Marks the data as open until `closed_cleanly`.
+/// has a backup, the newest intact one is offered. Marks the data as open until `closed_cleanly`.
 pub fn before_open(data_dir: &Path, vault_root: &Path, now: DateTime<FixedOffset>) -> std::io::Result<Option<RestoreOffer>> {
     std::fs::create_dir_all(data_dir)?;
     let db = data_dir.join("pla.db");
@@ -42,7 +42,9 @@ pub fn before_open(data_dir: &Path, vault_root: &Path, now: DateTime<FixedOffset
     if db.exists() {
         return Ok(None);
     }
-    let backup = crate::jobs::backups(vault_root).into_iter().next();
+    // the newest that passes the check (FR-BKP-006): a cut-off copy is never the one offered
+    let folder = vault_root.join(".pla").join("backup");
+    let backup = crate::jobs::backups(vault_root).into_iter().find(|name| intact(&folder.join(name)));
     Ok((backup.is_some() || damaged).then_some(RestoreOffer { backup, damaged }))
 }
 
@@ -112,6 +114,16 @@ mod tests {
         assert_eq!(offer, Some(RestoreOffer { backup: Some("pla-2026-10-05.db".into()), damaged: true }));
         assert!(!data.join("pla.db").exists());
         assert_eq!(damaged_files(&data), [data.join("pla-damaged-20261006-100000.db")], "kept, never deleted");
+    }
+
+    #[test]
+    fn a_damaged_backup_is_never_the_one_offered() {
+        // FR-BKP-006: the newest backup that passes the check, not just the newest
+        let tmp = tempfile::tempdir().unwrap();
+        let vault = vault_with_backup(tmp.path());
+        std::fs::write(vault.join(".pla/backup/pla-2026-10-06.db"), b"cut off".repeat(400)).unwrap();
+        let offer = before_open(&tmp.path().join("pc2"), &vault, at("2026-10-07T10:00:00+03:00")).unwrap();
+        assert_eq!(offer, Some(RestoreOffer { backup: Some("pla-2026-10-05.db".into()), damaged: false }));
     }
 
     #[test]
