@@ -30,6 +30,7 @@ pub const CODES: &[&str] = &[
     "no_vault",
     "no_app_data",
     "recycle_bin",
+    "backup_damaged",
     "model_server_missing",
     "model_file_missing",
     "model_start",
@@ -132,6 +133,7 @@ impl From<pla_core::jobs::JobError> for UserError {
         match e {
             pla_core::jobs::JobError::Db(e) => e.into(),
             pla_core::jobs::JobError::Io(e) => e.into(),
+            pla_core::jobs::JobError::Held => Self::unexpected("a backup waits to be restored"),
         }
     }
 }

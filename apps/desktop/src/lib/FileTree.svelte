@@ -4,8 +4,8 @@
   import FileText from "@lucide/svelte/icons/file-text";
   import Folder from "@lucide/svelte/icons/folder";
   import type { TreeEntry } from "./api";
-  import { t, tf } from "./i18n";
-  import { ancestors, moveTargets, openAfterMove, parentOf, visibleEntries, type TreeActions } from "./tree";
+  import { t, tf, type Key } from "./i18n";
+  import { ancestors, moveTargets, openAfterMove, parentOf, systemFolder, visibleEntries, type Folders, type TreeActions } from "./tree";
   import Button from "./ui/Button.svelte";
   import Icon from "./ui/Icon.svelte";
 
@@ -19,6 +19,7 @@
     actions,
     windowOpen = $bindable(false),
     vault = "",
+    folders = null,
   }: {
     entries: TreeEntry[];
     selected: string | null;
@@ -29,6 +30,8 @@
     windowOpen?: boolean;
     /** The vault's folder: its open folders are remembered apart from another vault's. */
     vault?: string;
+    /** The vault's own folders (FR-I18N-004): named in the interface language, kept on disk. */
+    folders?: Folders | null;
   } = $props();
 
   type Dialog =
@@ -97,6 +100,11 @@
   });
   const shown = $derived(visibleEntries(entries, open));
   const stem = (name: string) => name.replace(/\.md$/i, "");
+  /** What a row says: a system folder in the interface language, a note without `.md`. */
+  const label = (e: TreeEntry) => {
+    const kind = e.is_dir && folders ? systemFolder(e.path, folders) : null;
+    return kind ? t(`folder.${kind}` as Key) : e.is_dir ? e.name : stem(e.name);
+  };
   /** New notes go into the focused folder (or the focused note's folder), else the inbox (FR-VLT-009). */
   const target = $derived.by(() => {
     const e = focused ? byPath.get(focused) : undefined;
@@ -353,7 +361,7 @@
             ondrop={(e) => entry.is_dir && void drop(e, entry.path)}
           >
             {#if entry.is_dir}<span class="chevron" class:open={open.has(entry.path)}><Icon icon={ChevronRight} size="sm" /></span>{:else}<span class="chevron"></span>{/if}
-            <Icon icon={entry.is_dir ? Folder : FileText} size="sm" /><span class="name">{entry.is_dir ? entry.name : stem(entry.name)}</span>
+            <Icon icon={entry.is_dir ? Folder : FileText} size="sm" /><span class="name">{label(entry)}</span>
           </button>
         {/if}
         {#if creating && entry.is_dir && creating.parent === entry.path}

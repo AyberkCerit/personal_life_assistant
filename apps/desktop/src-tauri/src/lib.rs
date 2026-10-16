@@ -76,6 +76,9 @@ pub fn run() {
             task_cmds::reminder_done,
             task_cmds::reminder_snooze,
             commands::backup_now,
+            commands::backup_list,
+            commands::restore_backup,
+            commands::keep_empty,
             commands::set_paused,
             task_cmds::pending_reminders,
             task_cmds::dismiss_missed,
@@ -147,7 +150,8 @@ pub fn run() {
         // (the first-run wizard) closing the window quits, as before (F4c decision)
         if let tauri::RunEvent::ExitRequested { code: None, api, .. } = &event {
             use tauri::Manager;
-            if handle.state::<commands::AppState>().session.lock().expect("session lock").is_some() {
+            let state = handle.state::<commands::AppState>();
+            if state.session.lock().expect("session lock").is_some() || state.restoring.load(std::sync::atomic::Ordering::SeqCst) {
                 api.prevent_exit();
             }
         }
@@ -155,6 +159,14 @@ pub fn run() {
             // Tauri ends the process without running destructors: stop the worker (and with it the
             // model) explicitly. The job object in pla-core is the backstop for crashes.
             use tauri::Manager;
+            // Quit during a restore: let pla.db finish moving first (final review I2)
+            let state = handle.state::<commands::AppState>();
+            for _ in 0..600 {
+                if !state.restoring.load(std::sync::atomic::Ordering::SeqCst) {
+                    break;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(100));
+            }
             handle.state::<commands::AppState>().downloads.shutdown(std::time::Duration::from_secs(2));
             handle.state::<commands::AppState>().memory_downloads.shutdown(std::time::Duration::from_secs(2));
             let session = handle.state::<commands::AppState>().session.lock().expect("session lock").take();

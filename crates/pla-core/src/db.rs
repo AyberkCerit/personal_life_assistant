@@ -36,6 +36,11 @@ pub enum DbError {
     NewerSchema { found: i64, supported: i64 },
 }
 
+/// The newest pla.db schema this PLA reads (a backup beyond it is refused, final review C2).
+pub fn pla_schema_supported() -> i64 {
+    PLA_MIGRATIONS.len() as i64
+}
+
 /// Opens (creating if needed) `dir/pla.db` and `dir/cache.db` and brings both to the current schema.
 pub fn open_databases(dir: &Path) -> Result<Databases, DbError> {
     std::fs::create_dir_all(dir)?;

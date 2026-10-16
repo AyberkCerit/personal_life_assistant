@@ -703,7 +703,7 @@ mod tests {
 
     #[test]
     fn an_old_vault_is_extracted_from_its_last_month_only() {
-        // M6 owner decision a: 10 000 old notes were days of model work on the reference machine
+        // FR-EXT-030, M6 owner decision a: 10 000 old notes were days of model work on the reference machine
         let tmp = tempfile::tempdir().unwrap();
         let vault = open_vault(tmp.path()).unwrap();
         let mut conn = open_databases(&tmp.path().join(".data")).unwrap().pla;

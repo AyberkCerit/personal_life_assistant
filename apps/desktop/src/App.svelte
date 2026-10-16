@@ -14,7 +14,7 @@
   import { api, inTauri, type DownloadState, type TreeEntry, type WorkerStatus } from "./lib/api";
   import FileTree from "./lib/FileTree.svelte";
   import CalendarDays from "@lucide/svelte/icons/calendar-days";
-  import { followMove, type TreeActions } from "./lib/tree";
+  import { followMove, type Folders, type TreeActions } from "./lib/tree";
   import TaskPanel from "./lib/TaskPanel.svelte";
   import Editor from "./lib/Editor.svelte";
   import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -40,6 +40,8 @@
   import type { Progress } from "./lib/wizard";
   import { failure, sayAgain, t, tf, lang, setLang, type Failure, type Lang } from "./lib/i18n";
   import ErrorBanner from "./lib/ui/ErrorBanner.svelte";
+  import RestoreDialog from "./lib/RestoreDialog.svelte";
+  import type { RestoreOffer } from "./lib/settings";
   import type { VaultInfo } from "./lib/api";
 
   let loaded = $state(false);
@@ -50,6 +52,8 @@
   let entries = $state<TreeEntry[]>([]);
   let current = $state<string | null>(null);
   let inbox = $state("inbox");
+  /** FR-I18N-004: the vault's own folders, which the tree says in the interface language. */
+  let folders = $state<Folders | null>(null);
   let tasksVersion = $state(0);
   let panelEdits = $state(0); // changes made in the task panel itself
   let modelDownload = $state<DownloadState | null>(null);
@@ -57,6 +61,8 @@
   let reveal = $state<string | null>(null);
   let editor: ReturnType<typeof Editor> | undefined = $state();
   let error = $state<string | Failure | null>(null);
+  /** FR-BKP-004/008, FR-LOG-007: a backup offered when the vault opened. */
+  let restoreOffer = $state<RestoreOffer | null>(null);
   let vaultInAppData = $state(false);
   let settingsOpen = $state(false);
   // The middle pane: the note editor or the metrics view (SRS S-06).
@@ -229,6 +235,8 @@
   async function vaultOpened(info: VaultInfo) {
     vaultPath = info.path;
     inbox = info.inbox;
+    folders = info.folders;
+    restoreOffer = info.restore_offer;
     status = await api.workerStatus(); // the first status may have been sent before we listened
     error = null;
     await refresh();
@@ -374,8 +382,10 @@
       document.documentElement.dataset.theme = info.theme;
       error = info.error ? failure(info.error) : null;
       vaultInAppData = info.vault_in_app_data;
+      restoreOffer = info.restore_offer;
       vaultPath = info.vault_path;
       inbox = info.inbox ?? "inbox";
+      folders = info.folders;
       if (vaultPath) {
         await refresh();
         status = await api.workerStatus(); // F4a M2: do not miss the first status
@@ -508,7 +518,7 @@
       {#if leftView === "search"}
         <SearchPanel bind:this={searchPanel} {entries} onOpen={(p, line) => void openNote(p, line)} onClose={() => (leftView = "tree")} />
       {:else}
-        <FileTree {entries} selected={center === "editor" ? current : null} {inbox} vault={vaultPath ?? ""} onOpen={openNote} actions={treeActions} bind:windowOpen={treeDialog} />
+        <FileTree {entries} selected={center === "editor" ? current : null} {inbox} {folders} vault={vaultPath ?? ""} onOpen={openNote} actions={treeActions} bind:windowOpen={treeDialog} />
       {/if}
     </aside>
     <section class="main">
@@ -578,7 +588,11 @@
     onLanguage={settingsLanguage}
     onTheme={settingsTheme}
     onSwitchVault={settingsSwitchVault}
+    onBeforeRestore={async () => void (await editor?.close())}
   />
+{/if}
+{#if restoreOffer && vaultPath && !wizard}
+  <RestoreDialog offer={restoreOffer} onDone={() => (restoreOffer = null)} onBeforeRestore={async () => void (await editor?.close())} />
 {/if}
 {/key}
 

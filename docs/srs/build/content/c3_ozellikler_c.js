@@ -128,7 +128,7 @@ module.exports = [
     ["FR-BKP-001", "E", "WHEN the daily maintenance runs, the system shall write a consistent copy of `pla.db` using the SQLite online backup API to `.pla/backup/pla-<YYYY-MM-DD>.db` in the vault.", "Y", "T", "P5.1"],
     ["FR-BKP-002", "U", "The system shall keep the 7 most recent backup files and delete older backup files.", "Y", "T", "P5.1"],
     ["FR-BKP-003", "E", "WHEN the user selects Back up now, the system shall create a backup immediately.", "O", "T", "P5.1"],
-    ["FR-BKP-004", "E", "WHEN a vault is opened whose `pla.db` is missing and a backup exists, the system shall offer to restore the most recent backup.", "Y", "T", "P9"],
+    ["FR-BKP-004", "E", "WHEN a vault is opened whose `pla.db` is missing and a backup exists, the system shall offer to restore the most recent backup that passes the integrity check, and keep background AI paused until the user answers.", "Y", "T", "P9"],
     ["FR-BKP-005", "E", "WHEN the user restores a backup, the system shall verify it with an integrity check, keep the current `pla.db` as `pla-before-restore-<timestamp>.db` and then replace it.", "Y", "T", "P9"],
     ["FR-BKP-006", "W", "IF a backup file fails the integrity check, THEN the system shall not restore it and shall report which file failed.", "Y", "T", "E-C7"],
     ["FR-BKP-007", "E", "WHEN the user exports data, the system shall write tasks and metric records as CSV and JSON files to a folder chosen by the user.", "Y", "T", "P9"],
@@ -154,6 +154,6 @@ module.exports = [
     ["FR-LOG-004", "U", "Error messages shown to the user shall state what happened, its effect and what the user can do, without stack traces.", "O", "İ", "E-C5"],
     ["FR-LOG-005", "E", "WHEN an unexpected error occurs, the system shall offer a Copy details action that copies a technical summary without personal data.", "O", "T", "E-C5"],
     ["FR-LOG-006", "E", "WHEN the application starts after an abnormal termination, the system shall run an integrity check on `pla.db` and `cache.db`.", "Y", "T", "E-C7"],
-    ["FR-LOG-007", "W", "IF `pla.db` fails the integrity check, THEN the system shall open it read-only and offer to restore the most recent backup (FR-BKP-005).", "Y", "T", "E-C7"],
+    ["FR-LOG-007", "W", "IF `pla.db` fails the integrity check, THEN the system shall keep it aside without deleting it, keep notes usable, and offer to restore the most recent intact backup (FR-BKP-005).", "Y", "T", "E-C7"],
   ] },
 ];

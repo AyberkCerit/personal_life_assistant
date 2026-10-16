@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { SECTIONS, WEEKDAYS, backupLine, describeError, reportLine, settingsError, trapIndex } from "./settings";
+import { SECTIONS, WEEKDAYS, backupDay, backupLine, describeError, offerText, reportLine, settingsError, trapIndex } from "./settings";
 import { errorText } from "./i18n";
 
 describe("settings screen", () => {
@@ -62,5 +62,18 @@ describe("settings screen", () => {
 describe("settings errors (M6 final review)", () => {
   it("a missing thing with no folder named reads as the general message", () => {
     expect(describeError("missing||os error 2")).toMatchObject({ text: errorText("missing||").text, details: "os error 2" });
+  });
+});
+
+describe("restore (FR-BKP-004/005/008, FR-LOG-007)", () => {
+  it("reads a backup's day from its name, and nothing else", () => {
+    expect(backupDay("pla-2026-10-05.db")).toBe("2026-10-05");
+    expect(backupDay("benim.db")).toBeNull();
+  });
+
+  it("says why a backup is offered", () => {
+    expect(offerText({ backup: "pla-2026-10-05.db", damaged: false })).toEqual({ key: "restore.missing", day: "2026-10-05", canRestore: true });
+    expect(offerText({ backup: "pla-2026-10-05.db", damaged: true })).toEqual({ key: "restore.damaged", day: "2026-10-05", canRestore: true });
+    expect(offerText({ backup: null, damaged: true })).toEqual({ key: "restore.damagedNone", day: "", canRestore: false });
   });
 });

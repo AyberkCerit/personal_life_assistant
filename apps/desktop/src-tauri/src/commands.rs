@@ -50,6 +50,23 @@ pub struct Session {
     pub worker: WorkerHandle,
     /// FR-SCH-016: when the weekly report is due; the settings screen changes it live.
     pub weekly: Arc<Mutex<pla_core::report::WeeklySchedule>>,
+    /// Where this vault's pla.db and cache.db live (`<app root>/vaults/<vault_id>`).
+    pub data_dir: std::path::PathBuf,
+    /// FR-BKP-004/008, FR-LOG-007: a backup offered when the vault opened; background AI waits for
+    /// the answer (it would only extract into data about to be replaced).
+    pub restore_offer: Mutex<Option<pla_core::recovery::RestoreOffer>>,
+    /// Last, so it drops after the worker, scheduler and indexer have closed pla.db.
+    pub _running: RunningGuard,
+}
+
+/// FR-LOG-006: a session that ends normally tells the next start not to check pla.db; dropped last
+/// in `Session`, so a stop during the shutdown itself still counts as unclean (final review).
+pub struct RunningGuard(std::path::PathBuf);
+
+impl Drop for RunningGuard {
+    fn drop(&mut self) {
+        pla_core::recovery::closed_cleanly(&self.0);
+    }
 }
 
 #[derive(Default)]
@@ -58,6 +75,8 @@ pub struct AppState {
     pub self_writes: Arc<SelfWrites>,
     /// Background AI paused (FR-SCH-014); kept across vault switches.
     pub paused: AtomicBool,
+    /// A restore is swapping pla.db: closing or quitting waits for it (final review I2).
+    pub restoring: AtomicBool,
     /// The model download outlives vault switches (model-manager spec § 5).
     pub downloads: crate::model_download::ModelDownloads,
     /// The embedding model's download, next to the language model's.
@@ -80,10 +99,22 @@ pub(crate) fn update_settings(root: &Path, lock: &Mutex<()>, change: impl FnOnce
 pub struct VaultInfo {
     path: String,
     inbox: String,
+    /// FR-I18N-004: the tree names the vault's own folders in the interface language.
+    folders: pla_core::vault::Folders,
+    restore_offer: Option<pla_core::recovery::RestoreOffer>,
 }
 
 fn vault_info_of(vault: &Vault) -> VaultInfo {
-    VaultInfo { path: vault.root.to_string_lossy().into_owned(), inbox: vault.config.folders.inbox.clone() }
+    VaultInfo {
+        path: vault.root.to_string_lossy().into_owned(),
+        inbox: vault.config.folders.inbox.clone(),
+        folders: vault.config.folders.clone(),
+        restore_offer: None,
+    }
+}
+
+fn session_info(session: &Session) -> VaultInfo {
+    VaultInfo { restore_offer: session.restore_offer.lock().expect("offer lock").clone(), ..vault_info_of(&session.vault) }
 }
 
 #[derive(Serialize)]
@@ -98,9 +129,12 @@ pub struct StartupInfo {
     theme: String,
     error: Option<String>,
     inbox: Option<String>,
+    folders: Option<pla_core::vault::Folders>,
     /// The remembered vault lies in PLA's own data folders (from before PLA refused that): it still
     /// opens, but the user is told to move it before uninstalling (NFR-SEC-010).
     vault_in_app_data: bool,
+    /// FR-BKP-004/008, FR-LOG-007: offer a backup before the vault is used.
+    restore_offer: Option<pla_core::recovery::RestoreOffer>,
 }
 
 #[derive(Serialize)]
@@ -132,6 +166,9 @@ fn extractor(app: &AppHandle, settings: &AppSettings) -> Option<Box<dyn Extracto
 fn start_session(app: &AppHandle, root: &Path, settings: &AppSettings, own: Arc<SelfWrites>, paused: bool) -> Result<Session, String> {
     let mut vault = open_vault_dir(root).map_err(ue)?;
     let dir = resolve_data_dir(&app_root()?, &mut vault).map_err(ue)?;
+    // before the databases open: a damaged pla.db goes aside, a missing one may come from a backup
+    let offer = pla_core::recovery::before_open(&dir, &vault.root, Local::now().fixed_offset()).map_err(ue)?;
+    let paused = paused || offer.is_some();
     let dbs = open_databases(&dir).map_err(ue)?;
     let ui_db = connect(&dir.join("pla.db")).map_err(ue)?;
     let status =
@@ -226,6 +263,9 @@ fn start_session(app: &AppHandle, root: &Path, settings: &AppSettings, own: Arc<
         memory_pause,
         worker: handle,
         weekly,
+        _running: RunningGuard(dir.clone()),
+        data_dir: dir,
+        restore_offer: Mutex::new(offer),
     })
 }
 
@@ -261,12 +301,16 @@ pub fn begin(app: &AppHandle, state: &AppState) -> Result<StartupInfo, String> {
         theme: theme.to_owned(),
         error: None,
         inbox: None,
+        folders: None,
         vault_in_app_data: false,
+        restore_offer: None,
     };
     if let Some(running) = state.session.lock().expect("session lock").as_ref() {
         info.vault_path = Some(running.vault.root.to_string_lossy().into_owned());
         info.inbox = Some(running.vault.config.folders.inbox.clone());
+        info.folders = Some(running.vault.config.folders.clone());
         info.vault_in_app_data = pla_core::vault::inside_app_data(&running.vault.root, &pla_core::vault::app_data_roots());
+        info.restore_offer = running.restore_offer.lock().expect("offer lock").clone();
         return Ok(info);
     }
     if let Some(path) = loaded.settings.vault_path.clone() {
@@ -274,7 +318,9 @@ pub fn begin(app: &AppHandle, state: &AppState) -> Result<StartupInfo, String> {
             Ok(session) => {
                 info.vault_path = Some(session.vault.root.to_string_lossy().into_owned());
                 info.inbox = Some(session.vault.config.folders.inbox.clone());
+                info.folders = Some(session.vault.config.folders.clone());
                 info.vault_in_app_data = pla_core::vault::inside_app_data(&session.vault.root, &pla_core::vault::app_data_roots());
+                info.restore_offer = session.restore_offer.lock().expect("offer lock").clone();
                 *state.session.lock().expect("session lock") = Some(session);
             }
             Err(e) => info.error = Some(crate::errors::naming(&e, &path.display().to_string())),
@@ -302,7 +348,7 @@ fn open_vault_locked(app: &AppHandle, state: &State<AppState>, path: &Path) -> R
     let mut old_root = None;
     if let Some(old) = previous {
         if same_folder(&old.vault.root, path) {
-            let opened = vault_info_of(&old.vault);
+            let opened = session_info(&old);
             *state.session.lock().expect("session lock") = Some(old);
             return Ok(opened);
         }
@@ -326,7 +372,7 @@ fn open_vault_locked(app: &AppHandle, state: &State<AppState>, path: &Path) -> R
         Ok(session) => session,
         Err(e) => return Err(restore(e)),
     };
-    let opened = vault_info_of(&session.vault);
+    let opened = session_info(&session);
     let mut remembered = settings.clone();
     remembered.vault_path = Some(session.vault.root.clone());
     if let Err(e) = save_settings(&root, &remembered) {
@@ -590,6 +636,53 @@ pub fn backup_now(state: State<AppState>) -> Result<(), String> {
     let guard = state.session.lock().expect("session lock");
     guard.as_ref().ok_or(NO_VAULT)?.scheduler.send(SchedCommand::BackupNow);
     Ok(())
+}
+
+/// FR-BKP-005: the vault's backups, newest first (`pla-<YYYY-MM-DD>.db`).
+#[tauri::command]
+pub fn backup_list(state: State<AppState>) -> Result<Vec<String>, String> {
+    let guard = state.session.lock().expect("session lock");
+    Ok(pla_core::jobs::backups(&guard.as_ref().ok_or(NO_VAULT)?.vault.root))
+}
+
+/// FR-BKP-004/005/006/008, FR-LOG-007: puts backup `name` in place of this vault's pla.db. The
+/// session stops first (nothing may hold pla.db), and starts again whatever happened, so a refused
+/// backup leaves PLA as it was. The page reloads afterwards: every view reads the new data.
+#[tauri::command(async)]
+pub fn restore_backup(app: AppHandle, state: State<AppState>, name: String) -> Result<(), String> {
+    let _settings_guard = state.settings_lock.lock().expect("settings lock");
+    let root = app_root()?;
+    let settings = load_settings(&root).map_err(ue)?.settings;
+    let session = state.session.lock().expect("session lock").take().ok_or(NO_VAULT)?;
+    let (vault_root, data_dir) = (session.vault.root.clone(), session.data_dir.clone());
+    state.restoring.store(true, Ordering::SeqCst);
+    drop(session); // waits for the worker, scheduler and indexer: their connections close
+    let restored = pla_core::jobs::restore(&data_dir, &vault_root, &name, Local::now().fixed_offset()).map_err(|e| match e {
+        pla_core::jobs::RestoreError::Unknown(n) => ue(crate::errors::UserError::new("missing", n)),
+        pla_core::jobs::RestoreError::Damaged(n) => ue(crate::errors::UserError::new("backup_damaged", n)),
+        pla_core::jobs::RestoreError::NewerSchema(n) => ue(crate::errors::UserError::new("newer_schema", n)),
+        pla_core::jobs::RestoreError::Db(e) => ue(e),
+        pla_core::jobs::RestoreError::Io(e) => ue(e),
+    });
+    let again = start_session(&app, &vault_root, &settings, Arc::clone(&state.self_writes), state.paused.load(Ordering::SeqCst));
+    state.restoring.store(false, Ordering::SeqCst);
+    // the page reloads next: tray requests wait for the new page (final review)
+    app.state::<crate::tray::UiQueue>().not_listening();
+    match again {
+        Ok(session) => *state.session.lock().expect("session lock") = Some(session),
+        Err(e) => return Err(restored.err().unwrap_or(e)), // the restore's own failure is the one to say
+    }
+    restored.map(drop)
+}
+
+/// The user starts with no data instead of the offered backup: background AI goes on as it was.
+#[tauri::command]
+pub fn keep_empty(app: AppHandle, state: State<AppState>) {
+    if let Some(session) = state.session.lock().expect("session lock").as_ref() {
+        *session.restore_offer.lock().expect("offer lock") = None;
+        pla_core::recovery::answered(&session.data_dir);
+    }
+    apply_pause(&app, state.paused.load(Ordering::SeqCst));
 }
 
 /// FR-SCH-014: the one path for pausing background AI, from the tray or the status bar, so the

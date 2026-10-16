@@ -2,7 +2,8 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { mockBackend, mockListeners } from "./mock";
 import type { FolderReport } from "./wizard";
-import type { JobStatus } from "./settings";
+import type { JobStatus, RestoreOffer } from "./settings";
+import type { Folders } from "./tree";
 import type { DayValue, MetricKind } from "./metrics";
 
 export interface TaskInput { title: string; details?: string | null; date?: string | null; time?: string | null; remind?: boolean | null }
@@ -17,7 +18,8 @@ export interface ReviewItem {
   created_at: string;
 }
 export interface AddedItem { kind: "task" | "metric"; id: string; title: string }
-export interface VaultInfo { path: string; inbox: string }
+/** `restore_offer`: a backup to offer before the vault is used (FR-BKP-004/008, FR-LOG-007). */
+export interface VaultInfo { path: string; inbox: string; folders: Folders; restore_offer: RestoreOffer | null }
 export type { Task } from "./tasks";
 import type { Task, TaskList } from "./tasks";
 
@@ -35,8 +37,10 @@ export interface StartupInfo {
   theme: "dark" | "light";
   error: string | null;
   inbox: string | null;
+  folders: Folders | null;
   /** The vault lies in PLA's own data folders, which uninstalling may delete (NFR-SEC-010). */
   vault_in_app_data: boolean;
+  restore_offer: RestoreOffer | null;
 }
 export interface WorkerStatus {
   queued: number;
@@ -206,6 +210,9 @@ export const api = {
   notificationStatus: () => call<boolean>("notification_status"),
   modelRemove: () => call<void>("model_remove"),
   backupNow: () => call<void>("backup_now"),
+  backupList: () => call<string[]>("backup_list"),
+  restoreBackup: (name: string) => call<void>("restore_backup", { name }),
+  keepEmpty: () => call<void>("keep_empty"),
   backupStatus: () => call<BackupStatus>("backup_status"),
   weeklyReportSettings: () => call<WeeklyReportView>("weekly_report_settings"),
   setWeeklyReport: (schedule: WeeklySchedule) => call<void>("set_weekly_report", { schedule }),
