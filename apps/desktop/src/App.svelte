@@ -588,10 +588,11 @@
     onLanguage={settingsLanguage}
     onTheme={settingsTheme}
     onSwitchVault={settingsSwitchVault}
+    onBeforeRestore={async () => void (await editor?.close())}
   />
 {/if}
 {#if restoreOffer && vaultPath && !wizard}
-  <RestoreDialog offer={restoreOffer} onDone={() => (restoreOffer = null)} />
+  <RestoreDialog offer={restoreOffer} onDone={() => (restoreOffer = null)} onBeforeRestore={async () => void (await editor?.close())} />
 {/if}
 {/key}
 

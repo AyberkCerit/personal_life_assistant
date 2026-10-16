@@ -183,6 +183,8 @@ impl Scheduler {
                     crate::applog::error(&format!("pruning missing blocks failed: {e}"));
                 }
             }
+            // a backup waits to be restored: nothing is copied, nothing failed; tried again later
+            Err(pla_core::jobs::JobError::Held) => return,
             Err(e) => {
                 // stored as a code: the settings screen says it in PLA's language (M6 translations)
                 let reason = crate::errors::ue(e);

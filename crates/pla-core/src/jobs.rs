@@ -18,6 +18,10 @@ pub enum JobError {
     Db(#[from] rusqlite::Error),
     #[error(transparent)]
     Io(#[from] std::io::Error),
+    /// A backup waits to be restored (`recovery::pending`): copying this database now could
+    /// replace it with an empty one (final review C1). Not a failure; the job waits.
+    #[error("a backup waits to be restored")]
+    Held,
 }
 
 struct JobRow {
@@ -109,6 +113,9 @@ fn is_backup_name(name: &str) -> bool {
 
 /// A consistent copy of pla.db in the vault, so copying the vault folder is a full backup (FR-BKP-001).
 pub fn backup(conn: &Connection, vault_root: &Path, today: NaiveDate) -> Result<PathBuf, JobError> {
+    if conn.path().and_then(|p| Path::new(p).parent()).is_some_and(crate::recovery::pending) {
+        return Err(JobError::Held);
+    }
     let dir = vault_root.join(".pla").join("backup");
     std::fs::create_dir_all(&dir)?;
     let target = dir.join(format!("pla-{}.db", today.format("%Y-%m-%d")));
@@ -138,6 +145,9 @@ pub enum RestoreError {
     /// FR-BKP-006: the file fails SQLite's integrity check; nothing was changed.
     #[error("the backup {0} is damaged")]
     Damaged(String),
+    /// Written by a newer PLA: this one cannot read it (final review C2); nothing was changed.
+    #[error("the backup {0} is from a newer PLA")]
+    NewerSchema(String),
     #[error(transparent)]
     Db(#[from] crate::db::DbError),
     #[error(transparent)]
@@ -154,30 +164,37 @@ pub fn restore(data_dir: &Path, vault_root: &Path, name: &str, now: DateTime<Fix
         return Err(RestoreError::Unknown(name.to_owned()));
     }
     let source = vault_root.join(".pla").join("backup").join(name);
-    let ok = Connection::open_with_flags(&source, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
-        .and_then(|c| c.query_row("PRAGMA integrity_check", [], |r| r.get::<_, String>(0)))
-        .is_ok_and(|check| check == "ok");
-    if !ok {
+    if !crate::recovery::intact(&source) {
         return Err(RestoreError::Damaged(name.to_owned()));
+    }
+    // a newer PLA's schema is refused before anything moves (final review C2)
+    let version: i64 = Connection::open_with_flags(&source, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+        .and_then(|c| c.query_row("SELECT COALESCE(MAX(version), 0) FROM schema_version", [], |r| r.get(0)))
+        .unwrap_or(0);
+    if version > crate::db::pla_schema_supported() {
+        return Err(RestoreError::NewerSchema(name.to_owned()));
     }
     std::fs::create_dir_all(data_dir)?;
     let current = data_dir.join("pla.db");
-    let kept = if current.exists() {
-        let base = format!("pla-before-restore-{}.db", now.format("%Y%m%d-%H%M%S"));
-        for suffix in ["", "-wal", "-shm"] {
-            let file = data_dir.join(format!("pla.db{suffix}"));
-            if file.exists() {
-                std::fs::rename(&file, data_dir.join(format!("{base}{suffix}")))?;
-            }
+    let kept = if current.exists() { Some(crate::recovery::move_aside(data_dir, "pla-before-restore", now)?) } else { None };
+    let swapped = (|| -> Result<(), RestoreError> {
+        let partial = data_dir.join("pla.db.restoring");
+        std::fs::copy(&source, &partial)?;
+        std::fs::rename(&partial, &current)?;
+        drop(crate::db::open_databases(data_dir)?); // an older backup gets the current schema
+        Ok(())
+    })();
+    if let Err(e) = swapped {
+        // what was there comes back: the copy of the backup goes (the backup itself stays)
+        for leftover in ["pla.db.restoring", "pla.db", "pla.db-wal", "pla.db-shm"] {
+            let _ = std::fs::remove_file(data_dir.join(leftover));
         }
-        Some(data_dir.join(base))
-    } else {
-        None
-    };
-    let partial = data_dir.join("pla.db.restoring");
-    std::fs::copy(&source, &partial)?;
-    std::fs::rename(&partial, &current)?;
-    drop(crate::db::open_databases(data_dir)?); // an older backup gets the current schema
+        if let Some(kept) = &kept {
+            crate::recovery::put_back(data_dir, kept)?;
+        }
+        return Err(e);
+    }
+    crate::recovery::answered(data_dir);
     Ok(kept)
 }
 
@@ -355,5 +372,40 @@ mod tests {
         }
         assert_eq!(titles(&data), ["Dişçi"], "the current data is untouched");
         assert!(std::fs::read_dir(&data).unwrap().all(|e| !e.unwrap().file_name().to_string_lossy().contains("before-restore")));
+    }
+
+    #[test]
+    fn a_backup_from_a_newer_pla_is_refused_and_nothing_changes() {
+        // final review C2: it used to be swapped in, and then the vault would not open at all
+        let tmp = tempfile::tempdir().unwrap();
+        let (data, vault) = (tmp.path().join("data"), tmp.path().join("kasa"));
+        {
+            let conn = open_databases(&data).unwrap().pla;
+            add(&conn, "Dişçi");
+            conn.execute("INSERT INTO schema_version (version, applied_at) VALUES (999, 'x')", []).unwrap();
+            backup(&conn, &vault, d("2026-10-05")).unwrap();
+            conn.execute("DELETE FROM schema_version WHERE version = 999", []).unwrap();
+            add(&conn, "Sonra");
+        }
+        let err = restore(&data, &vault, "pla-2026-10-05.db", at("2026-10-06T10:00:00+03:00")).unwrap_err();
+        assert!(matches!(err, RestoreError::NewerSchema(_)), "{err:?}");
+        assert_eq!(titles(&data), ["Dişçi", "Sonra"], "pla.db is where it was");
+    }
+
+    #[test]
+    fn no_backup_is_taken_while_one_waits_to_be_restored() {
+        // final review C1: the empty database replaced the very backup the dialog offered
+        let tmp = tempfile::tempdir().unwrap();
+        let (data, vault) = (tmp.path().join("data"), tmp.path().join("kasa"));
+        let conn = open_databases(&data).unwrap().pla;
+        add(&conn, "Dişçi");
+        backup(&conn, &vault, d("2026-10-05")).unwrap();
+        let offer = crate::recovery::RestoreOffer { backup: Some("pla-2026-10-05.db".into()), damaged: false };
+        std::fs::write(data.join("pla.restore-offer"), serde_json::to_string(&offer).unwrap()).unwrap();
+        let empty = open_databases(&tmp.path().join("empty")).unwrap().pla;
+        drop(empty);
+        assert!(matches!(backup(&conn, &vault, d("2026-10-05")), Err(JobError::Held)));
+        crate::recovery::answered(&data);
+        backup(&conn, &vault, d("2026-10-05")).unwrap();
     }
 }

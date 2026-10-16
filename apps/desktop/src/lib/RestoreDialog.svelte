@@ -7,7 +7,7 @@
 
   // FR-BKP-004/008, FR-LOG-007 (M6 acceptance): asked once, before the vault is used. Background AI
   // waits meanwhile (the session started paused for it).
-  let { offer, onDone }: { offer: RestoreOffer; onDone: () => void } = $props();
+  let { offer, onDone, onBeforeRestore }: { offer: RestoreOffer; onDone: () => void; onBeforeRestore: () => Promise<void> } = $props();
 
   const said = $derived(offerText(offer));
   const day = $derived.by(() => {
@@ -23,11 +23,24 @@
     busy = true;
     error = null;
     try {
+      await onBeforeRestore();
       await api.restoreBackup(offer.backup);
       location.reload(); // every view reads the restored data afresh
     } catch (e) {
       error = failure(e);
       busy = false;
+    }
+  }
+
+  // a question that must be answered: the main button has the focus, Esc closes nothing beneath
+  let main: HTMLButtonElement | undefined = $state();
+  $effect(() => {
+    main?.focus();
+  });
+  function key(e: KeyboardEvent) {
+    if (e.key === "Escape") {
+      e.preventDefault();
+      e.stopPropagation();
     }
   }
 
@@ -38,7 +51,8 @@
 </script>
 
 <div class="backdrop" aria-hidden="true"></div>
-<div class="dialog" role="alertdialog" aria-modal="true" aria-labelledby="restore-title" aria-describedby="restore-body">
+<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+<div class="dialog" role="alertdialog" aria-modal="true" aria-labelledby="restore-title" aria-describedby="restore-body" tabindex="-1" onkeydown={key}>
   <h2 id="restore-title">{t("restore.title")}</h2>
   <p id="restore-body">{tf(said.key, { day })}</p>
   {#if said.canRestore}<p class="muted">{t("restore.notesSafe")}</p>{/if}
@@ -46,9 +60,9 @@
   <footer>
     {#if said.canRestore}
       <Button variant="quiet" disabled={busy} onclick={() => void keepEmpty()}>{t("restore.empty")}</Button>
-      <Button variant="primary" disabled={busy} onclick={() => void restore()}>{busy ? t("restore.busy") : t("restore.restore")}</Button>
+      <Button variant="primary" bind:element={main} disabled={busy} onclick={() => void restore()}>{busy ? t("restore.busy") : t("restore.restore")}</Button>
     {:else}
-      <Button variant="primary" onclick={() => void keepEmpty()}>{t("restore.ok")}</Button>
+      <Button variant="primary" bind:element={main} onclick={() => void keepEmpty()}>{t("restore.ok")}</Button>
     {/if}
   </footer>
 </div>

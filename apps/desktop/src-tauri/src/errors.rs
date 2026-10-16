@@ -133,6 +133,7 @@ impl From<pla_core::jobs::JobError> for UserError {
         match e {
             pla_core::jobs::JobError::Db(e) => e.into(),
             pla_core::jobs::JobError::Io(e) => e.into(),
+            pla_core::jobs::JobError::Held => Self::unexpected("a backup waits to be restored"),
         }
     }
 }

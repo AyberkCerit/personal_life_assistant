@@ -24,6 +24,7 @@
     onLanguage,
     onTheme,
     onSwitchVault,
+    onBeforeRestore,
   }: {
     section: Section;
     refocus: string | null;
@@ -31,6 +32,8 @@
     onLanguage: (l: Lang) => Promise<void>;
     onTheme: (theme: "dark" | "light") => Promise<void>;
     onSwitchVault: (path: string) => Promise<void>;
+    /** The open note is saved before a restore reloads the page (final review). */
+    onBeforeRestore: () => Promise<void>;
   } = $props();
 
   let dialog: HTMLDivElement | undefined = $state();
@@ -105,7 +108,7 @@
       {:else if section === "ai"}<Ai />
       {:else if section === "scheduler"}<Scheduler />
       {:else if section === "notifications"}<Notifications />
-      {:else if section === "privacy"}<Privacy />
+      {:else if section === "privacy"}<Privacy {onBeforeRestore} />
       {:else}<About />{/if}
     </div>
   </div>

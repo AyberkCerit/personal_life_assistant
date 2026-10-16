@@ -1,6 +1,6 @@
 # MVP kabul raporu (M6 parça 3)
 
-Tarih: 16 Ekim 2026 · SRS 1.4 · `main` + `feat/acceptance`. Testler: Rust (pla-core 336, kabuk 109), arayüz
+Tarih: 16 Ekim 2026 · SRS 1.4 · `main` + `feat/acceptance`. Testler: Rust (pla-core 340, kabuk 109), arayüz
 120, gerçek pencere E2E'leri (release derlemesi, Türkçe arayüz). Ölçümler: `research/perf/RESULTS.md`,
 doğal dil: `research/nl-eval/RESULTS.md`, model seçimi: `research/f1-model-eval/RESULTS.md`.
 
@@ -8,31 +8,31 @@ doğal dil: `research/nl-eval/RESULTS.md`, model seçimi: `research/f1-model-eva
 
 | # | Ölçüt | Durum | Kanıt |
 | --- | --- | --- | --- |
-| 1 | Çıkarım kalitesi: JSON %100, doğrulama ≥ %95, alan doğruluğu ≥ %85 (TR ve EN ayrı) | ✓ | F1 değerlendirmesi, 100 TR + 100 EN örnek: JSON %100, anlamsal doğrulama %99,5, alan doğruluğu TR %96 / EN %95 (Q3_K_M). Uygulamanın kendi koduyla çıkarım kümesi 31/31 (nl-eval). Gramer: `prompt.rs::request_body_uses_deterministic_grammar_constrained_settings`. |
+| 1 | Çıkarım kalitesi: JSON %100, doğrulama ≥ %95, alan doğruluğu ≥ %85 (TR ve EN ayrı) | ✓ | F1 ayrık test seti (dev setle ortak notu olmayan 100 TR + 100 EN, Q3_K_M): alan doğruluğu TR %91 / EN %91, kesinlik %93 / %96. Dev sette JSON %100, anlamsal doğrulama %99,5 (Q4_0 QAT). Uygulamanın kendi koduyla çıkarım kümesi 31/31 (nl-eval). Gramer: `prompt.rs::request_body_uses_deterministic_grammar_constrained_settings`. |
 | 2 | Tekrar önleme: yazım düzeltmesi yinelenen öğe üretmez; düzenlenen ya da reddedilen öğe yeniden oluşmaz | ✓ | `blocks::a_typo_fix_keeps_the_block`, `duplicates_pair_by_nearest_position`, `pipeline::user_edited_or_completed_items_win`, `rejected_items_are_not_recreated`, `a_reworded_rejected_item_stays_rejected`, `tasks::deleting_an_extracted_task_remembers_the_rejection`, `metrics::a_deleted_extraction_stays_deleted_when_its_note_is_read_again`. |
 | 3 | Kaynak: boşta ve çıkarım/soru-cevap sırasında RAM hedefleri | ✓ | Tepside 27 MB (≤ 150), pencere açık 374 MB (≤ 450), model cevaplarken 664 MB (≤ 2 GB); 10 000 notluk referans kasa (perf). |
-| 4 | Veri güvenliği: otomatik işlem ham veri silmez; yalnız kasa kopyasından tam geri yükleme | ✓ | Bu aşamada eklendi: `jobs::a_vault_copied_alone_brings_its_tasks_to_another_computer`, `a_backup_comes_back_and_what_was_there_is_kept`, `a_damaged_or_foreign_backup_is_refused_and_nothing_changes`, `recovery::*` (5 test). E2E: kasa başka bir "bilgisayara" (boş APPDATA) kopyalandı, öneri çıktı, görev geri geldi; zorla kapatma + bozuk `pla.db` → dosya silinmeden ayrı tutuldu, yedek önerildi, görev geri geldi; bozuk yedek reddedildi. Silmeme: `pipeline::deleted_note_marks_everything_missing`, `report::a_report_is_never_overwritten`, `engine::instructions_in_a_note_reach_no_tool_outside_the_list_and_no_check_is_skipped`; asistanın silme aracı yok (BR-06). |
+| 4 | Veri güvenliği: otomatik işlem ham veri silmez; yalnız kasa kopyasından tam geri yükleme | ✓ | Bu aşamada eklendi: `jobs::a_vault_copied_alone_brings_its_tasks_to_another_computer`, `a_backup_comes_back_and_what_was_there_is_kept`, `a_damaged_or_foreign_backup_is_refused_and_nothing_changes`, `recovery::*` (7 test), `jobs::a_backup_from_a_newer_pla_is_refused_and_nothing_changes`, `no_backup_is_taken_while_one_waits_to_be_restored`. E2E: kasa başka bir "bilgisayara" (boş APPDATA) kopyalandı, öneri çıktı, görev geri geldi; zorla kapatma + bozuk `pla.db` → dosya silinmeden ayrı tutuldu, yedek önerildi, görev geri geldi; bozuk yedek reddedildi. Silmeme: `pipeline::deleted_note_marks_everything_missing`, `report::a_report_is_never_overwritten`, `engine::instructions_in_a_note_reach_no_tool_outside_the_list_and_no_check_is_skipped`; asistanın silme aracı yok (BR-06). |
 | 5 | Güvenilirlik: kapalı geçen Pazar'dan sonra haftalık rapor telafi edilir; kaçırılan hatırlatıcılar açılışta listelenir | ✓ | `scheduler::the_weekly_report_is_asked_for_once_when_due_and_the_user_is_away`, `report::the_due_week_is_the_latest_whose_time_has_come`, `scheduler::reminders_due_before_start_or_during_sleep_are_one_missed_list`, `unanswered_reminders_are_listed_again_after_a_restart`, `worker::catches_up_on_start_and_reports_what_it_added`. Windows oturum açılışında (`--hidden`) oturum açılıyor (M6 parça 1 E2E). |
-| 6 | Soru-cevap: ham notlara kaynak gösterir, bilgi yokken uydurmaz, sayılar SQL'le birebir | ✓ | nl-eval asistan kümesi 87/91 (%96; saklı küme 12/15, olumsuz 5/5, sorgu 9/9), `engine::answers_name_their_sources`, `tools::numbers_come_from_the_records`, `report::the_numbers_come_from_the_records`. |
+| 6 | Soru-cevap: ham notlara kaynak gösterir, bilgi yokken uydurmaz, sayılar SQL'le birebir | ✓ | nl-eval asistan kümesi 86/91 (%94,5; sonradan düzeltilen 1 vaka tek başına geçti, tam koşu tekrarlanmadı; saklı küme 12/15, olumsuz 5/5, sorgu 9/9), `engine::answers_name_their_sources`, `tools::numbers_come_from_the_records`, `report::the_numbers_come_from_the_records`. |
 | 7 | Kullanım: geliştirici 4 hafta günlük asıl not/görev aracı olarak kullanır | **Sürüyor** | 16 Ekim – 13 Kasım 2026. Kasada `notes/PLA kullanım günlüğü.md` (günde bir satır) ve dört haftalık rapor. Bu ölçüt dönem bitince kapanır. |
 
 ## SRS "Yüksek" gereksinimleri
 
 198 Yüksek gereksinimin 147'si kodda ya da testlerde ID'siyle anılıyor (`research/acceptance/req_gaps.py` taraması; `--all` metinleriyle listeler).
-Denetimde anılmayan 61 madde tek tek incelendi:
+Denetimin başında 61 madde ID'siyle anılmıyordu; hepsi tek tek incelendi. Bunların 10'u bu aşamada uygulanıp ya da etiketlenip ID'siyle anılır oldu, kalan 51'inin 3'ü SRS sapmasıydı, 48'i uygulanmış:
 
-- **Eksik çıkan ve bu aşamada uygulanan (10):**
+- **Eksik çıkan ya da etiketsiz olup bu aşamada ele alınan (10):**
   - FR-BKP-004/005/006/008: yedekten geri yükleme, açılışta öneri, başka bilgisayar.
   - FR-LOG-006/007: anormal kapanmadan sonra `pla.db` kontrolü.
   - NFR-REL-001: 1 000 kesintili kaydetme testi.
   - FR-I18N-004: sistem klasörlerinin yerelleştirilmiş adları.
   - NFR-SEC-005: not içindeki talimat testi.
   - FR-EXT-030: etiket eklendi.
-- **SRS'ten sapma, SRS 1.4'te düzeltildi (4):**
+- **SRS'ten sapma, SRS 1.4'te düzeltildi (FR-LOG-007 yukarıdaki 10'un içinde; burada kalan 3):**
   - FR-MDL-009/010: llama.cpp CPU arka ucunu çalışma anında seçiyor ve AVX2'siz temel x86-64 arka ucu paketli.
   - FR-MDL-016: embedding ayrı sunucu sürecinde (M4 kararı).
   - FR-LOG-007: bozuk veritabanı salt okunur açılmıyor, silinmeden ayrı tutuluyor (sahibin onayı).
-- **Uygulanmış, kanıtı aşağıda (51):**
+- **Uygulanmış, kanıtı aşağıda (48):**
 
 | Gereksinim | Kanıt |
 | --- | --- |
@@ -67,3 +67,7 @@ Denetimde anılmayan 61 madde tek tek incelendi:
 
 - Ölçüt 7 (4 haftalık kullanım) 13 Kasım 2026'da kapanacak.
 - Ağaçta sistem klasörleri diskteki İngilizce adlara göre sıralanıyor; Türkçe adlarla alfabetik değil (küçük).
+- Son incelemeden ertelenen küçükler:
+  - Eski bir yedek geri yüklenince şema göçü önceki `pla.before-upgrade.db`'nin yerine yenisini yazıyor; asıl veri `pla-before-restore-*`'da korunuyor.
+  - Öneri beklerken arka plan yapay zekâsı duraklatılmış, ama tepsideki "Duraklat" işareti bunu göstermiyor.
+  - Anormal kapanmadan sonra açılışta tam `integrity_check` büyük bir `pla.db`'de açılışı yavaşlatabilir.

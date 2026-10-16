@@ -12,6 +12,8 @@
   import Button from "../ui/Button.svelte";
   import Row from "./Row.svelte";
 
+  let { onBeforeRestore }: { onBeforeRestore: () => Promise<void> } = $props();
+
   let saved = $state<string[]>([]);
   let busy = $state(false);
   let error = $state<string | Failure | null>(null);
@@ -48,6 +50,7 @@
     restoring = true;
     error = null;
     try {
+      await onBeforeRestore(); // what is being typed is saved before the page reloads
       await api.restoreBackup(chosen);
       location.reload(); // every view reads the restored data afresh
     } catch (e) {

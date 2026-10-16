@@ -55,12 +55,17 @@ pub struct Session {
     /// FR-BKP-004/008, FR-LOG-007: a backup offered when the vault opened; background AI waits for
     /// the answer (it would only extract into data about to be replaced).
     pub restore_offer: Mutex<Option<pla_core::recovery::RestoreOffer>>,
+    /// Last, so it drops after the worker, scheduler and indexer have closed pla.db.
+    pub _running: RunningGuard,
 }
 
-/// FR-LOG-006: a session that ends normally tells the next start not to check pla.db.
-impl Drop for Session {
+/// FR-LOG-006: a session that ends normally tells the next start not to check pla.db; dropped last
+/// in `Session`, so a stop during the shutdown itself still counts as unclean (final review).
+pub struct RunningGuard(std::path::PathBuf);
+
+impl Drop for RunningGuard {
     fn drop(&mut self) {
-        pla_core::recovery::closed_cleanly(&self.data_dir);
+        pla_core::recovery::closed_cleanly(&self.0);
     }
 }
 
@@ -70,6 +75,8 @@ pub struct AppState {
     pub self_writes: Arc<SelfWrites>,
     /// Background AI paused (FR-SCH-014); kept across vault switches.
     pub paused: AtomicBool,
+    /// A restore is swapping pla.db: closing or quitting waits for it (final review I2).
+    pub restoring: AtomicBool,
     /// The model download outlives vault switches (model-manager spec § 5).
     pub downloads: crate::model_download::ModelDownloads,
     /// The embedding model's download, next to the language model's.
@@ -256,6 +263,7 @@ fn start_session(app: &AppHandle, root: &Path, settings: &AppSettings, own: Arc<
         memory_pause,
         worker: handle,
         weekly,
+        _running: RunningGuard(dir.clone()),
         data_dir: dir,
         restore_offer: Mutex::new(offer),
     })
@@ -647,15 +655,23 @@ pub fn restore_backup(app: AppHandle, state: State<AppState>, name: String) -> R
     let settings = load_settings(&root).map_err(ue)?.settings;
     let session = state.session.lock().expect("session lock").take().ok_or(NO_VAULT)?;
     let (vault_root, data_dir) = (session.vault.root.clone(), session.data_dir.clone());
+    state.restoring.store(true, Ordering::SeqCst);
     drop(session); // waits for the worker, scheduler and indexer: their connections close
     let restored = pla_core::jobs::restore(&data_dir, &vault_root, &name, Local::now().fixed_offset()).map_err(|e| match e {
         pla_core::jobs::RestoreError::Unknown(n) => ue(crate::errors::UserError::new("missing", n)),
         pla_core::jobs::RestoreError::Damaged(n) => ue(crate::errors::UserError::new("backup_damaged", n)),
+        pla_core::jobs::RestoreError::NewerSchema(n) => ue(crate::errors::UserError::new("newer_schema", n)),
         pla_core::jobs::RestoreError::Db(e) => ue(e),
         pla_core::jobs::RestoreError::Io(e) => ue(e),
     });
-    let again = start_session(&app, &vault_root, &settings, Arc::clone(&state.self_writes), state.paused.load(Ordering::SeqCst))?;
-    *state.session.lock().expect("session lock") = Some(again);
+    let again = start_session(&app, &vault_root, &settings, Arc::clone(&state.self_writes), state.paused.load(Ordering::SeqCst));
+    state.restoring.store(false, Ordering::SeqCst);
+    // the page reloads next: tray requests wait for the new page (final review)
+    app.state::<crate::tray::UiQueue>().not_listening();
+    match again {
+        Ok(session) => *state.session.lock().expect("session lock") = Some(session),
+        Err(e) => return Err(restored.err().unwrap_or(e)), // the restore's own failure is the one to say
+    }
     restored.map(drop)
 }
 
@@ -664,6 +680,7 @@ pub fn restore_backup(app: AppHandle, state: State<AppState>, name: String) -> R
 pub fn keep_empty(app: AppHandle, state: State<AppState>) {
     if let Some(session) = state.session.lock().expect("session lock").as_ref() {
         *session.restore_offer.lock().expect("offer lock") = None;
+        pla_core::recovery::answered(&session.data_dir);
     }
     apply_pause(&app, state.paused.load(Ordering::SeqCst));
 }
