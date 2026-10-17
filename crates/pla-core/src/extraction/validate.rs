@@ -40,6 +40,8 @@ pub enum InvalidReason {
     RepeatWithDate,
     #[error("repeat on a metric")]
     RepeatOnMetric,
+    #[error("repeat without a day")]
+    EmptyRepeat,
     #[error("task or reminder without a title")]
     MissingTitle,
     #[error("task or reminder carrying a metric")]
@@ -102,6 +104,9 @@ pub fn validate(item: &RawItem, reference: NaiveDate, s: &ValidationSettings) ->
         }
         if anchors.iter().any(|set| *set) {
             return Err(InvalidReason::RepeatWithDate);
+        }
+        if repeat.is_empty() {
+            return Err(InvalidReason::EmptyRepeat);
         }
         let title = item.title.as_deref().map(str::trim).unwrap_or_default();
         if title.is_empty() {
@@ -195,6 +200,7 @@ mod tests {
             assert_eq!(check(&format!(r#"{{"type":"task","title":"x","when":{{"repeat":["mon"],{w}}}}}"#)), Err(InvalidReason::RepeatWithDate), "{w}");
         }
         assert_eq!(check(r#"{"type":"metric","when":{"repeat":["mon"]},"metric":{"kind":"sleep","value":7,"unit":"h"}}"#), Err(InvalidReason::RepeatOnMetric));
+        assert_eq!(check(r#"{"type":"task","title":"Spor","when":{"repeat":[]}}"#), Err(InvalidReason::EmptyRepeat));
     }
 
     #[test]

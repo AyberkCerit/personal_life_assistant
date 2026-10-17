@@ -198,6 +198,7 @@ pub fn prune_missing(conn: &Connection, now: DateTime<FixedOffset>, days: i64) -
             "SELECT b.block_id, b.missing_since FROM block b WHERE b.missing = 1
                AND NOT EXISTS (SELECT 1 FROM task t WHERE t.block_id = b.block_id)
                AND NOT EXISTS (SELECT 1 FROM metric_record m WHERE m.block_id = b.block_id)
+               AND NOT EXISTS (SELECT 1 FROM routine u WHERE u.block_id = b.block_id)
                AND NOT EXISTS (SELECT 1 FROM rejection r WHERE r.block_id = b.block_id)
                AND NOT EXISTS (SELECT 1 FROM review_item v WHERE v.block_id = b.block_id)",
         )?
@@ -216,6 +217,8 @@ pub fn prune_missing(conn: &Connection, now: DateTime<FixedOffset>, days: i64) -
 fn set_source_missing(conn: &Connection, block_id: &str, missing: bool) -> rusqlite::Result<()> {
     conn.execute("UPDATE task SET source_missing = ?1 WHERE block_id = ?2", params![missing, block_id])?;
     conn.execute("UPDATE metric_record SET source_missing = ?1 WHERE block_id = ?2", params![missing, block_id])?;
+    // A routine whose note is gone keeps running; it is only marked.
+    conn.execute("UPDATE routine SET source_missing = ?1 WHERE block_id = ?2", params![missing, block_id])?;
     Ok(())
 }
 
@@ -279,9 +282,11 @@ mod tests {
         // architecture review A10, owner decision 2026-10-13: 60 days
         let tmp = tempfile::tempdir().unwrap();
         let dbs = open_databases(tmp.path()).unwrap();
-        let blocks = sync(&dbs.pla, "notes/x.md", "Bir.\n\nİki.\n\nÜç.\n\nDört.", None, T1);
+        let blocks = sync(&dbs.pla, "notes/x.md", "Bir.\n\nİki.\n\nÜç.\n\nDört.\n\nAltı.", None, T1);
         let ids: Vec<String> = blocks.iter().map(|b| b.block_id.clone()).collect();
         insert_task(&dbs.pla, "t", &ids[1]);
+        let days = [crate::extraction::Weekday::Mon].map(|day| crate::routines::RoutineDay { day, time: None });
+        crate::routines::insert_routine(&dbs.pla, "Spor", &days, Some(&ids[4]), Some("routine:spor"), T1).unwrap();
         dbs.pla.execute("INSERT INTO rejection (rejection_id, block_id, item_signature, rejected_at) VALUES ('r', ?1, 'action:x', 'now')", [&ids[2]]).unwrap();
         dbs.pla
             .execute("INSERT INTO review_item (review_id, block_id, payload_json, reason, created_at) VALUES ('v', ?1, '{}', 'x', 'now')", [&ids[3]])
@@ -294,8 +299,8 @@ mod tests {
         assert_eq!(prune_missing(&dbs.pla, at("2026-12-06T10:00:00+03:00"), 60).unwrap(), 1, "only the unreferenced old one");
         let left: Vec<String> = dbs.pla.prepare("SELECT block_id FROM block").unwrap().query_map([], |r| r.get(0)).unwrap().map(Result::unwrap).collect();
         assert!(!left.contains(&ids[0]), "unreferenced, 61 days missing");
-        for kept in [&ids[1], &ids[2], &ids[3], &alive[0].block_id] {
-            assert!(left.contains(kept), "a task, a rejection, a review item or a later date keeps {kept}");
+        for kept in [&ids[1], &ids[2], &ids[3], &ids[4], &alive[0].block_id] {
+            assert!(left.contains(kept), "a task, a rejection, a review item, a routine or a later date keeps {kept}");
         }
     }
 

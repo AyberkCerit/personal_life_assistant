@@ -1,11 +1,13 @@
 //! Merging one block's extraction into pla.db (FR-EXT-013…019, -021; FR-TSK-011; FR-MET-002, -007).
-//! Extraction adds and updates; it never deletes, and never touches what the user changed.
+//! Extraction adds and updates; it never touches what the user changed, and deletes only the one-off
+//! copies a routine takes over (`take_over_copies`).
 
 use chrono::{DateTime, FixedOffset, NaiveDate, NaiveTime};
 use rusqlite::{params, Connection, OptionalExtension};
 use serde_json::{Map, Value};
 
-use crate::extraction::{validate, MetricKind, RawExtraction, RawItem, Unit, ValidItem, ValidationSettings};
+use crate::extraction::{validate, MetricKind, RawExtraction, RawItem, Unit, ValidItem, ValidationSettings, Weekday};
+use crate::routines::{insert_routine, roll_one, RoutineDay};
 use crate::util::new_id;
 
 const MAX_TITLE_CHARS: usize = 200;
@@ -45,11 +47,16 @@ pub fn action_signature(title: &str) -> String {
     format!("action:{}", normalize(title))
 }
 
+/// Signature of a routine with this title (the same as `item_signature` gives).
+pub fn routine_signature(title: &str) -> String {
+    format!("routine:{}", normalize(title))
+}
+
 /// "The same item" within a block (SRS C.1): type plus normalized title, metric kind, or workout exercise.
 pub fn item_signature(item: &ValidItem) -> String {
     match item {
         ValidItem::Action { title, .. } => action_signature(title),
-        ValidItem::Routine { title, .. } => format!("routine:{}", normalize(title)),
+        ValidItem::Routine { title, .. } => routine_signature(title),
         // The day is part of a metric (metrics final review I1): "Monday 6 h, Tuesday 7 h" in one
         // paragraph are two items, and deleting one must not hand its place to the other.
         ValidItem::Metric { kind: MetricKind::Workout, exercise, date, .. } => {
@@ -68,6 +75,8 @@ const SAME_ITEM_SIMILARITY: f64 = 0.8;
 fn split_signature(signature: &str) -> (&str, &str) {
     if let Some(rest) = signature.strip_prefix("action:") {
         ("action", rest)
+    } else if let Some(rest) = signature.strip_prefix("routine:") {
+        ("routine", rest)
     } else if signature.starts_with("metric:workout:") {
         // metric:workout:<date>:<exercise>: the same day groups, the exercise may be reworded
         let label_at = signature.match_indices(':').nth(2).map_or(signature.len(), |(i, _)| i + 1);
@@ -103,8 +112,6 @@ pub fn apply_block_items(
     for raw in &extraction.items {
         match validate(raw, reference, settings) {
             Err(reason) => outcomes.push(review(conn, block_id, raw, &reason.to_string(), &now_s)?),
-            // Task 5 stores routines; until then they wait in the Review box
-            Ok(ValidItem::Routine { .. }) => outcomes.push(review(conn, block_id, raw, "routine", &now_s)?),
             Ok(ValidItem::Action { reminder: true, date: None, .. }) => outcomes.push(review(conn, block_id, raw, "reminder without a date", &now_s)?),
             Ok(ValidItem::Action { date: Some(d), .. }) if skip_past_before.is_some_and(|today| d < today) => outcomes.push(Outcome::SkippedPast),
             Ok(item) => {
@@ -150,8 +157,9 @@ pub fn apply_block_items(
         }
     }
 
+    let mut written = Vec::with_capacity(accepted.len());
     for (i, (item, signature)) in accepted.iter().enumerate() {
-        outcomes.push(match pairing[i] {
+        written.push(match pairing[i] {
             _ if rejected[i] => Outcome::Rejected { signature: signature.clone() },
             Some(j) if existing[j].user_owned => {
                 adopt(conn, &existing[j].item, block_id)?;
@@ -164,7 +172,45 @@ pub fn apply_block_items(
             None => Outcome::Added(insert_item(conn, block_id, item, signature, &now_s)?),
         });
     }
+    // A written routine gets its occurrences, then takes over its one-off copies.
+    let mut written_tasks: Vec<&str> = Vec::new();
+    let mut routine_labels: Vec<&str> = Vec::new();
+    for (outcome, (_, signature)) in written.iter().zip(&accepted) {
+        match outcome {
+            Outcome::Added(ItemRef::Task(id)) | Outcome::Updated(ItemRef::Task(id)) => written_tasks.push(id),
+            Outcome::Added(ItemRef::Routine(id)) | Outcome::Updated(ItemRef::Routine(id)) => {
+                roll_one(conn, id, now.date_naive(), now)?;
+                routine_labels.push(split_signature(signature).1);
+            }
+            _ => {}
+        }
+    }
+    for label in routine_labels {
+        take_over_copies(conn, block_id, label, &written_tasks)?;
+    }
+    outcomes.extend(written);
     Ok(outcomes)
+}
+
+/// Spec goal 9, the one exception to "extraction never deletes": a routine replaces the one-off copies
+/// extraction made of it in its block (before routines, a weekly habit became one task per day). Only
+/// untouched open copies go, and they are not rejections; done or user-edited ones, and tasks this run
+/// just wrote, stay.
+fn take_over_copies(conn: &Connection, block_id: &str, routine_label: &str, keep: &[&str]) -> rusqlite::Result<()> {
+    let copies: Vec<(String, String)> = conn
+        .prepare(
+            "SELECT task_id, COALESCE(item_signature, '') FROM task
+             WHERE block_id = ?1 AND origin = 'extracted' AND routine_id IS NULL AND status = 'open' AND user_modified = 0",
+        )?
+        .query_map([block_id], |r| Ok((r.get(0)?, r.get(1)?)))?
+        .collect::<Result<_, _>>()?;
+    for (task_id, signature) in copies {
+        let (group, label) = split_signature(&signature);
+        if group == "action" && !keep.contains(&task_id.as_str()) && strsim::jaro_winkler(label, routine_label) >= SAME_ITEM_SIMILARITY {
+            conn.execute("DELETE FROM task WHERE task_id = ?1", [&task_id])?;
+        }
+    }
+    Ok(())
 }
 
 pub fn record_unreadable_answer(conn: &Connection, block_id: &str, answer: &str, reason: &str, now: DateTime<FixedOffset>) -> rusqlite::Result<Outcome> {
@@ -266,6 +312,12 @@ fn load_existing(conn: &Connection, block_id: &str, now: &str) -> rusqlite::Resu
         .query_map([block_id, now], |r| Ok(Existing { item: ItemRef::Metric(r.get(0)?), signature: r.get(1)?, user_owned: r.get(2)?, claimed: false }))?
         .collect::<Result<_, _>>()?;
     out.extend(metrics);
+    // A routine the user edited or paused is theirs.
+    let routines: Vec<Existing> = conn
+        .prepare(&format!("SELECT routine_id, COALESCE(item_signature, ''), user_modified OR paused FROM routine WHERE origin = 'extracted' AND {SOURCES}"))?
+        .query_map([block_id, now], |r| Ok(Existing { item: ItemRef::Routine(r.get(0)?), signature: r.get(1)?, user_owned: r.get(2)?, claimed: false }))?
+        .collect::<Result<_, _>>()?;
+    out.extend(routines);
     Ok(out)
 }
 
@@ -328,7 +380,9 @@ fn insert_item(conn: &Connection, block_id: &str, item: &ValidItem, signature: &
             )?;
             Ok(ItemRef::Task(id))
         }
-        ValidItem::Routine { .. } => unreachable!("routines go to the Review box until they are stored"),
+        ValidItem::Routine { title, days, time } => {
+            Ok(ItemRef::Routine(insert_routine(conn, title, &routine_days(days, *time), Some(block_id), Some(signature), now)?))
+        }
         ValidItem::Metric { kind, date, value, unit, exercise, sets, reps } => {
             conn.execute(
                 "INSERT INTO metric_record (metric_id, type, value_json, unit, date, origin, block_id, item_signature, created_at)
@@ -372,9 +426,29 @@ fn update_item(conn: &Connection, target: &ItemRef, block_id: &str, item: &Valid
                 ],
             )?;
         }
+        // the caller rolls the occurrences afterwards
+        (ItemRef::Routine(id), ValidItem::Routine { title, days, time }) => {
+            conn.execute(
+                "UPDATE routine SET title = ?1, days_json = ?2, item_signature = ?3, source_missing = 0, updated_at = ?4, block_id = ?5 WHERE routine_id = ?6",
+                params![
+                    title.chars().take(MAX_TITLE_CHARS).collect::<String>(),
+                    serde_json::to_string(&routine_days(days, *time)).expect("days serialize"),
+                    signature,
+                    now,
+                    block_id,
+                    id
+                ],
+            )?;
+        }
         _ => unreachable!("pairing only joins items of the same group"),
     }
     Ok(())
+}
+
+/// Every day of an extracted routine gets the item's one time (or none).
+fn routine_days(days: &[Weekday], time: Option<NaiveTime>) -> Vec<RoutineDay> {
+    let time = time.map(|t| t.format("%H:%M").to_string());
+    days.iter().map(|&day| RoutineDay { day, time: time.clone() }).collect()
 }
 
 #[cfg(test)]
@@ -649,5 +723,159 @@ mod tests {
         assert_eq!(occurrences(), before, "the occurrences are left alone");
         assert_eq!(count(&conn, "task"), 3, "a new task was added next to them");
         assert_eq!(count(&conn, "task WHERE routine_id IS NULL"), 1);
+    }
+
+    // --- routines (spec 2026-10-18, Task 5) ---
+
+    const SPOR: &str = r#"{"type":"task","title":"Spor","when":{"repeat":["sun","mon","wed","thu","fri"],"time":"20:00"}}"#;
+    const NOTE: &str = "n.md";
+
+    fn d(s: &str) -> NaiveDate {
+        NaiveDate::parse_from_str(s, "%Y-%m-%d").unwrap()
+    }
+    fn now_on(date: &str) -> DateTime<FixedOffset> {
+        DateTime::parse_from_rfc3339(&format!("{date}T10:00:00+03:00")).unwrap()
+    }
+    fn apply_at(conn: &Connection, json: &str, now: DateTime<FixedOffset>) -> Vec<Outcome> {
+        let ex = parse_extraction(&format!(r#"{{"items": [{json}]}}"#)).unwrap();
+        apply_block_items(conn, "b1", now.date_naive(), &ex, &ValidationSettings::default(), None, now).unwrap()
+    }
+    fn n(conn: &Connection, sql: &str) -> i64 {
+        conn.query_row(sql, [], |r| r.get(0)).unwrap()
+    }
+    fn days_of(conn: &Connection) -> String {
+        let json: String = conn.query_row("SELECT days_json FROM routine", [], |r| r.get(0)).unwrap();
+        let days: Vec<crate::routines::RoutineDay> = serde_json::from_str(&json).unwrap();
+        days.iter().map(|d| serde_json::to_value(d.day).unwrap().as_str().unwrap().to_owned()).collect::<Vec<_>>().join(",")
+    }
+    fn routine_input(title: &str, days: &[(&str, Option<&str>)]) -> crate::routines::RoutineInput {
+        let days = days.iter().map(|(d, t)| serde_json::from_value(serde_json::json!({"day": d, "time": t})).unwrap()).collect();
+        crate::routines::RoutineInput { title: title.into(), days }
+    }
+    /// The behaviour before routines: one "Spor" task per day in the block; the one on `done` is ticked.
+    fn seed_five_spor_tasks(conn: &Connection, block: &str, done: &str) {
+        for date in ["2026-10-25", "2026-10-26", "2026-10-28", "2026-10-29", "2026-10-30"] {
+            conn.execute(
+                "INSERT INTO task (task_id, title, date, time, status, origin, block_id, item_signature, created_at, updated_at)
+                 VALUES (?1, 'Spor', ?2, '20:00', CASE WHEN ?2 = ?3 THEN 'done' ELSE 'open' END, 'extracted', ?4, 'action:spor', ?5, ?5)",
+                params![new_id(), date, done, block, NOW],
+            )
+            .unwrap();
+        }
+    }
+
+    #[test]
+    fn a_repeat_becomes_one_routine_with_its_occurrences() {
+        let (_t, conn) = setup();
+        let out = apply_at(&conn, SPOR, now_on("2026-10-26"));
+        assert!(matches!(out[0], Outcome::Added(ItemRef::Routine(_))), "{out:?}");
+        assert_eq!(n(&conn, "SELECT count(*) FROM routine"), 1);
+        assert_eq!(n(&conn, "SELECT count(*) FROM task WHERE routine_id IS NOT NULL AND status = 'open'"), 2);
+        let (block, sig): (String, String) = conn.query_row("SELECT block_id, item_signature FROM routine", [], |r| Ok((r.get(0)?, r.get(1)?))).unwrap();
+        assert_eq!((block.as_str(), sig.as_str()), ("b1", "routine:spor"));
+        assert_eq!(days_of(&conn), "mon,wed,thu,fri,sun");
+        let notify: String = conn.query_row("SELECT notify_at FROM task WHERE date = '2026-10-26'", [], |r| r.get(0)).unwrap();
+        assert_eq!(notify, "2026-10-26T20:00", "every day gets the item's time");
+    }
+
+    #[test]
+    fn the_routine_takes_over_the_one_off_copies_of_its_block() {
+        let (_t, conn) = setup();
+        // the behaviour before: five "Spor" tasks in the same block, one done
+        seed_five_spor_tasks(&conn, "b1", "2026-10-26");
+        apply_at(&conn, SPOR, now_on("2026-10-26"));
+        assert_eq!(n(&conn, "SELECT count(*) FROM task WHERE routine_id IS NULL AND status = 'open'"), 0);
+        assert_eq!(n(&conn, "SELECT count(*) FROM task WHERE routine_id IS NULL AND status = 'done'"), 1, "the user's tick stays");
+        assert_eq!(n(&conn, "SELECT count(*) FROM rejection"), 0);
+    }
+
+    #[test]
+    fn the_takeover_leaves_touched_unrelated_and_other_blocks_tasks_alone() {
+        let (_t, conn) = setup();
+        conn.execute(
+            "INSERT INTO block (block_id, note_path, position, text, text_hash, first_seen_at, last_seen_at) VALUES ('b2', 'n.md', 1, 'y', 'h2', ?1, ?1)",
+            [NOW],
+        )
+        .unwrap();
+        seed_five_spor_tasks(&conn, "b1", "none");
+        seed_five_spor_tasks(&conn, "b2", "none");
+        conn.execute("UPDATE task SET user_modified = 1 WHERE block_id = 'b1' AND date = '2026-10-28'", []).unwrap();
+        conn.execute(
+            "INSERT INTO task (task_id, title, status, origin, block_id, item_signature, created_at, updated_at)
+             VALUES ('other', 'Market', 'open', 'extracted', 'b1', 'action:market', ?1, ?1)",
+            [NOW],
+        )
+        .unwrap();
+        // "Spor çantası al" is like "Spor", but it is this run's own task
+        let out = apply_at(&conn, &format!(r#"{SPOR},{{"type":"task","title":"Spor çantası al"}}"#), now_on("2026-10-26"));
+        assert!(matches!(&out[..], [Outcome::Added(ItemRef::Routine(_)), Outcome::Updated(ItemRef::Task(_))]), "{out:?}");
+        let left: Vec<String> = conn
+            .prepare("SELECT title FROM task WHERE routine_id IS NULL AND block_id = 'b1' ORDER BY title")
+            .unwrap()
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(left, ["Market", "Spor", "Spor çantası al"], "the user-edited copy, the unrelated task and this run's task stay");
+        assert_eq!(n(&conn, "SELECT count(*) FROM task WHERE user_modified = 1 AND block_id = 'b1'"), 1);
+        assert_eq!(n(&conn, "SELECT count(*) FROM task WHERE block_id = 'b2' AND routine_id IS NULL"), 5, "another block's copies stay");
+    }
+
+    #[test]
+    fn a_changed_note_updates_the_routine_unless_the_user_edited_it() {
+        let (_t, conn) = setup();
+        apply_at(&conn, SPOR, now_on("2026-10-26"));
+        let out = apply_at(&conn, &SPOR.replace(r#","fri""#, ""), now_on("2026-10-26"));
+        assert!(matches!(out[0], Outcome::Updated(ItemRef::Routine(_))), "{out:?}");
+        assert_eq!(days_of(&conn), "mon,wed,thu,sun");
+        let rid: String = conn.query_row("SELECT routine_id FROM routine", [], |r| r.get(0)).unwrap();
+        crate::routines::edit_routine(&conn, &rid, &routine_input("Spor", &[("mon", Some("21:00"))]), d("2026-10-26"), now_on("2026-10-26")).unwrap();
+        let out = apply_at(&conn, SPOR, now_on("2026-10-26"));
+        assert!(matches!(out[0], Outcome::KeptUserVersion(_)), "{out:?}");
+        assert_eq!(days_of(&conn), "mon");
+        assert_eq!(n(&conn, "SELECT count(*) FROM routine"), 1);
+    }
+
+    #[test]
+    fn an_update_rolls_the_occurrences() {
+        let (_t, conn) = setup();
+        apply_at(&conn, SPOR, now_on("2026-10-26"));
+        apply_at(&conn, &SPOR.replace("20:00", "21:00"), now_on("2026-10-26"));
+        let times: Vec<String> = conn
+            .prepare("SELECT time FROM task WHERE status = 'open' ORDER BY date")
+            .unwrap()
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(times, ["21:00", "21:00"]);
+    }
+
+    #[test]
+    fn an_undone_routine_does_not_come_back() {
+        let (_t, conn) = setup();
+        let Outcome::Added(item) = apply_at(&conn, SPOR, now_on("2026-10-26")).remove(0) else { panic!("expected Added") };
+        reject_item(&conn, &item, now()).unwrap();
+        assert!(matches!(apply_at(&conn, SPOR, now_on("2026-10-26"))[0], Outcome::Rejected { .. }));
+        let reworded = SPOR.replace(r#""Spor""#, r#""Spora git""#);
+        assert!(matches!(apply_at(&conn, &reworded, now_on("2026-10-26"))[0], Outcome::Rejected { .. }), "reworded too");
+        assert_eq!(n(&conn, "SELECT count(*) FROM routine"), 0);
+    }
+
+    #[test]
+    fn a_routine_whose_note_is_gone_is_marked_but_keeps_running() {
+        let (_t, conn) = setup();
+        apply_at(&conn, SPOR, now_on("2026-10-26"));
+        crate::pipeline::blocks::mark_note_missing(&conn, NOTE, now()).unwrap();
+        assert_eq!(n(&conn, "SELECT count(*) FROM routine WHERE source_missing = 1"), 1);
+        crate::routines::roll(&conn, d("2026-10-28"), now_on("2026-10-28")).unwrap();
+        assert!(n(&conn, "SELECT count(*) FROM task WHERE routine_id IS NOT NULL AND status = 'open'") > 0);
+    }
+
+    #[test]
+    fn routine_signature_matches_item_signature() {
+        let item = ValidItem::Routine { title: " Sabah  Yürüyüşü".into(), days: vec![crate::extraction::Weekday::Mon], time: None };
+        assert_eq!(routine_signature(" Sabah  Yürüyüşü"), item_signature(&item));
+        assert_eq!(split_signature("routine:sabah yürüyüşü"), ("routine", "sabah yürüyüşü"));
     }
 }

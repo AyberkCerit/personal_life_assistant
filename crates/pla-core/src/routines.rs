@@ -82,7 +82,6 @@ fn clean(input: &RoutineInput) -> Result<(String, Vec<RoutineDay>), RoutineError
 }
 
 /// Inserts an extracted routine; the caller has validated `days` (see `clean`).
-#[cfg_attr(not(test), allow(dead_code))] // used by extraction once routines are extracted
 pub(crate) fn insert_routine(
     conn: &Connection,
     title: &str,

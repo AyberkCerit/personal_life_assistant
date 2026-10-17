@@ -12,6 +12,7 @@ const PLA_MIGRATIONS: &[&str] = &[
     include_str!("../migrations/pla/005_qa.sql"),
     include_str!("../migrations/pla/006_item_block_index.sql"),
     include_str!("../migrations/pla/007_routines.sql"),
+    include_str!("../migrations/pla/008_requeue_repeated_items.sql"),
 ];
 const CACHE_MIGRATIONS: &[&str] = &[
     include_str!("../migrations/cache/001_init.sql"),
@@ -218,6 +219,34 @@ mod tests {
         // Review Focus 5: an older app opening a newer database
         let err = migrate(&mut conn, &v1, Some(&backup)).unwrap_err();
         assert!(matches!(err, DbError::NewerSchema { found: 2, supported: 1 }));
+    }
+
+    #[test]
+    fn blocks_that_made_one_task_per_day_are_extracted_again() {
+        // spec 2026-10-18: a weekly habit written as five one-off tasks gets one more pass, as a routine
+        let tmp = tempfile::tempdir().unwrap();
+        let mut conn = connect(&tmp.path().join("pla.db")).unwrap();
+        migrate(&mut conn, &PLA_MIGRATIONS[..7], None).unwrap();
+        conn.execute_batch(
+            "INSERT INTO block (block_id, note_path, position, text, text_hash, first_seen_at, last_seen_at, extracted_hash)
+               VALUES ('spor', 'spor.md', 0, 'x', 'h1', 't', 't', 'h1'), ('one', 'one.md', 0, 'y', 'h2', 't', 't', 'h2');
+             INSERT INTO task (task_id, title, date, status, origin, block_id, item_signature, created_at, updated_at) VALUES
+               ('s1', 'Spor', '2026-10-25', 'done', 'extracted', 'spor', 'action:spor', 't', 't'),
+               ('s2', 'Spor', '2026-10-26', 'open', 'extracted', 'spor', 'action:spor', 't', 't'),
+               ('s3', 'Spor', '2026-10-28', 'open', 'extracted', 'spor', 'action:spor', 't', 't'),
+               ('s4', 'Spor', '2026-10-29', 'open', 'extracted', 'spor', 'action:spor', 't', 't'),
+               ('s5', 'Spor', '2026-10-30', 'open', 'extracted', 'spor', 'action:spor', 't', 't'),
+               ('o1', 'Dişçi', '2026-10-27', 'open', 'extracted', 'one', 'action:dişçi', 't', 't');",
+        )
+        .unwrap();
+        migrate(&mut conn, PLA_MIGRATIONS, None).unwrap();
+        let hash = |id: &str| -> Option<String> { conn.query_row("SELECT extracted_hash FROM block WHERE block_id = ?1", [id], |r| r.get(0)).unwrap() };
+        assert_eq!((hash("spor"), hash("one")), (None, Some("h2".into())));
+        let queued: Vec<String> =
+            conn.prepare("SELECT note_path FROM extraction_queue").unwrap().query_map([], |r| r.get(0)).unwrap().collect::<Result<_, _>>().unwrap();
+        assert_eq!(queued, ["spor.md"]);
+        let tasks: i64 = conn.query_row("SELECT count(*) FROM task", [], |r| r.get(0)).unwrap();
+        assert_eq!(tasks, 6, "the migration only queues; nothing is deleted");
     }
 
     #[test]
