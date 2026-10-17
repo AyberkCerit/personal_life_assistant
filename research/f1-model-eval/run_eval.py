@@ -125,7 +125,8 @@ FEW_SHOT_V2 = FEW_SHOT + [
 
 SYSTEM_V4 = SYSTEM_V2 + """
 
-A habit that repeats every week ("her", "her gün", "hafta içi", "hafta sonu", "every", "each") is ONE item with when.repeat listing its weekdays, plus time if stated; never one item per day, and no weekday, which, day_offset or date. "her gün"/"every day" = all seven days, "hafta içi"/"weekdays" = mon..fri, "hafta sonu"/"weekend" = sat, sun. A single day without "her"/"every" is not a habit."""
+A habit that repeats every week ("her", "her gün", "hafta içi", "hafta sonu", "every", "each") is ONE item of type "task" (never "metric", even for sport or sleep) with when.repeat listing its weekdays, plus time if stated; never one item per day, and no weekday, which, day_offset or date. "her gün"/"every day" = all seven days, "hafta içi"/"weekdays" = mon..fri, "hafta sonu"/"weekend" = sat, sun. A single day without "her"/"every" is not a habit.
+A workout metric always names its exercise (e.g. "Squats 5x5 at 100 kg" -> exercise "squat"), in English notes too."""
 
 FEW_SHOT_V4 = FEW_SHOT_V2 + [
     ("2026-06-10", "Her pazar pazartesi çarşamba perşembe cuma akşam 8'de spora gideceğim.",
@@ -133,6 +134,10 @@ FEW_SHOT_V4 = FEW_SHOT_V2 + [
     ("2026-06-10", "Pazartesi spora gideceğim, hafta içi her sabah 7'de yürüyüş.",
      {"items": [{"type": "task", "title": "Spor", "when": {"weekday": "mon", "which": "this"}},
                 {"type": "task", "title": "Yürüyüş", "when": {"repeat": ["mon", "tue", "wed", "thu", "fri"], "time": "07:00"}}]}),
+    ("2026-06-10", "Her gün saat 22'de vitamin alacağım.",
+     {"items": [{"type": "task", "title": "Vitamin al", "when": {"repeat": ["mon", "tue", "wed", "thu", "fri", "sat", "sun"], "time": "22:00"}}]}),
+    ("2026-06-10", "Hafta sonu her sabah 9'da kahvaltı hazırla.",
+     {"items": [{"type": "task", "title": "Kahvaltı hazırla", "when": {"repeat": ["sat", "sun"], "time": "09:00"}}]}),
 ]
 
 

@@ -30,3 +30,10 @@
 {"id":"diary-film","cat":"other","text":"Akşam arkadaşlarla film izledik, çok eğlendik.","expect":{"empty":true}}
 {"id":"recipe-not-metric","cat":"other","text":"Mercimek çorbası: 1 su bardağı mercimek, 2 litre su, 1 soğan.","expect":{"none_of":["water"]}}
 {"id":"shopping-list","cat":"other","text":"Alınacaklar: 2 kg domates, 1 kg peynir, 6 yumurta.","expect":{"none_of":["weight","workout"]}}
+{"id":"rut-spor","cat":"routine","text":"Her pazar pazartesi çarşamba perşembe cuma akşam 8'de spora gideceğim.","expect":{"items":[{"type":"routine","days":["mon","wed","thu","fri","sun"],"time":"20:00"}]}}
+{"id":"rut-hergun","cat":"routine","text":"Her gün saat 23'te yatacağım.","expect":{"items":[{"type":"routine","days":["mon","tue","wed","thu","fri","sat","sun"],"time":"23:00"}]}}
+{"id":"rut-haftaici","cat":"routine","text":"Hafta içi her sabah 7'de koşu.","expect":{"items":[{"type":"routine","days":["mon","tue","wed","thu","fri"],"time":"07:00"}]}}
+{"id":"rut-en","cat":"routine","text":"I go swimming every Tuesday and Thursday at 6 pm.","expect":{"items":[{"type":"routine","days":["tue","thu"],"time":"18:00"}]}}
+{"id":"rut-tek","cat":"routine","text":"Pazartesi spora gideceğim.","expect":{"items":[{"type":"task"}],"none_of":["routine"]}}
+{"id":"rut-gecmis","cat":"routine","text":"Bu hafta her gün 8 saat uyudum.","expect":{"none_of":["routine"]}}
+{"id":"rut-duygu","cat":"routine","text":"Her zaman geç kalıyorum, sinir bozucu.","expect":{"empty":true}}
