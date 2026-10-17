@@ -837,6 +837,7 @@ fn describe(conn: &Connection, item: &ItemRef) -> Option<AddedItem> {
     let (kind, id, sql) = match item {
         ItemRef::Task(id) => ("task", id, "SELECT title FROM task WHERE task_id = ?1"),
         ItemRef::Metric(id) => ("metric", id, "SELECT type FROM metric_record WHERE metric_id = ?1"),
+        ItemRef::Routine(id) => ("routine", id, "SELECT title FROM routine WHERE routine_id = ?1"),
     };
     let title: String = conn.query_row(sql, [id], |r| r.get(0)).ok()?;
     Some(AddedItem { kind: kind.to_owned(), id: id.clone(), title })

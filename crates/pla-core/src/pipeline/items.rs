@@ -15,6 +15,7 @@ const DEFAULT_REMINDER_TIME: (u32, u32) = (9, 0);
 pub enum ItemRef {
     Task(String),
     Metric(String),
+    Routine(String),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -179,6 +180,7 @@ pub fn reject_item(conn: &Connection, item: &ItemRef, now: DateTime<FixedOffset>
     let (table, key, id) = match item {
         ItemRef::Task(id) => ("task", "task_id", id),
         ItemRef::Metric(id) => ("metric_record", "metric_id", id),
+        ItemRef::Routine(id) => ("routine", "routine_id", id),
     };
     let found: Option<(Option<String>, Option<String>)> =
         conn.query_row(&format!("SELECT block_id, item_signature FROM {table} WHERE {key} = ?1"), [id], |r| Ok((r.get(0)?, r.get(1)?))).optional()?;
@@ -191,6 +193,11 @@ pub fn reject_item(conn: &Connection, item: &ItemRef, now: DateTime<FixedOffset>
                 "INSERT OR IGNORE INTO rejection (rejection_id, block_id, item_signature, rejected_at) VALUES (?1, ?2, ?3, ?4)",
                 params![new_id(), block_id, signature, now.to_rfc3339()],
             )?;
+        }
+        if let ItemRef::Routine(id) = item {
+            // Open occurrences go; finished and cancelled ones stay as history, without the routine.
+            conn.execute("DELETE FROM task WHERE routine_id = ?1 AND status = 'open'", [id])?;
+            conn.execute("UPDATE task SET routine_id = NULL WHERE routine_id = ?1", [id])?;
         }
         conn.execute(&format!("DELETE FROM {table} WHERE {key} = ?1"), [id])
     })();
@@ -262,6 +269,7 @@ fn adopt(conn: &Connection, item: &ItemRef, block_id: &str) -> rusqlite::Result<
     match item {
         ItemRef::Task(id) => conn.execute("UPDATE task SET block_id = ?1, source_missing = 0 WHERE task_id = ?2", [block_id, id])?,
         ItemRef::Metric(id) => conn.execute("UPDATE metric_record SET block_id = ?1, source_missing = 0 WHERE metric_id = ?2", [block_id, id])?,
+        ItemRef::Routine(id) => conn.execute("UPDATE routine SET block_id = ?1, source_missing = 0 WHERE routine_id = ?2", [block_id, id])?,
     };
     Ok(())
 }

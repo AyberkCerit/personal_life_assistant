@@ -11,6 +11,7 @@ const PLA_MIGRATIONS: &[&str] = &[
     include_str!("../migrations/pla/004_reminder_seen.sql"),
     include_str!("../migrations/pla/005_qa.sql"),
     include_str!("../migrations/pla/006_item_block_index.sql"),
+    include_str!("../migrations/pla/007_routines.sql"),
 ];
 const CACHE_MIGRATIONS: &[&str] = &[
     include_str!("../migrations/cache/001_init.sql"),

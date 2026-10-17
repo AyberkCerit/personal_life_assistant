@@ -21,6 +21,7 @@ pub mod qa;
 pub mod recovery;
 pub mod reminders;
 pub mod report;
+pub mod routines;
 pub mod settings;
 pub mod summary;
 pub mod tasks;
