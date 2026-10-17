@@ -2,6 +2,8 @@
 
 html { font-size: 100%; }
 html, body, #app { height: 100%; margin: 0; }
+/* the panels scroll on their own; the window itself never does, so a long task list can't push the frame out of view */
+html, body { overflow: hidden; }
 body {
   background: var(--color-surface-reading);
   color: var(--color-text);
@@ -32,6 +34,7 @@ svg.lucide { flex: none; }
   grid-template-columns: var(--left-w, 15rem) minmax(0, 1fr) var(--right-w, 20rem);
   grid-template-rows: minmax(0, 1fr) 1.75rem;
   height: 100%;
+  overflow: hidden;
   /* the right panel widens for the assistant tab and narrows back (owner decision 2026-10-07) */
   transition: grid-template-columns var(--duration-base) var(--ease-standard); /* 0 with reduced motion */
 }
