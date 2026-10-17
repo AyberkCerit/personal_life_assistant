@@ -100,9 +100,113 @@ pub(crate) fn insert_routine(
     Ok(id)
 }
 
-/// Creates or tops up the open occurrence of a routine (implemented with occurrence rolling).
-pub(crate) fn roll_one(_conn: &Connection, _routine_id: &str, _today: NaiveDate, _now: DateTime<FixedOffset>) -> rusqlite::Result<bool> {
-    Ok(false)
+/// Runs `f` as one step: a savepoint works alone and inside a caller's transaction (as in `reject_item`).
+fn atomically<T, E: From<rusqlite::Error>>(conn: &Connection, name: &str, f: impl FnOnce() -> Result<T, E>) -> Result<T, E> {
+    conn.execute_batch(&format!("SAVEPOINT {name}"))?;
+    match f() {
+        Ok(v) => {
+            conn.execute_batch(&format!("RELEASE {name}"))?;
+            Ok(v)
+        }
+        Err(e) => {
+            conn.execute_batch(&format!("ROLLBACK TO {name}; RELEASE {name}"))?;
+            Err(e)
+        }
+    }
+}
+
+fn fmt_date(date: NaiveDate) -> String {
+    date.format("%Y-%m-%d").to_string()
+}
+
+/// The dates a routine keeps open: today when it is a routine day, plus the first routine day after today (at most 7 days ahead). Ascending.
+pub fn occurrence_dates(days: &[Weekday], today: NaiveDate) -> Vec<NaiveDate> {
+    let on = |date: NaiveDate| days.iter().any(|d| d.num_days_from_monday() == date.weekday().num_days_from_monday());
+    let mut dates = Vec::new();
+    if on(today) {
+        dates.push(today);
+    }
+    if let Some(next) = (1..=7).map(|n| today + Duration::days(n)).find(|&date| on(date)) {
+        dates.push(next);
+    }
+    dates
+}
+
+/// Brings the open occurrences of one routine in line with it; returns whether anything changed.
+pub(crate) fn roll_one(conn: &Connection, routine_id: &str, today: NaiveDate, now: DateTime<FixedOffset>) -> rusqlite::Result<bool> {
+    let found: Option<(String, String, bool, Option<String>)> = conn
+        .query_row("SELECT title, days_json, paused, block_id FROM routine WHERE routine_id = ?1", [routine_id], |r| {
+            Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))
+        })
+        .optional()?;
+    let Some((title, days_json, paused, block_id)) = found else { return Ok(false) };
+    let Ok(days) = serde_json::from_str::<Vec<RoutineDay>>(&days_json) else { return Ok(false) };
+    let wanted: Vec<(String, Option<String>)> = if paused {
+        Vec::new()
+    } else {
+        let weekdays: Vec<Weekday> = days.iter().map(|d| d.day).collect();
+        occurrence_dates(&weekdays, today)
+            .into_iter()
+            .map(|date| {
+                let time = days.iter().find(|d| d.day.num_days_from_monday() == date.weekday().num_days_from_monday()).and_then(|d| d.time.clone());
+                (fmt_date(date), time)
+            })
+            .collect()
+    };
+    let today_s = fmt_date(today);
+    let now_s = now.to_rfc3339();
+
+    atomically(conn, "roll_routine", || {
+        let mut changed = 0;
+        let open: Vec<(String, String, bool)> = conn
+            .prepare("SELECT task_id, date, user_modified FROM task WHERE routine_id = ?1 AND status = 'open' AND date >= ?2")?
+            .query_map(params![routine_id, today_s], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
+            .collect::<Result<_, _>>()?;
+        for (task_id, date, user_modified) in &open {
+            match wanted.iter().find(|(d, _)| d == date) {
+                None => changed += conn.execute("DELETE FROM task WHERE task_id = ?1", [task_id])?,
+                Some((_, time)) if !user_modified => {
+                    let notify_at = time.as_ref().map(|t| format!("{date}T{t}"));
+                    changed += conn.execute(
+                        "UPDATE task SET title = ?1, time = ?2,
+                                notified_at = CASE WHEN notify_at IS ?3 THEN notified_at ELSE NULL END, notify_at = ?3, updated_at = ?4
+                         WHERE task_id = ?5 AND (title IS NOT ?1 OR time IS NOT ?2 OR notify_at IS NOT ?3)",
+                        params![title, time, notify_at, now_s, task_id],
+                    )?;
+                }
+                Some(_) => {}
+            }
+        }
+        for (date, time) in &wanted {
+            let exists: Option<i64> =
+                conn.query_row("SELECT 1 FROM task WHERE routine_id = ?1 AND date = ?2", params![routine_id, date], |r| r.get(0)).optional()?;
+            if exists.is_some() {
+                continue;
+            }
+            let notify_at = time.as_ref().map(|t| format!("{date}T{t}"));
+            changed += conn.execute(
+                "INSERT INTO task (task_id, title, date, time, notify_at, status, origin, block_id, item_signature, routine_id, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, 'open', 'extracted', ?6, NULL, ?7, ?8, ?8)",
+                params![new_id(), title, date, time, notify_at, block_id, routine_id, now_s],
+            )?;
+        }
+        Ok(changed > 0)
+    })
+}
+
+/// Daily upkeep: open occurrences of past days become `cancelled`, then every routine is rolled. Returns whether anything changed.
+pub fn roll(conn: &Connection, today: NaiveDate, now: DateTime<FixedOffset>) -> rusqlite::Result<bool> {
+    atomically(conn, "roll_routines", || {
+        let mut changed = conn.execute(
+            "UPDATE task SET status = 'cancelled', updated_at = ?1 WHERE routine_id IS NOT NULL AND status = 'open' AND date < ?2",
+            params![now.to_rfc3339(), fmt_date(today)],
+        )? > 0;
+        let ids: Vec<String> = conn.prepare("SELECT routine_id FROM routine")?.query_map([], |r| r.get(0))?.collect::<Result<_, _>>()?;
+        for id in ids {
+            changed |= roll_one(conn, &id, today, now)?;
+        }
+        Ok(changed)
+    })
 }
 
 pub fn list_routines(conn: &Connection, today: NaiveDate) -> Result<Vec<RoutineView>, RoutineError> {
@@ -146,25 +250,29 @@ pub fn list_routines(conn: &Connection, today: NaiveDate) -> Result<Vec<RoutineV
 
 pub fn edit_routine(conn: &Connection, id: &str, input: &RoutineInput, today: NaiveDate, now: DateTime<FixedOffset>) -> Result<(), RoutineError> {
     let (title, days) = clean(input)?;
-    let changed = conn.execute(
-        "UPDATE routine SET title = ?1, days_json = ?2, user_modified = 1, updated_at = ?3 WHERE routine_id = ?4",
-        params![title, serde_json::to_string(&days).expect("days serialize"), now.to_rfc3339(), id],
-    )?;
-    if changed == 0 {
-        return Err(RoutineError::NotFound);
-    }
-    roll_one(conn, id, today, now)?;
-    Ok(())
+    atomically(conn, "edit_routine", || {
+        let changed = conn.execute(
+            "UPDATE routine SET title = ?1, days_json = ?2, user_modified = 1, updated_at = ?3 WHERE routine_id = ?4",
+            params![title, serde_json::to_string(&days).expect("days serialize"), now.to_rfc3339(), id],
+        )?;
+        if changed == 0 {
+            return Err(RoutineError::NotFound);
+        }
+        roll_one(conn, id, today, now)?;
+        Ok(())
+    })
 }
 
 pub fn set_paused(conn: &Connection, id: &str, paused: bool, today: NaiveDate, now: DateTime<FixedOffset>) -> Result<(), RoutineError> {
-    let changed =
-        conn.execute("UPDATE routine SET paused = ?1, user_modified = 1, updated_at = ?2 WHERE routine_id = ?3", params![paused, now.to_rfc3339(), id])?;
-    if changed == 0 {
-        return Err(RoutineError::NotFound);
-    }
-    roll_one(conn, id, today, now)?;
-    Ok(())
+    atomically(conn, "set_paused", || {
+        let changed =
+            conn.execute("UPDATE routine SET paused = ?1, user_modified = 1, updated_at = ?2 WHERE routine_id = ?3", params![paused, now.to_rfc3339(), id])?;
+        if changed == 0 {
+            return Err(RoutineError::NotFound);
+        }
+        roll_one(conn, id, today, now)?;
+        Ok(())
+    })
 }
 
 /// The UI confirms first. The routine is remembered as rejected so extraction does not bring it back.
@@ -219,6 +327,169 @@ mod tests {
     }
     fn count(conn: &Connection, sql: &str) -> i64 {
         conn.query_row(sql, [], |r| r.get(0)).unwrap()
+    }
+
+    use crate::tasks::{TaskInput, TaskList};
+
+    /// Monday/Wednesday 20:00 routine "Spor" tied to block b1.
+    fn mon_wed(conn: &Connection) -> String {
+        insert_routine(conn, "Spor", &[day(Weekday::Mon, "20:00"), day(Weekday::Wed, "20:00")], Some("b1"), Some("routine:spor"), NOW).unwrap()
+    }
+    fn open(conn: &Connection) -> Vec<(String, Option<String>)> {
+        conn.prepare("SELECT date, notify_at FROM task WHERE status = 'open' ORDER BY date")
+            .unwrap()
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap()
+    }
+    fn open_dates(conn: &Connection) -> Vec<String> {
+        open(conn).into_iter().map(|(d, _)| d).collect()
+    }
+    fn occurrence(conn: &Connection, date: &str) -> String {
+        conn.query_row("SELECT task_id FROM task WHERE date = ?1", [date], |r| r.get(0)).unwrap()
+    }
+    fn status_on(conn: &Connection, date: &str) -> String {
+        conn.query_row("SELECT status FROM task WHERE date = ?1", [date], |r| r.get(0)).unwrap()
+    }
+    fn time_on(conn: &Connection, date: &str) -> String {
+        conn.query_row("SELECT time FROM task WHERE date = ?1", [date], |r| r.get(0)).unwrap()
+    }
+    fn some(date: &str, at: &str) -> (String, Option<String>) {
+        (date.into(), Some(at.into()))
+    }
+
+    #[test]
+    fn today_and_the_next_routine_day_are_open() {
+        let (_t, conn) = setup();
+        mon_wed(&conn);
+        roll(&conn, d("2026-10-26"), now()).unwrap(); // Monday
+        assert_eq!(open(&conn), [some("2026-10-26", "2026-10-26T20:00"), some("2026-10-28", "2026-10-28T20:00")]);
+        let (origin, block, sig): (String, Option<String>, Option<String>) = conn
+            .query_row("SELECT origin, block_id, item_signature FROM task WHERE date = '2026-10-28'", [], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+            .unwrap();
+        assert_eq!((origin.as_str(), block.as_deref(), sig), ("extracted", Some("b1"), None));
+    }
+
+    #[test]
+    fn rolling_twice_on_one_day_changes_nothing() {
+        let (_t, conn) = setup();
+        mon_wed(&conn);
+        assert!(roll(&conn, d("2026-10-26"), now()).unwrap());
+        assert!(!roll(&conn, d("2026-10-26"), now()).unwrap());
+        assert_eq!(count(&conn, "SELECT count(*) FROM task"), 2);
+    }
+
+    #[test]
+    fn a_ticked_day_is_not_recreated_and_the_next_one_stays() {
+        let (_t, conn) = setup();
+        mon_wed(&conn);
+        roll(&conn, d("2026-10-26"), now()).unwrap();
+        crate::tasks::set_done(&conn, &occurrence(&conn, "2026-10-26"), true, now()).unwrap();
+        roll(&conn, d("2026-10-26"), now()).unwrap();
+        assert_eq!(open_dates(&conn), ["2026-10-28"]);
+        roll(&conn, d("2026-10-27"), now()).unwrap(); // Tuesday: not a routine day
+        assert_eq!(open_dates(&conn), ["2026-10-28"]);
+        roll(&conn, d("2026-10-28"), now()).unwrap();
+        assert_eq!(open_dates(&conn), ["2026-10-28", "2026-11-02"]);
+    }
+
+    #[test]
+    fn a_missed_day_is_cancelled_not_left_open() {
+        let (_t, conn) = setup();
+        mon_wed(&conn);
+        roll(&conn, d("2026-10-26"), now()).unwrap();
+        roll(&conn, d("2026-10-27"), now()).unwrap();
+        assert_eq!(status_on(&conn, "2026-10-26"), "cancelled");
+        assert!(crate::tasks::list_tasks(&conn, TaskList::Today, d("2026-10-27")).unwrap().is_empty());
+    }
+
+    #[test]
+    fn editing_the_days_moves_future_occurrences_only() {
+        let (_t, conn) = setup();
+        let id = mon_wed(&conn);
+        roll(&conn, d("2026-10-26"), now()).unwrap();
+        crate::tasks::set_done(&conn, &occurrence(&conn, "2026-10-26"), true, now()).unwrap();
+        edit_routine(&conn, &id, &input("Spor", &[("mon", Some("21:00")), ("thu", Some("21:00"))]), d("2026-10-26"), now()).unwrap();
+        assert_eq!(open(&conn), [some("2026-10-29", "2026-10-29T21:00")]);
+        assert_eq!(status_on(&conn, "2026-10-26"), "done");
+    }
+
+    #[test]
+    fn a_paused_routine_has_no_open_occurrences_until_resumed() {
+        let (_t, conn) = setup();
+        let id = mon_wed(&conn);
+        roll(&conn, d("2026-10-26"), now()).unwrap();
+        set_paused(&conn, &id, true, d("2026-10-26"), now()).unwrap();
+        assert!(open_dates(&conn).is_empty());
+        roll(&conn, d("2026-10-26"), now()).unwrap();
+        assert!(open_dates(&conn).is_empty(), "rolling does not add occurrences of a paused routine");
+        set_paused(&conn, &id, false, d("2026-10-26"), now()).unwrap();
+        assert_eq!(open_dates(&conn), ["2026-10-26", "2026-10-28"]);
+    }
+
+    #[test]
+    fn an_occurrence_the_user_edited_keeps_its_time() {
+        let (_t, conn) = setup();
+        let id = mon_wed(&conn);
+        roll(&conn, d("2026-10-26"), now()).unwrap();
+        let occ = occurrence(&conn, "2026-10-28");
+        let moved = TaskInput { title: "Spor".into(), date: Some("2026-10-28".into()), time: Some("18:00".into()), ..Default::default() };
+        crate::tasks::edit_task(&conn, &occ, &moved, now()).unwrap();
+        roll(&conn, d("2026-10-26"), now()).unwrap();
+        assert_eq!(time_on(&conn, "2026-10-28"), "18:00");
+        // Even a routine edit leaves it alone while its day stays a routine day.
+        edit_routine(&conn, &id, &input("Spor", &[("mon", Some("21:00")), ("wed", Some("21:00"))]), d("2026-10-26"), now()).unwrap();
+        assert_eq!(time_on(&conn, "2026-10-28"), "18:00");
+        assert_eq!(time_on(&conn, "2026-10-26"), "21:00");
+    }
+
+    #[test]
+    fn a_changed_time_re_arms_the_reminder_of_an_untouched_occurrence() {
+        let (_t, conn) = setup();
+        let id = mon_wed(&conn);
+        roll(&conn, d("2026-10-26"), now()).unwrap();
+        conn.execute("UPDATE task SET notified_at = '2026-10-26T20:00'", []).unwrap();
+        edit_routine(&conn, &id, &input("Spor", &[("mon", Some("20:00")), ("wed", Some("21:00"))]), d("2026-10-26"), now()).unwrap();
+        let notified = |date: &str| -> Option<String> { conn.query_row("SELECT notified_at FROM task WHERE date = ?1", [date], |r| r.get(0)).unwrap() };
+        assert!(notified("2026-10-26").is_some(), "same time: stays notified");
+        assert!(notified("2026-10-28").is_none());
+    }
+
+    #[test]
+    fn a_failing_roll_leaves_an_edit_unapplied() {
+        let (_t, conn) = setup();
+        let id = mon_wed(&conn);
+        conn.execute_batch("CREATE TRIGGER boom BEFORE INSERT ON task BEGIN SELECT RAISE(ABORT, 'boom'); END").unwrap();
+        let err = edit_routine(&conn, &id, &input("Koşu", &[("mon", Some("21:00"))]), d("2026-10-26"), now());
+        assert!(matches!(err, Err(RoutineError::Db(_))));
+        let v = &list_routines(&conn, d("2026-10-26")).unwrap()[0];
+        assert_eq!((v.title.as_str(), v.days.len(), v.user_modified), ("Spor", 2, false));
+    }
+
+    #[test]
+    fn the_next_day_wraps_into_next_week() {
+        assert_eq!(occurrence_dates(&[Weekday::Mon], d("2026-11-01")), [d("2026-11-02")]); // Sunday -> Monday
+        assert_eq!(occurrence_dates(&[Weekday::Sun], d("2026-11-01")), [d("2026-11-01"), d("2026-11-08")]);
+    }
+
+    #[test]
+    fn a_routine_without_a_time_is_no_reminder() {
+        let (_t, conn) = setup();
+        insert_routine(&conn, "Su", &[RoutineDay { day: Weekday::Mon, time: None }], None, None, NOW).unwrap();
+        roll(&conn, d("2026-10-26"), now()).unwrap();
+        assert_eq!(open(&conn)[0].1, None);
+    }
+
+    #[test]
+    fn a_routine_day_edit_that_drops_today_deletes_nothing_in_the_past() {
+        let (_t, conn) = setup();
+        let id = mon_wed(&conn);
+        roll(&conn, d("2026-10-26"), now()).unwrap();
+        roll(&conn, d("2026-10-27"), now()).unwrap(); // Monday's occurrence is cancelled
+        edit_routine(&conn, &id, &input("Spor", &[("fri", None)]), d("2026-10-27"), now()).unwrap();
+        assert_eq!(status_on(&conn, "2026-10-26"), "cancelled");
+        assert_eq!(open_dates(&conn), ["2026-10-30"]);
     }
 
     #[test]
