@@ -198,7 +198,7 @@ def validate(item):
         return False
     if "repeat" in w and (t == "metric" or any(k in w for k in ("day_offset", "date", "weekday"))):
         return False
-    if "repeat" in w and not w["repeat"]:
+    if w.get("repeat") == []:
         return False
     if "weekday" in w and "which" not in w and not WHICH_DEFAULT:
         return False
