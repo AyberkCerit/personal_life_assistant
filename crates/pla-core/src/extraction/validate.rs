@@ -4,7 +4,7 @@
 use chrono::{NaiveDate, NaiveTime};
 
 use super::dates::{resolve_date, DateError};
-use super::types::{ItemType, MetricKind, RawItem, RawMetric, RawWhen, Unit};
+use super::types::{ItemType, MetricKind, RawItem, RawMetric, RawWhen, Unit, Weekday};
 
 const LB_TO_KG: f64 = 0.453_592_37;
 
@@ -23,6 +23,8 @@ impl Default for ValidationSettings {
 #[derive(Debug, Clone, PartialEq)]
 pub enum ValidItem {
     Action { reminder: bool, title: String, date: Option<NaiveDate>, time: Option<NaiveTime> },
+    // a weekly habit (`when.repeat`): days deduplicated, Monday to Sunday
+    Routine { title: String, days: Vec<Weekday>, time: Option<NaiveTime> },
     Metric { kind: MetricKind, date: NaiveDate, value: Option<f64>, unit: Option<Unit>, exercise: Option<String>, sets: Option<i64>, reps: Option<i64> },
 }
 
@@ -34,6 +36,10 @@ pub enum InvalidReason {
     ConflictingDate,
     #[error(transparent)]
     Date(#[from] DateError),
+    #[error("repeat together with day_offset, date or weekday")]
+    RepeatWithDate,
+    #[error("repeat on a metric")]
+    RepeatOnMetric,
     #[error("task or reminder without a title")]
     MissingTitle,
     #[error("task or reminder carrying a metric")]
@@ -89,6 +95,25 @@ pub fn validate(item: &RawItem, reference: NaiveDate, s: &ValidationSettings) ->
     let anchors = [when.day_offset.is_some(), when.date.is_some(), when.weekday.is_some()];
     if anchors.iter().filter(|set| **set).count() > 1 {
         return Err(InvalidReason::ConflictingDate);
+    }
+    if let Some(repeat) = &when.repeat {
+        if item.kind == ItemType::Metric {
+            return Err(InvalidReason::RepeatOnMetric);
+        }
+        if anchors.iter().any(|set| *set) {
+            return Err(InvalidReason::RepeatWithDate);
+        }
+        let title = item.title.as_deref().map(str::trim).unwrap_or_default();
+        if title.is_empty() {
+            return Err(InvalidReason::MissingTitle);
+        }
+        if item.metric.is_some() {
+            return Err(InvalidReason::UnexpectedMetric);
+        }
+        let mut days = repeat.clone();
+        days.sort_by_key(|d| d.num_days_from_monday());
+        days.dedup();
+        return Ok(ValidItem::Routine { title: title.to_owned(), days, time });
     }
     let date = resolve_date(item, reference)?;
 
@@ -153,6 +178,23 @@ mod tests {
             got,
             ValidItem::Action { reminder: true, title: "Dişçi".into(), date: Some(d("2026-10-07")), time: Some(NaiveTime::from_hms_opt(9, 0, 0).unwrap()) }
         );
+    }
+
+    #[test]
+    fn a_repeat_makes_a_routine() {
+        let v = check(r#"{"type":"reminder","title":" Spor ","when":{"repeat":["fri","mon","fri"],"time":"20:00"}}"#).unwrap();
+        assert_eq!(
+            v,
+            ValidItem::Routine { title: "Spor".into(), days: vec![Weekday::Mon, Weekday::Fri], time: Some(NaiveTime::from_hms_opt(20, 0, 0).unwrap()) }
+        );
+    }
+
+    #[test]
+    fn a_repeat_with_a_date_or_on_a_metric_is_invalid() {
+        for w in [r#""weekday":"mon""#, r#""day_offset":1"#, r#""date":"2026-10-07""#] {
+            assert_eq!(check(&format!(r#"{{"type":"task","title":"x","when":{{"repeat":["mon"],{w}}}}}"#)), Err(InvalidReason::RepeatWithDate), "{w}");
+        }
+        assert_eq!(check(r#"{"type":"metric","when":{"repeat":["mon"]},"metric":{"kind":"sleep","value":7,"unit":"h"}}"#), Err(InvalidReason::RepeatOnMetric));
     }
 
     #[test]

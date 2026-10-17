@@ -49,6 +49,7 @@ pub fn action_signature(title: &str) -> String {
 pub fn item_signature(item: &ValidItem) -> String {
     match item {
         ValidItem::Action { title, .. } => action_signature(title),
+        ValidItem::Routine { title, .. } => format!("routine:{}", normalize(title)),
         // The day is part of a metric (metrics final review I1): "Monday 6 h, Tuesday 7 h" in one
         // paragraph are two items, and deleting one must not hand its place to the other.
         ValidItem::Metric { kind: MetricKind::Workout, exercise, date, .. } => {
@@ -102,6 +103,8 @@ pub fn apply_block_items(
     for raw in &extraction.items {
         match validate(raw, reference, settings) {
             Err(reason) => outcomes.push(review(conn, block_id, raw, &reason.to_string(), &now_s)?),
+            // Task 5 stores routines; until then they wait in the Review box
+            Ok(ValidItem::Routine { .. }) => outcomes.push(review(conn, block_id, raw, "routine", &now_s)?),
             Ok(ValidItem::Action { reminder: true, date: None, .. }) => outcomes.push(review(conn, block_id, raw, "reminder without a date", &now_s)?),
             Ok(ValidItem::Action { date: Some(d), .. }) if skip_past_before.is_some_and(|today| d < today) => outcomes.push(Outcome::SkippedPast),
             Ok(item) => {
@@ -325,6 +328,7 @@ fn insert_item(conn: &Connection, block_id: &str, item: &ValidItem, signature: &
             )?;
             Ok(ItemRef::Task(id))
         }
+        ValidItem::Routine { .. } => unreachable!("routines go to the Review box until they are stored"),
         ValidItem::Metric { kind, date, value, unit, exercise, sets, reps } => {
             conn.execute(
                 "INSERT INTO metric_record (metric_id, type, value_json, unit, date, origin, block_id, item_signature, created_at)

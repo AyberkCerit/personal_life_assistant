@@ -18,6 +18,9 @@ pub fn resolve_date(item: &RawItem, reference: NaiveDate) -> Result<Option<Naive
     let empty = RawWhen::default();
     let when = item.when.as_ref().unwrap_or(&empty);
 
+    if when.repeat.is_some() {
+        return Ok(None); // a routine is no single day
+    }
     if let Some(s) = &when.date {
         return NaiveDate::parse_from_str(s, "%Y-%m-%d").map(Some).map_err(|_| DateError::InvalidDate(s.clone()));
     }

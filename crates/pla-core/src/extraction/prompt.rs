@@ -1,12 +1,12 @@
-//! The extraction prompt and schema measured in F1 (prompt v3), embedded verbatim.
+//! The extraction prompt and schema measured in F1 (prompt v4), embedded verbatim.
 //! Regenerate the assets with `research/f1-model-eval/export_rust_assets.py`.
 
 use chrono::{Datelike, NaiveDate};
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-const SCHEMA_JSON: &str = include_str!("../../assets/extraction_schema_v3.json");
-const PROMPT_JSON: &str = include_str!("../../assets/extraction_prompt_v3.json");
+const SCHEMA_JSON: &str = include_str!("../../assets/extraction_schema_v4.json");
+const PROMPT_JSON: &str = include_str!("../../assets/extraction_prompt_v4.json");
 const DAY_NAMES: [&str; 7] = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
 
 #[derive(Deserialize)]
@@ -21,7 +21,7 @@ struct Shot {
     assistant: String,
 }
 
-/// JSON schema the model output is constrained to (SRS C.3, v3 property order).
+/// JSON schema the model output is constrained to (SRS C.3, v4 property order).
 pub fn schema() -> Value {
     serde_json::from_str(SCHEMA_JSON).expect("embedded extraction schema is valid JSON")
 }
@@ -86,6 +86,13 @@ mod tests {
             .map(|k| metric.find(k).unwrap_or_else(|| panic!("{k} missing")))
             .collect();
         assert!(pos.windows(2).all(|w| w[0] < w[1]), "order broken: {pos:?}");
+    }
+
+    #[test]
+    fn repeat_comes_first_in_when() {
+        let s = serde_json::to_string(&request_body(d("2026-10-06"), "x")).unwrap();
+        let when = &s[s.find("\"when\":{").unwrap()..];
+        assert!(when.find("\"repeat\"").unwrap() < when.find("\"day_offset\"").unwrap());
     }
 
     #[test]

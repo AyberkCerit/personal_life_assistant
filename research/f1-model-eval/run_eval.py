@@ -60,9 +60,16 @@ SCHEMA = {
 }
 
 # v3: gramer özellikleri tanım sırasıyla ürettiği için "value" egzersiz bilgisinden sonra gelir
-if PROMPT == "v3":
+if PROMPT in ("v3", "v4"):
     _m = SCHEMA["properties"]["items"]["items"]["properties"]["metric"]["properties"]
     SCHEMA["properties"]["items"]["items"]["properties"]["metric"]["properties"] = {k: _m[k] for k in ("kind", "exercise", "sets", "reps", "value", "unit")}
+
+# v4: "repeat" is the FIRST property of "when": the grammar emits properties in order, so after a
+# single "weekday" the model could no longer turn to a repetition
+if PROMPT == "v4":
+    _w = SCHEMA["properties"]["items"]["items"]["properties"]["when"]["properties"]
+    SCHEMA["properties"]["items"]["items"]["properties"]["when"]["properties"] = {
+        "repeat": {"type": "array", "minItems": 1, "maxItems": 7, "items": {"enum": WEEKDAYS}}, **_w}
 
 SYSTEM = """You extract structured items from one personal note. Answer with JSON only.
 
@@ -116,6 +123,18 @@ FEW_SHOT_V2 = FEW_SHOT + [
                 {"type": "metric", "metric": {"kind": "workout", "exercise": "deadlift", "sets": 4, "reps": 6, "value": 110, "unit": "kg"}}]}),
 ]
 
+SYSTEM_V4 = SYSTEM_V2 + """
+
+A habit that repeats every week ("her", "her gün", "hafta içi", "hafta sonu", "every", "each") is ONE item with when.repeat listing its weekdays, plus time if stated; never one item per day, and no weekday, which, day_offset or date. "her gün"/"every day" = all seven days, "hafta içi"/"weekdays" = mon..fri, "hafta sonu"/"weekend" = sat, sun. A single day without "her"/"every" is not a habit."""
+
+FEW_SHOT_V4 = FEW_SHOT_V2 + [
+    ("2026-06-10", "Her pazar pazartesi çarşamba perşembe cuma akşam 8'de spora gideceğim.",
+     {"items": [{"type": "task", "title": "Spor", "when": {"repeat": ["sun", "mon", "wed", "thu", "fri"], "time": "20:00"}}]}),
+    ("2026-06-10", "Pazartesi spora gideceğim, hafta içi her sabah 7'de yürüyüş.",
+     {"items": [{"type": "task", "title": "Spor", "when": {"weekday": "mon", "which": "this"}},
+                {"type": "task", "title": "Yürüyüş", "when": {"repeat": ["mon", "tue", "wed", "thu", "fri"], "time": "07:00"}}]}),
+]
+
 
 def user_msg(ref, text):
     d = date.fromisoformat(ref)
@@ -123,8 +142,8 @@ def user_msg(ref, text):
 
 
 def messages(ref, text):
-    m = [{"role": "system", "content": SYSTEM_V2 if PROMPT in ("v2", "v3") else SYSTEM}]
-    for r, t, out in (FEW_SHOT_V2 if PROMPT in ("v2", "v3") else FEW_SHOT):
+    m = [{"role": "system", "content": SYSTEM_V4 if PROMPT == "v4" else SYSTEM_V2 if PROMPT in ("v2", "v3") else SYSTEM}]
+    for r, t, out in (FEW_SHOT_V4 if PROMPT == "v4" else FEW_SHOT_V2 if PROMPT in ("v2", "v3") else FEW_SHOT):
         m.append({"role": "user", "content": user_msg(r, t)})
         m.append({"role": "assistant", "content": json.dumps(out, ensure_ascii=False)})
     m.append({"role": "user", "content": user_msg(ref, text)})
@@ -134,6 +153,8 @@ def messages(ref, text):
 # ------------------------------------------------------------------ Rust'ta uygulanacak kuralların Python eşleniği
 def resolve_date(item, ref):
     w = item.get("when") or {}
+    if "repeat" in w:
+        return None
     try:
         if "date" in w:
             return date.fromisoformat(w["date"])
@@ -144,7 +165,7 @@ def resolve_date(item, ref):
             return ref + timedelta(days=ahead + (7 if w.get("which") == "next" else 0))
     except ValueError:
         return "invalid"
-    if item.get("type") == "metric" or (PROMPT in ("v2", "v3") and "time" in w):
+    if item.get("type") == "metric" or (PROMPT in ("v2", "v3", "v4") and "time" in w):
         return ref
     return None
 
@@ -174,6 +195,8 @@ def validate(item):
         if hh > 23 or mm > 59:
             return False
     if sum(k in w for k in ("day_offset", "date", "weekday")) > 1:
+        return False
+    if "repeat" in w and (t == "metric" or any(k in w for k in ("day_offset", "date", "weekday"))):
         return False
     if "weekday" in w and "which" not in w and not WHICH_DEFAULT:
         return False
