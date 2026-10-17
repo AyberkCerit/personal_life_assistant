@@ -15,4 +15,6 @@ CREATE TABLE routine (
 CREATE INDEX routine_block ON routine(block_id);
 
 ALTER TABLE task ADD COLUMN routine_id TEXT REFERENCES routine(routine_id);
-CREATE INDEX task_routine ON task(routine_id, date);
+-- The routine slot (day) an occurrence fills; stays put when the user moves the task to another date.
+ALTER TABLE task ADD COLUMN routine_date TEXT;
+CREATE INDEX task_routine ON task(routine_id, routine_date);

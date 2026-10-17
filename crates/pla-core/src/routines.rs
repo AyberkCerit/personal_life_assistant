@@ -158,15 +158,19 @@ pub(crate) fn roll_one(conn: &Connection, routine_id: &str, today: NaiveDate, no
 
     atomically(conn, "roll_routine", || {
         let mut changed = 0;
-        let open: Vec<(String, String, bool)> = conn
-            .prepare("SELECT task_id, date, user_modified FROM task WHERE routine_id = ?1 AND status = 'open' AND date >= ?2")?
-            .query_map(params![routine_id, today_s], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
+        // Rows the user touched (`user_modified = 1`) are never changed or deleted here.
+        let open: Vec<(String, String)> = conn
+            .prepare(
+                "SELECT task_id, COALESCE(routine_date, date) FROM task
+                 WHERE routine_id = ?1 AND status = 'open' AND user_modified = 0 AND date >= ?2",
+            )?
+            .query_map(params![routine_id, today_s], |r| Ok((r.get(0)?, r.get(1)?)))?
             .collect::<Result<_, _>>()?;
-        for (task_id, date, user_modified) in &open {
-            match wanted.iter().find(|(d, _)| d == date) {
+        for (task_id, slot) in &open {
+            match wanted.iter().find(|(d, _)| d == slot) {
                 None => changed += conn.execute("DELETE FROM task WHERE task_id = ?1", [task_id])?,
-                Some((_, time)) if !user_modified => {
-                    let notify_at = time.as_ref().map(|t| format!("{date}T{t}"));
+                Some((_, time)) => {
+                    let notify_at = time.as_ref().map(|t| format!("{slot}T{t}"));
                     changed += conn.execute(
                         "UPDATE task SET title = ?1, time = ?2,
                                 notified_at = CASE WHEN notify_at IS ?3 THEN notified_at ELSE NULL END, notify_at = ?3, updated_at = ?4
@@ -174,19 +178,19 @@ pub(crate) fn roll_one(conn: &Connection, routine_id: &str, today: NaiveDate, no
                         params![title, time, notify_at, now_s, task_id],
                     )?;
                 }
-                Some(_) => {}
             }
         }
         for (date, time) in &wanted {
-            let exists: Option<i64> =
-                conn.query_row("SELECT 1 FROM task WHERE routine_id = ?1 AND date = ?2", params![routine_id, date], |r| r.get(0)).optional()?;
+            let exists: Option<i64> = conn
+                .query_row("SELECT 1 FROM task WHERE routine_id = ?1 AND COALESCE(routine_date, date) = ?2", params![routine_id, date], |r| r.get(0))
+                .optional()?;
             if exists.is_some() {
                 continue;
             }
             let notify_at = time.as_ref().map(|t| format!("{date}T{t}"));
             changed += conn.execute(
-                "INSERT INTO task (task_id, title, date, time, notify_at, status, origin, block_id, item_signature, routine_id, created_at, updated_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, 'open', 'extracted', ?6, NULL, ?7, ?8, ?8)",
+                "INSERT INTO task (task_id, title, date, time, notify_at, status, origin, block_id, item_signature, routine_id, routine_date, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, 'open', 'extracted', ?6, NULL, ?7, ?3, ?8, ?8)",
                 params![new_id(), title, date, time, notify_at, block_id, routine_id, now_s],
             )?;
         }
@@ -445,6 +449,34 @@ mod tests {
     }
 
     #[test]
+    fn an_occurrence_the_user_moved_is_not_deleted_or_recreated() {
+        let (_t, conn) = setup();
+        mon_wed(&conn);
+        roll(&conn, d("2026-10-26"), now()).unwrap();
+        let occ = occurrence(&conn, "2026-10-28");
+        let moved = TaskInput { title: "Spor".into(), date: Some("2026-10-29".into()), time: Some("20:00".into()), ..Default::default() };
+        crate::tasks::edit_task(&conn, &occ, &moved, now()).unwrap();
+        for day in ["2026-10-26", "2026-10-27"] {
+            roll(&conn, d(day), now()).unwrap();
+            assert_eq!(count(&conn, "SELECT count(*) FROM task WHERE date = '2026-10-28'"), 0);
+            assert_eq!(count(&conn, "SELECT count(*) FROM task WHERE date = '2026-10-29' AND status = 'open'"), 1);
+        }
+    }
+
+    #[test]
+    fn a_user_modified_occurrence_survives_a_routine_edit_that_drops_its_weekday() {
+        let (_t, conn) = setup();
+        let id = mon_wed(&conn);
+        roll(&conn, d("2026-10-26"), now()).unwrap();
+        let occ = occurrence(&conn, "2026-10-28");
+        let kept = TaskInput { title: "Spor (özel)".into(), date: Some("2026-10-28".into()), time: Some("18:00".into()), ..Default::default() };
+        crate::tasks::edit_task(&conn, &occ, &kept, now()).unwrap();
+        edit_routine(&conn, &id, &input("Spor", &[("mon", Some("20:00")), ("fri", Some("20:00"))]), d("2026-10-26"), now()).unwrap();
+        assert_eq!(open_dates(&conn), ["2026-10-26", "2026-10-28", "2026-10-30"]);
+        assert_eq!(time_on(&conn, "2026-10-28"), "18:00");
+    }
+
+    #[test]
     fn a_changed_time_re_arms_the_reminder_of_an_untouched_occurrence() {
         let (_t, conn) = setup();
         let id = mon_wed(&conn);
@@ -482,7 +514,7 @@ mod tests {
     }
 
     #[test]
-    fn a_routine_day_edit_that_drops_today_deletes_nothing_in_the_past() {
+    fn a_routine_edit_keeps_a_cancelled_past_occurrence_and_opens_only_future_days() {
         let (_t, conn) = setup();
         let id = mon_wed(&conn);
         roll(&conn, d("2026-10-26"), now()).unwrap();
