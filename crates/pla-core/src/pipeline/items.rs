@@ -250,7 +250,9 @@ fn load_existing(conn: &Connection, block_id: &str, now: &str) -> rusqlite::Resu
     const SOURCES: &str = "(block_id = ?1 OR block_id IN (SELECT o.block_id FROM block o JOIN block b ON o.note_path = b.note_path
                            WHERE b.block_id = ?1 AND o.missing = 1 AND o.missing_since = ?2))";
     let mut out: Vec<Existing> = conn
-        .prepare(&format!("SELECT task_id, COALESCE(item_signature, ''), user_modified, status FROM task WHERE origin = 'extracted' AND {SOURCES}"))?
+        .prepare(&format!(
+            "SELECT task_id, COALESCE(item_signature, ''), user_modified, status FROM task WHERE origin = 'extracted' AND routine_id IS NULL AND {SOURCES}"
+        ))?
         .query_map([block_id, now], |r| {
             let status: String = r.get(3)?;
             Ok(Existing { item: ItemRef::Task(r.get(0)?), signature: r.get(1)?, user_owned: r.get::<_, bool>(2)? || status != "open", claimed: false })
@@ -625,5 +627,23 @@ mod tests {
         apply(&conn, r#"{"type":"reminder","title":"İlaç","when":{"day_offset":0,"time":"22:00"}}"#);
         let cleared: Option<String> = conn.query_row("SELECT notified_at FROM task", [], |r| r.get(0)).unwrap();
         assert!(cleared.is_none(), "new time: fires again");
+    }
+
+    #[test]
+    fn a_routine_occurrence_is_not_an_existing_item_of_its_block() {
+        let (_t, conn) = setup();
+        let days = [crate::extraction::Weekday::Tue].map(|day| crate::routines::RoutineDay { day, time: None });
+        let routine = crate::routines::insert_routine(&conn, "Spor", &days, Some("b1"), Some("routine:spor"), NOW).unwrap();
+        crate::routines::roll(&conn, reference(), now()).unwrap();
+        let occurrences = || -> Vec<(String, String)> {
+            let mut stmt = conn.prepare("SELECT task_id, title FROM task WHERE routine_id = ?1 ORDER BY date").unwrap();
+            stmt.query_map([&routine], |r| Ok((r.get(0)?, r.get(1)?))).unwrap().collect::<Result<_, _>>().unwrap()
+        };
+        let before = occurrences();
+        assert_eq!(before.len(), 2);
+        apply(&conn, r#"{"type":"task","title":"Spor"}"#);
+        assert_eq!(occurrences(), before, "the occurrences are left alone");
+        assert_eq!(count(&conn, "task"), 3, "a new task was added next to them");
+        assert_eq!(count(&conn, "task WHERE routine_id IS NULL"), 1);
     }
 }

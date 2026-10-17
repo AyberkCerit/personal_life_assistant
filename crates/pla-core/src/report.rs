@@ -507,6 +507,20 @@ mod tests {
     }
 
     #[test]
+    fn a_missed_routine_day_is_not_still_open_in_the_report() {
+        use crate::routines::{insert_routine, roll, RoutineDay};
+        let (_t, conn) = db();
+        let days = [crate::extraction::Weekday::Mon].map(|day| RoutineDay { day, time: None });
+        insert_routine(&conn, "Spor", &days, None, Some("routine:spor"), "2026-10-26T10:00:00+03:00").unwrap();
+        roll(&conn, d("2026-10-26"), at("2026-10-26 10:00")).unwrap();
+        roll(&conn, d("2026-10-27"), at("2026-10-27 10:00")).unwrap();
+        let status: String = conn.query_row("SELECT status FROM task WHERE date = '2026-10-26'", [], |r| r.get(0)).unwrap();
+        assert_eq!(status, "cancelled");
+        let stats = week_stats(&conn, Week::of(d("2026-10-26"))).unwrap();
+        assert!(stats.open_late.is_empty(), "{:?}", stats.open_late);
+    }
+
+    #[test]
     fn the_report_reads_in_the_users_language() {
         let week = Week::of(d("2026-10-09"));
         let stats = WeekStats {
