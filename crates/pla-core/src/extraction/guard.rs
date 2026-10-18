@@ -1,7 +1,7 @@
 //! Checks on the model's items that need the note's own words (nl-quality plan § 2). The model
 //! read a pasted workout program ("Bench press: 4x4-6") as four workouts done today at 6 kg.
 
-use super::{ItemType, MetricKind, RawExtraction};
+use super::{ItemType, MetricKind, RawExtraction, Weekday};
 
 /// "4x4-6", "3-4x5", "3x8–10": a range of sets or repetitions belongs to a program, not to a
 /// workout someone did (they did one number). The dash sits right between the numbers: "3x10 - 60
@@ -170,6 +170,56 @@ pub fn section_of<'a>(note: &'a str, block: &'a str) -> &'a str {
     sections.iter().map(|(s, e)| &note[*s..*e]).find(|s| s.replace('\r', "").contains(&wanted)).unwrap_or(block)
 }
 
+/// Whether `text` gives a clock time: a number, or a word that is one ("öğlen", "noon", "gece
+/// yarısı", "midnight"). "Yatmadan" or "akşam" alone is no time; the model wrote 22:00 for it (the
+/// owner's report). The assistant does the same with `without_made_up_time`.
+pub fn states_a_time(text: &str) -> bool {
+    let w = words(text);
+    text.chars().any(|c| c.is_ascii_digit())
+        || w.iter().any(|x| x.starts_with("oglen") || x == "noon" || x == "midnight")
+        || w.windows(2).any(|p| p[0] == "gece" && p[1].starts_with("yarisi"))
+}
+
+const ALL_DAYS: [Weekday; 7] = [Weekday::Mon, Weekday::Tue, Weekday::Wed, Weekday::Thu, Weekday::Fri, Weekday::Sat, Weekday::Sun];
+
+/// A habit sentence that names no day ("Her akşam yatmadan kelime tekrarı"): every day. The model
+/// copied the days of the habit before it in the same paragraph (the owner's report).
+fn every_day(sentence: &str) -> bool {
+    const DAYS: [&str; 17] = [
+        "pazar", "sali", "salı", "carsamba", "çarsamba", "persembe", "cuma", "hafta", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday",
+        "weekday", "weekend",
+    ];
+    let w = words(sentence);
+    let names_a_day = w.iter().any(|x| DAYS.iter().any(|d| x.starts_with(d)));
+    let every = w.iter().any(|x| x == "her" || x == "hergun" || x == "every" || x == "daily" || x == "each");
+    every && !names_a_day
+}
+
+/// The sentences of `text`: split at ".", "!", "?" and line ends, but not inside "7.30".
+fn sentences(text: &str) -> Vec<&str> {
+    let mut out = Vec::new();
+    let mut start = 0;
+    let chars: Vec<(usize, char)> = text.char_indices().collect();
+    for (k, &(i, c)) in chars.iter().enumerate() {
+        let decimal = c == '.' && k > 0 && chars[k - 1].1.is_ascii_digit() && chars.get(k + 1).is_some_and(|n| n.1.is_ascii_digit());
+        if ".!?\n".contains(c) && !decimal {
+            out.push(&text[start..i]);
+            start = i + c.len_utf8();
+        }
+    }
+    out.push(&text[start..]);
+    out.into_iter().filter(|s| !s.trim().is_empty()).collect()
+}
+
+/// The sentence of `block` an item titled `title` comes from: the one sharing the most word stems
+/// (five letters: "spora" ~ "Spor"); the whole block when none shares one.
+fn sentence_of<'a>(block: &'a str, title: &str) -> &'a str {
+    let stems = |s: &str| words(s).into_iter().map(|w| w.chars().take(5).collect::<String>()).collect::<std::collections::BTreeSet<_>>();
+    let wanted = stems(title);
+    let shared = |s: &&str| stems(s).iter().filter(|w| wanted.iter().any(|t| t.starts_with(w.as_str()) || w.starts_with(t.as_str()))).count();
+    sentences(block).into_iter().map(|s| (shared(&s), s)).filter(|(n, _)| *n > 0).max_by_key(|(n, _)| *n).map_or(block, |(_, s)| s)
+}
+
 fn is_list_item(block: &str) -> bool {
     let t = block.trim_start();
     t.starts_with(['-', '*', '+', '•']) || t.split_once('.').is_some_and(|(n, _)| !n.is_empty() && n.chars().all(|c| c.is_ascii_digit()))
@@ -187,6 +237,15 @@ pub fn guard(block: &str, section: &str, mut extraction: RawExtraction) -> RawEx
     let program_section = section.lines().any(is_list_item) && (has_rep_range(section) || names_a_plan(section));
     let weight_named = names_a_weight(block);
     extraction.items.retain_mut(|item| {
+        let own = sentence_of(block, item.title.as_deref().unwrap_or_default());
+        if let Some(when) = item.when.as_mut() {
+            if !states_a_time(own) {
+                when.time = None;
+            }
+            if when.repeat.is_some() && every_day(own) {
+                when.repeat = Some(ALL_DAYS.to_vec());
+            }
+        }
         if item.kind != ItemType::Metric {
             return !program_section;
         }
@@ -363,6 +422,59 @@ Pazartesi dişçi var.";
         let habit = r#"{"items":[{"type":"task","title":"Spor","when":{"repeat":["sun","mon","wed","thu","fri"],"time":"20:00"}}]}"#;
         let e = guard_one("Her pazar pazartesi çarşamba perşembe cuma akşam 8'de spora gideceğim.", parse_extraction(habit).unwrap());
         assert_eq!(e.items.len(), 1);
+    }
+
+    #[test]
+    fn a_time_the_block_does_not_state_goes() {
+        // the owner's report: "yatmadan" became 22:00
+        let habit = r#"{"items":[{"type":"task","title":"Kelime tekrarı","when":{"repeat":["mon"],"time":"22:00"}}]}"#;
+        let e = guard_one("Her akşam yatmadan ingilizce kelime tekrarı yapacağım.", parse_extraction(habit).unwrap());
+        assert_eq!(e.items[0].when.as_ref().unwrap().time, None);
+        assert!(e.items[0].when.as_ref().unwrap().repeat.is_some(), "the days stay");
+        // two habits in one paragraph: each item is judged by its own sentence
+        let both = r#"{"items":[{"type":"task","title":"Spor","when":{"repeat":["mon"],"time":"20:00"}},{"type":"task","title":"İngilizce kelime tekrarı","when":{"repeat":["mon"],"time":"20:00"}}]}"#;
+        for text in [
+            "Her pazar pazartesi çarşamba perşembe cuma akşam 8 de spora gideceğim. Her akşam yatmadan ingilizce kelime tekrarı yapacağım.",
+            "Her pazar pazartesi çarşamba perşembe cuma akşam 8 de spora gideceğim.Her akşam yatmadan ingilizce kelime tekrarı yapacağım.",
+        ] {
+            let e = guard_one(text, parse_extraction(both).unwrap());
+            let times: Vec<Option<String>> = e.items.iter().map(|i| i.when.as_ref().unwrap().time.clone()).collect();
+            assert_eq!(times, [Some("20:00".to_owned()), None], "{text}");
+        }
+        let half = r#"{"items":[{"type":"task","title":"Toplantı","when":{"day_offset":1,"time":"07:30"}}]}"#;
+        assert!(guard_one("Yarın 7.30 toplantı. Sonra kahve.", parse_extraction(half).unwrap()).items[0].when.as_ref().unwrap().time.is_some());
+        let at = |text: &str, time: &str| {
+            let task = format!(r#"{{"items":[{{"type":"task","title":"x","when":{{"day_offset":1,"time":"{time}"}}}}]}}"#);
+            guard_one(text, parse_extraction(&task).unwrap()).items[0].when.as_ref().unwrap().time.clone()
+        };
+        assert_eq!(at("yarın akşam 8 de spor", "20:00").as_deref(), Some("20:00"));
+        assert_eq!(at("yarın öğlen yemek", "12:00").as_deref(), Some("12:00"), "a time word is a time");
+        assert_eq!(at("lunch at noon tomorrow", "12:00").as_deref(), Some("12:00"));
+        assert_eq!(at("yarın gece yarısı uçuş", "00:00").as_deref(), Some("00:00"));
+        assert_eq!(at("call Ali at midnight", "00:00").as_deref(), Some("00:00"));
+        assert_eq!(at("yarın sabah koşu", "07:00"), None);
+    }
+
+    #[test]
+    fn a_habit_keeps_the_days_of_its_own_sentence() {
+        // the model's answer in the owner's report: the second habit copied the first one's days
+        let raw = r#"{"items":[{"type":"task","title":"Spor","when":{"repeat":["sun","mon","wed","thu","fri"],"time":"20:00"}},{"type":"task","title":"Kelime tekrarı","when":{"repeat":["sun","mon","wed","thu","fri"],"time":"22:00"}}]}"#;
+        let text = "Her pazar pazartesi çarşamba perşembe cuma akşam 8 de spora gideceğim.Her akşam yatmadan ingilizce kelime tekrarı yapacağım.";
+        let e = guard_one(text, parse_extraction(raw).unwrap());
+        let days = |i: usize| e.items[i].when.as_ref().unwrap().repeat.clone().unwrap();
+        use crate::extraction::Weekday::*;
+        assert_eq!(days(0), [Sun, Mon, Wed, Thu, Fri], "named days stay");
+        assert_eq!(days(1), [Mon, Tue, Wed, Thu, Fri, Sat, Sun], "\"her akşam\" is every day");
+        // a sentence naming days, a weekend or no "her" keeps what the model wrote
+        let one = |text: &str| {
+            let habit = r#"{"items":[{"type":"task","title":"Kitap","when":{"repeat":["sat","sun"]}}]}"#;
+            guard_one(text, parse_extraction(habit).unwrap()).items[0].when.as_ref().unwrap().repeat.clone().unwrap().len()
+        };
+        assert_eq!(one("Hafta sonu her sabah kitap okuyacağım."), 2);
+        assert_eq!(one("Cumartesileri ve pazarları kitap okuyacağım."), 2);
+        assert_eq!(one("Every weekend I will read a book."), 2);
+        assert_eq!(one("Her gün kitap okuyacağım."), 7);
+        assert_eq!(one("I will read a book every evening."), 7);
     }
 
     #[test]
