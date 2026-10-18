@@ -1,7 +1,10 @@
 //! FR-MEM-009/010: what the model reads for one question, inside its 8 192-token window: about 40%
-//! the last 48 hours of notes (cut from the oldest), 40% notes found for the question, 20% tool
-//! results. The recent share is the same for every question, so the model server can reuse it
-//! (M6 performance); the question and the follow-up turns (decision A) come out of the found share.
+//! the last 48 hours of notes (cut from the oldest) together with the memory block, 40% notes found
+//! for the question, 20% tool results. The memory block (at most `MEMORY_TOKENS`) is paid for by
+//! the recent share, which is smaller by that constant, so the found share loses nothing to it. The
+//! recent share is the same for every question and any memory content, so the model server can
+//! reuse it (M6 performance); the question, the follow-up turns (decision A) and the people the
+//! conversation mentions come out of the found share.
 
 use chrono::{DateTime, FixedOffset, TimeZone};
 use rusqlite::Connection;
@@ -18,8 +21,9 @@ pub const WINDOW: usize = 8192;
 /// wrappers and the 900-token answer (final review I5: 2 048 was too thin).
 pub const RESERVED: usize = 3000;
 pub const ANSWER_TOKENS: usize = 900;
-/// The last 48 hours' share, whatever the question.
-pub const RECENT_TOKENS: usize = (WINDOW - RESERVED) * 2 / 5;
+/// The last 48 hours' share, whatever the question or the memory: 40% of the room less the memory
+/// block's maximum, which sits right after it.
+pub const RECENT_TOKENS: usize = (WINDOW - RESERVED) * 2 / 5 - recall::MEMORY_TOKENS;
 
 /// `s` cut to about `budget` tokens, at a line end when there is one near.
 fn cut(s: &str, budget: usize) -> String {
@@ -177,11 +181,11 @@ pub fn build_with(cache: &Connection, question: &str, turns: &[Turn], now: DateT
     let tool_budget = room / 5;
     let mut found_budget = room - RECENT_TOKENS - tool_budget;
 
-    // the memory block and the people the conversation names come out of the found share, by the
-    // tokens they use (at most MEMORY_TOKENS + PEOPLE_TOKENS)
+    // the memory block is paid for by the smaller recent share; the people the conversation names
+    // come out of the found share, by the tokens they use (at most PEOPLE_TOKENS)
     let memory_text = recall::block(recall);
     let people = recall::people_block(recall, question, turns);
-    found_budget = found_budget.saturating_sub(tokens(&memory_text) + tokens(&people));
+    found_budget = found_budget.saturating_sub(tokens(&people));
 
     // Follow-ups first (from the found share), newest kept when they do not all fit.
     let mut kept: Vec<Turn> = Vec::new();
@@ -336,7 +340,7 @@ mod tests {
         index::index_note(&conn, "notes/yeni.md", &format!("# Yeni\n\nYENİ {long}"), ms - 3_600_000, 10).unwrap();
         let ctx = build(&conn, "ne yaptım", &[], now(), None, "reports", &Recall::default(), "memory").unwrap();
         assert!(ctx.recent.contains("YENİ") && !ctx.recent.contains("ESKİ"), "the newest stays, the oldest goes");
-        assert!(tokens(&ctx.recent) <= (WINDOW - RESERVED) * 2 / 5);
+        assert!(tokens(&ctx.recent) <= RECENT_TOKENS);
     }
 
     #[test]
@@ -405,21 +409,34 @@ mod tests {
     }
 
     #[test]
-    fn memory_takes_its_share_from_the_found_notes() {
+    fn memory_is_paid_by_the_recent_share_and_people_by_the_found_share() {
         let (_t, conn) = cache();
         lots_of_notes(&conn);
-        let q = "bütçe kararı toplantı";
+        let q = "Deniz ile bütçe kararı toplantı";
         let plain = build(&conn, q, &[], now(), None, "reports", &Recall::default(), "memory").unwrap();
-        let recall = full_memory();
+        // the recent share is a constant: the memory block fits beside it in 40% of the room
+        assert_eq!(RECENT_TOKENS + recall::MEMORY_TOKENS, (WINDOW - RESERVED) * 2 / 5);
+        let mut recall = full_memory();
         let with = build(&conn, q, &[], now(), None, "reports", &recall, "memory").unwrap();
         let used = tokens(&with.memory);
         assert!(used > 500 && used <= recall::MEMORY_TOKENS, "{used}");
-        let room = WINDOW - RESERVED - tokens(q);
-        let found_budget = room - RECENT_TOKENS - room / 5;
-        assert!(tokens(&plain.found) > found_budget - used, "the plain run fills more than the shrunk share: {}", tokens(&plain.found));
-        assert!(tokens(&with.found) <= found_budget - used, "{} > {}", tokens(&with.found), found_budget - used);
+        assert_eq!(with.found, plain.found, "memory takes nothing from the found notes");
         assert_eq!(with.tool_budget, plain.tool_budget);
         assert_eq!(with.recent, plain.recent);
+        // the people the question names do
+        for i in 0..8 {
+            let mut e = manual(&format!("Deniz için {i}. bilgi: kahveyi sütsüz ve şekersiz içer, kayak yapmayı sever"));
+            e.person = Some("Deniz".into());
+            recall.people.push(e);
+        }
+        let named = build(&conn, q, &[], now(), None, "reports", &recall, "memory").unwrap();
+        let people = tokens(&named.people);
+        assert!(people > 100 && people <= recall::PEOPLE_TOKENS, "{people}");
+        let room = WINDOW - RESERVED - tokens(q);
+        let found_budget = room - RECENT_TOKENS - room / 5;
+        assert!(tokens(&plain.found) > found_budget - people, "the plain run fills more than the shrunk share: {}", tokens(&plain.found));
+        assert!(tokens(&named.found) <= found_budget - people, "{} > {}", tokens(&named.found), found_budget - people);
+        assert_eq!(named.recent, plain.recent);
     }
 
     #[test]

@@ -81,3 +81,14 @@ Doldurulacak:
 - [ ] `nl_eval -- memory-p1 memory` ve `-- memory-p1-nomem memory --no-memory` (8 + 5 vaka; kapı: hafızasızda geçmeyen, hafızalıda geçen)
 - [ ] Eski 122 vakada gerileme: `nl_eval -- memory-p1-all` ve `-- memory-p1-all-nomem --no-memory`
 - [ ] `qa_probe -- <ref>` hafızalı ve hafızasız: ilk cevap süresi ve `cache_n`
+
+## Dengeleme (hafıza payı son 48 saatten)
+
+Karar L: `RECENT_TOKENS` artık `(WINDOW - RESERVED) * 2 / 5 - MEMORY_TOKENS` (sabit; önbellek için her soruda ve her hafıza içeriğinde aynı). Bulunanlar payı hafıza bloğuyla küçülmez, yalnız anılan kişilerle küçülür. Hafızalı (507 token) `memory-p1b`:
+
+| Mod | Bağlı | Doğrudan | Toplam | Ort. bulunan token |
+| --- | --- | --- | --- | --- |
+| hibrit | 10/12 | 10/10 | 20/22 | 1316 |
+| hibrit + bağ | 11/12 | 10/10 | 21/22 | 1472 |
+
+`none` vakalarında hibrit + bağ: 1349 token, 13,0 not. `linked-iha-ucuz` yeniden geçiyor; hafızasız ölçümle (21/22, 1472) aynı sonuç.
