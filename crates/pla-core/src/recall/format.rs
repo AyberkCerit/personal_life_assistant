@@ -84,6 +84,8 @@ pub struct Entry {
     pub date: NaiveDate,
     /// The `## Name` section of the People file.
     pub person: Option<String>,
+    /// Indented lines the user wrote under the item, kept verbatim.
+    pub notes: Vec<String>,
 }
 
 /// Turkish-folded, whitespace and `-`/`_` runs collapsed into one `-`.
@@ -107,33 +109,34 @@ pub fn topic_key(raw: &str) -> String {
 
 const KEYS: [&str; 5] = ["id", "konu", "tür", "kaynak", "tarih"];
 
-/// Reads `key=value` pairs; a value runs until the next ` key=` or the end (values may hold spaces).
+/// Reads `key=value` pairs; a value runs until the next ` <word>=` token (so values may hold spaces)
+/// or the end. Unknown keys end the previous value and are dropped.
 fn parse_pairs(body: &str) -> Vec<(&'static str, String)> {
     let padded = format!(" {body}");
-    let mut marks: Vec<(usize, &'static str)> = Vec::new();
-    for key in KEYS {
-        let needle = format!(" {key}=");
-        let mut from = 0;
-        while let Some(i) = padded[from..].find(&needle) {
-            marks.push((from + i, key));
-            from += i + needle.len();
+    let mut marks: Vec<(usize, &str)> = Vec::new();
+    for (i, _) in padded.match_indices(' ') {
+        let rest = &padded[i + 1..];
+        let token = rest.split(' ').next().unwrap_or("");
+        if let Some((word, _)) = token.split_once('=') {
+            if !word.is_empty() && word.chars().all(|c| c.is_alphabetic() || c == '_') {
+                marks.push((i, word));
+            }
         }
     }
-    marks.sort();
-    marks
-        .iter()
-        .enumerate()
-        .map(|(n, (pos, key))| {
-            let start = pos + key.len() + 2;
-            let end = marks.get(n + 1).map_or(padded.len(), |m| m.0);
-            (*key, padded[start..end].trim().to_string())
-        })
-        .collect()
+    let mut out = Vec::new();
+    for (n, (pos, word)) in marks.iter().enumerate() {
+        let Some(key) = KEYS.iter().find(|k| *k == word) else { continue };
+        let start = pos + word.len() + 2;
+        let end = marks.get(n + 1).map_or(padded.len(), |m| m.0);
+        out.push((*key, padded[start..end].trim().to_string()));
+    }
+    out
 }
 
 type Parsed = (String, String, Kind, Option<String>, NaiveDate);
 
-/// `None` when the comment is not ours or lacks a required field (id, konu, tür, valid tarih).
+/// `None` when the comment is not ours or lacks a required field (id, konu, tür, valid tarih, and
+/// kaynak for an inference).
 fn parse_comment(comment: &str) -> Option<Parsed> {
     let pairs = parse_pairs(comment.strip_prefix("pla:")?);
     let get = |k: &str| pairs.iter().find(|(key, _)| *key == k).map(|(_, v)| v.clone()).filter(|v| !v.is_empty());
@@ -142,8 +145,12 @@ fn parse_comment(comment: &str) -> Option<Parsed> {
         "çıkarım" => Kind::Inferred,
         _ => return None,
     };
+    let source = get("kaynak");
+    if kind == Kind::Inferred && source.is_none() {
+        return None;
+    }
     let date = NaiveDate::parse_from_str(&get("tarih")?, "%Y-%m-%d").ok()?;
-    Some((get("id")?, get("konu")?, kind, get("kaynak"), date))
+    Some((get("id")?, get("konu")?, kind, source, date))
 }
 
 /// Cuts the trailing visible ` _(label · date)_` off the text.
@@ -162,30 +169,82 @@ fn parse_line(body: &str, person: &Option<String>) -> Entry {
     if let (Some(open), true) = (body.rfind("<!--"), body.ends_with("-->")) {
         let comment = body[open + 4..body.len() - 3].trim();
         if let Some((id, topic, kind, source, date)) = parse_comment(comment) {
-            return Entry { id, text: strip_suffix(&body[..open]).to_string(), kind, topic, source, date, person: person.clone() };
+            return Entry { id, text: strip_suffix(&body[..open]).to_string(), kind, topic, source, date, person: person.clone(), notes: Vec::new() };
         }
     }
     // A hand-written line has no date; the minimum date marks "unknown".
     let id: String = content_hash(topic_key(body).as_bytes()).chars().take(8).collect();
-    Entry { id, text: body.to_string(), kind: Kind::Manual, topic: topic_key(body), source: None, date: NaiveDate::MIN, person: person.clone() }
+    Entry { id, text: body.to_string(), kind: Kind::Manual, topic: topic_key(body), source: None, date: NaiveDate::MIN, person: person.clone(), notes: Vec::new() }
 }
 
-pub fn parse(role: Role, text: &str) -> Vec<Entry> {
+/// One piece of a memory file, in file order.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Block {
+    /// A line kept verbatim: paragraph, blank line, `#`/`###` heading, fenced code, ...
+    Raw(String),
+    /// A People section heading: the whole line as written (`## [[Deniz]]`) and the person's name.
+    Person { raw: String, name: String },
+    Entry(Entry),
+}
+
+/// A memory file with everything the user wrote kept in place. `parse_doc` then `render_doc`
+/// returns the same text; only PLA-owned lines (valid comment) are re-rendered canonically, and
+/// unknown comment keys on them are dropped.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct Doc {
+    /// The frontmatter lines as written, `---` fences included; empty when the file had none.
+    pub front: Vec<String>,
+    pub blocks: Vec<Block>,
+}
+
+impl Doc {
+    /// The entries, in file order.
+    pub fn entries(&self) -> Vec<Entry> {
+        self.blocks.iter().filter_map(|b| if let Block::Entry(e) = b { Some(e.clone()) } else { None }).collect()
+    }
+}
+
+fn person_name(heading: &str) -> String {
+    let h = heading.trim();
+    match h.strip_prefix("[[").and_then(|r| r.split_once("]]")) {
+        Some((inner, _)) => inner.split('|').next().unwrap_or(inner).trim().to_string(),
+        None => h.to_string(),
+    }
+}
+
+pub fn parse_doc(role: Role, text: &str) -> Doc {
+    let text = text.strip_prefix('\u{feff}').unwrap_or(text);
+    let lines: Vec<&str> = text.lines().collect();
+    let skip = crate::markdown::frontmatter_end(&lines).unwrap_or(0);
+    let mut doc = Doc { front: lines[..skip].iter().map(|l| l.to_string()).collect(), blocks: Vec::new() };
     let mut person: Option<String> = None;
-    let mut out = Vec::new();
-    for line in text.lines() {
+    let mut fences = crate::markdown::Fences::default();
+    for line in &lines[skip..] {
         let line = line.trim_end();
-        if let Some(h) = line.strip_prefix("## ") {
-            if role == Role::People {
-                person = Some(h.trim().trim_start_matches("[[").trim_end_matches("]]").trim().to_string());
+        if fences.is_code(line) {
+            doc.blocks.push(Block::Raw(line.to_string()));
+        } else if let Some(h) = line.strip_prefix("## ").filter(|_| role == Role::People) {
+            let name = person_name(h);
+            person = Some(name.clone());
+            doc.blocks.push(Block::Person { raw: line.to_string(), name });
+        } else if let Some(body) = line.strip_prefix("- ").or_else(|| line.strip_prefix("* ")).filter(|b| !b.trim().is_empty()) {
+            doc.blocks.push(Block::Entry(parse_line(body, &person)));
+        } else if line.starts_with([' ', '\t']) && !line.trim().is_empty() {
+            // An indented line right under an item belongs to it.
+            match doc.blocks.last_mut() {
+                Some(Block::Entry(e)) => e.notes.push(line.to_string()),
+                _ => doc.blocks.push(Block::Raw(line.to_string())),
             }
-        } else if let Some(body) = line.strip_prefix("- ").or_else(|| line.strip_prefix("* ")) {
-            if !body.trim().is_empty() {
-                out.push(parse_line(body, &person));
-            }
+        } else {
+            doc.blocks.push(Block::Raw(line.to_string()));
         }
     }
-    out
+    doc
+}
+
+/// The entries of a memory file (see `parse_doc` to keep the rest of the text).
+pub fn parse(role: Role, text: &str) -> Vec<Entry> {
+    parse_doc(role, text).entries()
 }
 
 fn visible_date(date: NaiveDate, lang: Lang) -> String {
@@ -219,8 +278,42 @@ fn render_line(e: &Entry, lang: Lang) -> String {
     )
 }
 
+/// The file text: the frontmatter as written with `pla_generated: true` ensured (written fresh when
+/// the doc had none), then every block in order.
+pub fn render_doc(doc: &Doc, lang: Lang) -> String {
+    let mut out = String::new();
+    if doc.front.is_empty() {
+        out.push_str("---\npla_generated: true\n---\n");
+    } else {
+        let marked = crate::notes::is_generated(&format!("{}\n", doc.front.join("\n")));
+        let last = doc.front.len() - 1;
+        for (i, l) in doc.front.iter().enumerate() {
+            if i == last && !marked {
+                out.push_str("pla_generated: true\n");
+            }
+            out.push_str(l);
+            out.push('\n');
+        }
+    }
+    for b in &doc.blocks {
+        match b {
+            Block::Raw(l) | Block::Person { raw: l, .. } => out.push_str(l),
+            Block::Entry(e) => {
+                out.push_str(&render_line(e, lang));
+                for n in &e.notes {
+                    out.push('\n');
+                    out.push_str(n);
+                }
+            }
+        }
+        out.push('\n');
+    }
+    out
+}
+
+/// A fresh file from entries alone: the role heading, then the lines (People: grouped under `## Name`).
 pub fn render(role: Role, entries: &[Entry], lang: Lang) -> String {
-    let mut out = format!("---\npla_generated: true\n---\n# {}\n\n", role.name(lang));
+    let mut doc = Doc { front: Vec::new(), blocks: vec![Block::Raw(format!("# {}", role.name(lang))), Block::Raw(String::new())] };
     if role == Role::People {
         let mut names: Vec<&str> = Vec::new();
         for p in entries.iter().filter_map(|e| e.person.as_deref()) {
@@ -229,24 +322,17 @@ pub fn render(role: Role, entries: &[Entry], lang: Lang) -> String {
             }
         }
         // Lines before any person heading come first.
-        for e in entries.iter().filter(|e| e.person.is_none()) {
-            out.push_str(&render_line(e, lang));
-            out.push('\n');
-        }
+        doc.blocks.extend(entries.iter().filter(|e| e.person.is_none()).cloned().map(Block::Entry));
         for name in names {
-            out.push_str(&format!("\n## {name}\n\n"));
-            for e in entries.iter().filter(|e| e.person.as_deref() == Some(name)) {
-                out.push_str(&render_line(e, lang));
-                out.push('\n');
-            }
+            doc.blocks.push(Block::Raw(String::new()));
+            doc.blocks.push(Block::Person { raw: format!("## {name}"), name: name.to_string() });
+            doc.blocks.push(Block::Raw(String::new()));
+            doc.blocks.extend(entries.iter().filter(|e| e.person.as_deref() == Some(name)).cloned().map(Block::Entry));
         }
     } else {
-        for e in entries {
-            out.push_str(&render_line(e, lang));
-            out.push('\n');
-        }
+        doc.blocks.extend(entries.iter().cloned().map(Block::Entry));
     }
-    out
+    render_doc(&doc, lang)
 }
 
 #[cfg(test)]
@@ -321,5 +407,69 @@ mod tests {
         let e = parse(Role::About, SAID);
         let out = render(Role::About, &e, Lang::En);
         assert!(out.contains("_(you said · 18 Oct)_"), "{out}");
+    }
+
+    #[test]
+    fn hand_written_content_survives_a_round_trip() {
+        let md = "---
+tags:
+- x
+pla_generated: true
+---
+# Kişiler
+
+Serbest paragraf.
+
+- Elle satır
+  - alt madde
+  devam
+
+### Not
+
+## [[Deniz|Den]]
+
+- Kız kardeşi.
+
+## [[Can]]
+
+```
+- kod
+```
+";
+        let doc = parse_doc(Role::People, md);
+        assert_eq!(render_doc(&doc, Lang::Tr), md);
+        let e = doc.entries();
+        assert_eq!(e.len(), 2, "yaml list and fenced code are not entries");
+        assert_eq!(e[0].notes.len(), 2);
+        assert_eq!(e[1].person.as_deref(), Some("Deniz"));
+    }
+
+    #[test]
+    fn a_pla_line_is_rewritten_canonically_and_missing_marker_is_added() {
+        let md = format!("---
+tags: [a]
+---
+# Hakkımda
+
+{SAID}
+");
+        let out = render_doc(&parse_doc(Role::About, &md), Lang::Tr);
+        assert_eq!(out, md.replace("tags: [a]
+", "tags: [a]
+pla_generated: true
+"));
+    }
+
+    #[test]
+    fn unknown_comment_keys_do_not_break_a_line() {
+        let l = "- Spor. _(senin sözün · 18 Eki)_ <!-- pla:id=k7f3 konu=spor tür=söz tarih=2026-10-18 foo=bar -->";
+        let e = &parse(Role::About, l)[0];
+        assert_eq!((e.kind, e.date.to_string()), (Kind::Said, "2026-10-18".to_string()));
+    }
+
+    #[test]
+    fn an_inference_without_a_source_is_manual() {
+        let l = "- X. <!-- pla:id=a1 konu=x tür=çıkarım tarih=2026-10-10 -->";
+        assert_eq!(parse(Role::About, l)[0].kind, Kind::Manual);
     }
 }

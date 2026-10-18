@@ -2,4 +2,4 @@
 
 pub mod format;
 
-pub use format::{parse, render, topic_key, Entry, Kind, Role};
+pub use format::{parse, parse_doc, render_doc, Block, Doc, render, topic_key, Entry, Kind, Role};
