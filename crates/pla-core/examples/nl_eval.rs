@@ -157,7 +157,7 @@ fn assistant_case(model: &mut ModelHost, case: &Value) -> Result<(Vec<String>, V
     let env = ToolEnv { vault: &vault, pla: &dbs.pla, cache: &dbs.cache, now: now(), validation: ValidationSettings::default() };
     let lang = case["ui"].as_str().unwrap_or("tr");
     let q = case["q"].as_str().unwrap();
-    let answer = engine::answer(model, &env, &engine::Question { text: q, turns: &turns, memory: None, ui_lang: lang }, &AtomicBool::new(false), &mut |_| {})?;
+    let answer = engine::answer(model, &env, &engine::Question { text: q, turns: &turns, memory: None, recall: None, ui_lang: lang }, &AtomicBool::new(false), &mut |_| {})?;
 
     let want = &case["expect"];
     let mut fails = Vec::new();

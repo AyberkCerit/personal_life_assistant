@@ -96,7 +96,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         for (m, (name, hybrid, linked)) in modes.iter().enumerate() {
             let memory = if *hybrid { vector.as_deref().map(|v| (v, model_id.as_str())) } else { None };
             let t = Instant::now();
-            let ctx = build_with(&dbs.cache, q, &[], now(), memory, "reports", *linked)?;
+            let ctx = build_with(&dbs.cache, q, &[], now(), memory, "reports", *linked, &pla_core::recall::Recall::default(), "memory")?;
             let took = t.elapsed();
             let read = key(&format!("{}\n{}", ctx.recent, ctx.found));
             let missing: Vec<&str> = case["facts"].as_array().unwrap().iter().map(|f| f.as_str().unwrap()).filter(|f| !read.contains(&key(f))).collect();

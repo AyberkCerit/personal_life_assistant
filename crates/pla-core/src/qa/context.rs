@@ -8,7 +8,9 @@ use rusqlite::Connection;
 
 use super::Turn;
 use crate::index::{self, NoteText};
+use crate::recall::{self, Recall, Role};
 use crate::util::tokens;
+use crate::vault::is_under;
 
 /// The model's window (`ServerConfig::ctx_size`).
 pub const WINDOW: usize = 8192;
@@ -43,6 +45,12 @@ fn cut(s: &str, budget: usize) -> String {
 pub struct Context {
     /// The last 48 hours of notes, newest first, as text for the model.
     pub recent: String,
+    /// What the memory files say about the user (`recall::block`), after the recent notes. Empty
+    /// when there is no memory. Its tokens come out of the found share.
+    pub memory: String,
+    /// The people the question and the last turns mention (`recall::people_block`), without a
+    /// heading. Comes out of the found share too.
+    pub people: String,
     /// Paragraphs of notes found for the question.
     pub found: String,
     /// The follow-up turns that fit, oldest first.
@@ -101,9 +109,16 @@ fn recent_notes(cache: &Connection, now: DateTime<FixedOffset>) -> rusqlite::Res
     Ok((blocks.concat(), in_recent))
 }
 
-/// What every question starts with (M6 performance: read ahead when the panel opens).
-pub fn shared(cache: &Connection, now: DateTime<FixedOffset>) -> rusqlite::Result<Context> {
-    Ok(Context { recent: recent_notes(cache, now)?.0, ..Default::default() })
+/// What every question starts with (M6 performance: read ahead when the panel opens): the last 48
+/// hours and the memory block, which the conversation's snapshot keeps the same.
+pub fn shared(cache: &Connection, now: DateTime<FixedOffset>, recall: &Recall) -> rusqlite::Result<Context> {
+    Ok(Context { recent: recent_notes(cache, now)?.0, memory: recall::block(recall), ..Default::default() })
+}
+
+/// Whether `path` is one of the active memory files, which the prompt carries whole: finding them
+/// again as chunks would only repeat them. The Archive is not active, so it stays searchable.
+fn is_active_memory(path: &str, memory_folder: &str) -> bool {
+    is_under(path, memory_folder) && path.rsplit(['/', '\\']).next().and_then(Role::from_file_name).is_some_and(|r| r != Role::Archive)
 }
 
 /// How many of the best notes found lend their links, and how many linked notes come in
@@ -149,15 +164,23 @@ fn with_linked(cache: &Connection, question: &str, memory: Memory<'_>, hits: Vec
 }
 
 /// Builds the context for `question` with the earlier `turns` (oldest first).
-pub fn build(cache: &Connection, question: &str, turns: &[Turn], now: DateTime<FixedOffset>, memory: Memory<'_>, reports: &str) -> rusqlite::Result<Context> {
-    build_with(cache, question, turns, now, memory, reports, LINKED)
+#[allow(clippy::too_many_arguments)]
+pub fn build(cache: &Connection, question: &str, turns: &[Turn], now: DateTime<FixedOffset>, memory: Memory<'_>, reports: &str, recall: &Recall, memory_folder: &str) -> rusqlite::Result<Context> {
+    build_with(cache, question, turns, now, memory, reports, LINKED, recall, memory_folder)
 }
 
 /// `build` with at most `linked` notes brought in by links (0: none), for measuring what they add.
-pub fn build_with(cache: &Connection, question: &str, turns: &[Turn], now: DateTime<FixedOffset>, memory: Memory<'_>, reports: &str, linked: usize) -> rusqlite::Result<Context> {
+#[allow(clippy::too_many_arguments)]
+pub fn build_with(cache: &Connection, question: &str, turns: &[Turn], now: DateTime<FixedOffset>, memory: Memory<'_>, reports: &str, linked: usize, recall: &Recall, memory_folder: &str) -> rusqlite::Result<Context> {
     let room = WINDOW - RESERVED - tokens(question).min(700);
     let tool_budget = room / 5;
     let mut found_budget = room - RECENT_TOKENS - tool_budget;
+
+    // the memory block and the people the conversation names come out of the found share, by the
+    // tokens they use (at most MEMORY_TOKENS + PEOPLE_TOKENS)
+    let memory_text = recall::block(recall);
+    let people = recall::people_block(recall, question, turns);
+    found_budget = found_budget.saturating_sub(tokens(&memory_text) + tokens(&people));
 
     // Follow-ups first (from the found share), newest kept when they do not all fit.
     let mut kept: Vec<Turn> = Vec::new();
@@ -184,6 +207,7 @@ pub fn build_with(cache: &Connection, question: &str, turns: &[Turn], now: DateT
     if linked > 0 {
         hits = with_linked(cache, question, memory, hits, linked)?;
     }
+    hits.retain(|h| !is_active_memory(&h.note_path, memory_folder));
     for h in hits {
         if in_recent.contains(&h.note_path) {
             if !sources.contains(&h.note_path) {
@@ -206,7 +230,7 @@ pub fn build_with(cache: &Connection, question: &str, turns: &[Turn], now: DateT
     found_budget += day_share;
     for day in days {
         for path in crate::summary::source_paths(cache, day)? {
-            if sources.contains(&path) || in_recent.contains(&path) {
+            if sources.contains(&path) || in_recent.contains(&path) || is_active_memory(&path, memory_folder) {
                 continue;
             }
             let hits: Vec<crate::memory::ChunkHit> = cache
@@ -232,7 +256,7 @@ pub fn build_with(cache: &Connection, question: &str, turns: &[Turn], now: DateT
             }
         }
     }
-    Ok(Context { recent, found, turns: kept, sources, tool_budget })
+    Ok(Context { recent, memory: memory_text, people, found, turns: kept, sources, tool_budget })
 }
 
 #[cfg(test)]
@@ -260,7 +284,7 @@ mod tests {
         let ms = now().timestamp_millis();
         index::index_note(&conn, "daily/bugün.md", "# Bugün\n\nDişçi randevusu yarın 10'da.", ms - 3_600_000, 10).unwrap();
         index::index_note(&conn, "notes/PLA.md", "# PLA\n\nGiriş.\n\nKarar: Tauri ve Svelte kullanılacak.\n\nBaşka konu.", ms - 30 * 86_400_000, 10).unwrap();
-        let ctx = build(&conn, "PLA projesinde hangi kararları aldık?", &[], now(), None, "reports").unwrap();
+        let ctx = build(&conn, "PLA projesinde hangi kararları aldık?", &[], now(), None, "reports", &Recall::default(), "memory").unwrap();
         assert!(ctx.recent.contains("Dişçi randevusu"), "the last 48 hours");
         assert!(!ctx.recent.contains("Tauri"), "an old note is not recent");
         assert!(ctx.found.contains("Karar: Tauri"), "the chunk that matters");
@@ -277,7 +301,7 @@ mod tests {
         let day = crate::summary::day_of(old).unwrap();
         let src = crate::summary::sources(&conn, &crate::vault::Folders::default(), day).unwrap();
         crate::summary::save(&conn, &src, "- Yönetim kurulu buluştu [[Toplantı]]", now()).unwrap();
-        let ctx = build(&conn, "yönetim kurulu ne dedi", &[], now(), None, "reports").unwrap();
+        let ctx = build(&conn, "yönetim kurulu ne dedi", &[], now(), None, "reports", &Recall::default(), "memory").unwrap();
         assert!(ctx.found.contains("Bütçe kararı: 40 bin"), "the raw note: {}", ctx.found);
         assert!(!ctx.found.contains("Yönetim kurulu buluştu"), "not the summary");
         assert_eq!(ctx.sources, ["notes/Toplantı.md"]);
@@ -292,9 +316,9 @@ mod tests {
         index::index_note(&conn, "notes/Kararlar.md", "# Kararlar\n\nÖnbellek tek bir SQLite dosyasında.", old, 10).unwrap();
         index::index_note(&conn, "notes/Mutfak.md", "# Mutfak\n\nMercimek çorbası.", old, 10).unwrap();
         let q = "PLA'da veritabanı için ne seçtik?";
-        let without = build_with(&conn, q, &[], now(), None, "reports", 0).unwrap();
+        let without = build_with(&conn, q, &[], now(), None, "reports", 0, &Recall::default(), "memory").unwrap();
         assert!(!without.found.contains("SQLite"), "words alone miss it: {}", without.found);
-        let with = build(&conn, q, &[], now(), None, "reports").unwrap();
+        let with = build(&conn, q, &[], now(), None, "reports", &Recall::default(), "memory").unwrap();
         assert!(with.found.contains("SQLite"), "{}", with.found);
         assert_eq!(with.sources, ["notes/PLA.md", "notes/Kararlar.md"], "after the note that led to it");
         assert!(!with.found.contains("Mercimek"), "an unlinked note does not come along");
@@ -308,7 +332,7 @@ mod tests {
         let long = "kelime ".repeat(2500); // ~4 300 tokens, more than the recent share
         index::index_note(&conn, "notes/eski.md", &format!("# Eski\n\nESKİ {long}"), ms - 40 * 3_600_000, 10).unwrap();
         index::index_note(&conn, "notes/yeni.md", &format!("# Yeni\n\nYENİ {long}"), ms - 3_600_000, 10).unwrap();
-        let ctx = build(&conn, "ne yaptım", &[], now(), None, "reports").unwrap();
+        let ctx = build(&conn, "ne yaptım", &[], now(), None, "reports", &Recall::default(), "memory").unwrap();
         assert!(ctx.recent.contains("YENİ") && !ctx.recent.contains("ESKİ"), "the newest stays, the oldest goes");
         assert!(tokens(&ctx.recent) <= (WINDOW - RESERVED) * 2 / 5);
     }
@@ -321,7 +345,7 @@ mod tests {
         let ms = now().timestamp_millis();
         index::index_note(&conn, "notes/sabah.md", "# Sabah\n\nKahvaltı.", ms - 5 * 3_600_000, 10).unwrap();
         index::index_note(&conn, "notes/akşam.md", "# Akşam\n\nToplantı.", ms - 3_600_000, 10).unwrap();
-        let ctx = build(&conn, "ne yaptım", &[], now(), None, "reports").unwrap();
+        let ctx = build(&conn, "ne yaptım", &[], now(), None, "reports", &Recall::default(), "memory").unwrap();
         assert!(ctx.recent.find("Kahvaltı").unwrap() < ctx.recent.find("Toplantı").unwrap(), "{}", ctx.recent);
     }
 
@@ -333,8 +357,8 @@ mod tests {
         let ms = now().timestamp_millis();
         let long = "kelime ".repeat(2500);
         index::index_note(&conn, "notes/yeni.md", &format!("# Yeni\n\nYENİ {long}"), ms - 3_600_000, 10).unwrap();
-        let short = build(&conn, "ne?", &[], now(), None, "reports").unwrap();
-        let long_q = build(&conn, &"bu hafta neler yaptım ".repeat(30), &[turn("bir", &"a ".repeat(800))], now(), None, "reports").unwrap();
+        let short = build(&conn, "ne?", &[], now(), None, "reports", &Recall::default(), "memory").unwrap();
+        let long_q = build(&conn, &"bu hafta neler yaptım ".repeat(30), &[turn("bir", &"a ".repeat(800))], now(), None, "reports", &Recall::default(), "memory").unwrap();
         assert_eq!(short.recent, long_q.recent);
         assert_eq!(long_q.turns.len(), 1, "the follow-up still fits");
     }
@@ -344,7 +368,69 @@ mod tests {
         let (_t, conn) = cache();
         let big = "a ".repeat(3000);
         let turns = [turn("bir", &big), turn("iki", &big), turn("üç", "kısa")];
-        let ctx = build(&conn, "peki ya cuma?", &turns, now(), None, "reports").unwrap();
+        let ctx = build(&conn, "peki ya cuma?", &turns, now(), None, "reports", &Recall::default(), "memory").unwrap();
         assert_eq!(ctx.turns.iter().map(|t| t.question.as_str()).collect::<Vec<_>>(), ["iki", "üç"]);
+    }
+
+    fn manual(text: &str) -> recall::Entry {
+        recall::Entry {
+            id: String::new(),
+            text: text.into(),
+            kind: recall::Kind::Manual,
+            topic: String::new(),
+            source: None,
+            date: chrono::NaiveDate::from_ymd_opt(2026, 10, 1).unwrap(),
+            person: None,
+            notes: Vec::new(),
+        }
+    }
+
+    /// A memory that fills its 600 tokens.
+    fn full_memory() -> Recall {
+        let mut r = Recall::default();
+        for i in 0..80 {
+            r.about.push(manual(&format!("Kullanıcının {i} numaralı tercihi: sabah kahve içer ve erken kalkar")));
+        }
+        r
+    }
+
+    fn lots_of_notes(conn: &Connection) {
+        let old = now().timestamp_millis() - 30 * 86_400_000;
+        for i in 0..12 {
+            let body = format!("# Proje {i}\n\n{}", "bütçe kararı toplantı ".repeat(120));
+            index::index_note(conn, &format!("notes/p{i}.md"), &body, old, 10).unwrap();
+        }
+    }
+
+    #[test]
+    fn memory_takes_its_share_from_the_found_notes() {
+        let (_t, conn) = cache();
+        lots_of_notes(&conn);
+        let q = "bütçe kararı toplantı";
+        let plain = build(&conn, q, &[], now(), None, "reports", &Recall::default(), "memory").unwrap();
+        let recall = full_memory();
+        let with = build(&conn, q, &[], now(), None, "reports", &recall, "memory").unwrap();
+        let used = tokens(&with.memory);
+        assert!(used > 500 && used <= recall::MEMORY_TOKENS, "{used}");
+        let room = WINDOW - RESERVED - tokens(q);
+        let found_budget = room - RECENT_TOKENS - room / 5;
+        assert!(tokens(&plain.found) > found_budget - used, "the plain run fills more than the shrunk share: {}", tokens(&plain.found));
+        assert!(tokens(&with.found) <= found_budget - used, "{} > {}", tokens(&with.found), found_budget - used);
+        assert_eq!(with.tool_budget, plain.tool_budget);
+        assert_eq!(with.recent, plain.recent);
+    }
+
+    #[test]
+    fn active_memory_files_are_not_found_again_but_the_archive_is() {
+        let (_t, conn) = cache();
+        let old = now().timestamp_millis() - 30 * 86_400_000;
+        index::index_note(&conn, "memory/Durum.md", "# Durum\n\nDeniz ile kayak planı yapıyoruz.", old, 10).unwrap();
+        index::index_note(&conn, "memory/Arşiv.md", "# Arşiv\n\nEski kayak planı iptal oldu.", old, 10).unwrap();
+        index::index_note(&conn, "notes/kayak.md", "# Kayak\n\nKayak malzemeleri listesi.", old, 10).unwrap();
+        let ctx = build(&conn, "kayak planı", &[], now(), None, "reports", &Recall::default(), "memory").unwrap();
+        assert!(!ctx.found.contains("Deniz ile kayak"), "{}", ctx.found);
+        assert!(ctx.found.contains("Eski kayak planı"), "{}", ctx.found);
+        assert!(!ctx.sources.iter().any(|s| s == "memory/Durum.md"), "{:?}", ctx.sources);
+        assert!(ctx.sources.iter().any(|s| s == "memory/Arşiv.md"), "{:?}", ctx.sources);
     }
 }

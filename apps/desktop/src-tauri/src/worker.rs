@@ -313,6 +313,10 @@ pub struct Worker {
     on_report: Option<ReportListener>,
     /// Reads titles of added items while the main connection is busy in the pipeline.
     reader: Option<Connection>,
+    /// The memory files as they were at the conversation's first question; kept until the next
+    /// new topic, so a note written meanwhile does not change the prompt the server has cached.
+    /// The vault is fixed for a worker: a vault switch starts a new one, with no snapshot.
+    recall: Option<pla_core::recall::Recall>,
 }
 
 impl Worker {
@@ -338,6 +342,7 @@ impl Worker {
             on_summary: None,
             on_report: None,
             reader,
+            recall: None,
             status: WorkerStatus { queued: 0, model, busy: false, last_error: None, added: 0, paused: false },
         }
     }
@@ -734,8 +739,10 @@ impl Worker {
         }
         let Some(model) = self.extractor.as_mut().and_then(|x| x.chat_model()) else { return };
         let Ok(cache) = pla_core::db::connect(cache_path) else { return };
+        // the same snapshot the next question of this conversation reads (a new topic loads again)
+        let recall = &*self.recall.get_or_insert_with(|| pla_core::recall::load(&self.vault));
         // only a closing session stops it: a question that comes meanwhile wants it finished
-        let _ = engine::warm(model, &cache, (self.clock)(), &self.stops.cancel);
+        let _ = engine::warm(model, &cache, (self.clock)(), recall, &self.stops.cancel);
         let model = self.model_state();
         if model != self.status.model {
             self.status.model = model;
@@ -747,6 +754,10 @@ impl Worker {
     fn ask(&mut self, job: AskJob) {
         let AskJob { turn_id, question, new_topic, cache_path, memory, cancel, on } = job;
         let fail = |code: &str, detail: String| on(QaEvent::Failed { turn_id: turn_id.clone(), code: code.into(), detail });
+        // FR-MEM: the memory is read once per conversation, at its first question
+        if new_topic || self.recall.is_none() {
+            self.recall = Some(pla_core::recall::load(&self.vault));
+        }
         let Some(model) = self.extractor.as_mut().and_then(|x| x.chat_model()) else {
             fail("no_model", String::new());
             return;
@@ -783,7 +794,7 @@ impl Worker {
         let result = engine::answer(
             model,
             &env,
-            &engine::Question { text: &question, turns: &turns, memory: memory_arg, ui_lang: crate::notify::ui_lang() },
+            &engine::Question { text: &question, turns: &turns, memory: memory_arg, ui_lang: crate::notify::ui_lang(), recall: self.recall.as_ref() },
             &cancel,
             &mut |p| {
                 let event = match p {
