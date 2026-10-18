@@ -1,5 +1,5 @@
 {
-  "about": "Retrieval eval: a small personal vault and questions. 'linked' cases keep the answer in a note the question does not name but a named note links to (or is linked from); 'direct' cases name the note that holds the answer. A case passes when every fact is in what the model reads (recent + found). Written before the graph expansion it measures.",
+  "about": "Retrieval eval: a small personal vault and questions. 'linked' cases keep the answer in a note the question does not name but a named note links to (or is linked from); 'direct' cases name the note that holds the answer. 'none' cases ask for something that is nowhere in the vault: they pass trivially and report the tokens and source notes the model would read for nothing. 'memory' is the fixture of the assistant's memory files, written to a temp vault for the run. A case passes when every fact is in what the model reads (recent + found). Written before the graph expansion it measures.",
   "pad": [
     "Bu konuya sonra tekrar bakmam gerekecek. Şimdilik aklıma gelenleri buraya yazıyorum, düzenlemeyi hafta sonuna bırakıyorum. Bazı maddeler eksik kalabilir, önemli olanları işaretledim.",
     "Genel olarak işler yolunda ama zaman yönetimi hâlâ zor. Gün içinde çok bölünüyorum; sabahları daha verimli olduğumu fark ettim. Bunu bir alışkanlık hâline getirmeyi deneyeceğim.",
@@ -85,6 +85,93 @@
     {"path": "notlar/Tatil Planı.md", "age_days": 25, "pad": 1, "text": "# Tatil Planı\n\nKasım sonunda üç günlük Kapadokya gezisi. Balon turu fiyatları yüksek, ikinci güne bıraktım."},
     {"path": "notlar/Mutfak.md", "age_days": 75, "pad": 1, "text": "# Mutfak\n\nMercimek çorbası: bir su bardağı kırmızı mercimek, bir soğan, bir havuç. Pul biberli tereyağı en son."}
   ],
+  "memory": {
+    "about": [
+      {
+        "text": "Adım Ayberk, bilgisayar mühendisliği son sınıf öğrencisiyim; yarı zamanlı da çalışıyorum.",
+        "kind": "said",
+        "date": "2026-10-05"
+      },
+      {
+        "text": "Sabah erken kalkarım, en verimli saatlerim 07:00-11:00 arası; derin işi sabaha koyarım.",
+        "kind": "said",
+        "date": "2026-10-05"
+      },
+      {
+        "text": "Çayı şekersiz, kahveyi çok az sütle içerim. Akşam yemeğini genellikle 20:00 civarında yerim.",
+        "kind": "said",
+        "date": "2026-10-05"
+      },
+      {
+        "text": "Okula metrobüsle giderim, yolculuk yaklaşık 50 dakika sürer; yolda podcast dinlerim.",
+        "kind": "said",
+        "date": "2026-10-05"
+      },
+      {
+        "text": "Telefonumda bildirimleri kapalı tutarım, mesajlara günde iki kez bakarım.",
+        "kind": "inferred",
+        "date": "2026-09-21",
+        "source": "daily/2026-09-20.md#b2"
+      }
+    ],
+    "rules": [
+      {
+        "text": "Cevaplar kısa olsun, en fazla üç cümle.",
+        "kind": "said",
+        "date": "2026-10-05"
+      },
+      {
+        "text": "Tarihleri gün ve ay adıyla yaz, örneğin 12 Kasım.",
+        "kind": "said",
+        "date": "2026-10-05"
+      },
+      {
+        "text": "Notlarımda olmayan bir şeyi uydurma; bilmiyorsan bilmediğini söyle.",
+        "kind": "said",
+        "date": "2026-10-05"
+      }
+    ],
+    "state": [
+      {
+        "text": "Bitirme projesinde gövde seçimi hâlâ açık; hangi gövdenin alınacağına henüz karar verilmedi.",
+        "kind": "inferred",
+        "date": "2026-10-12",
+        "source": "projeler/Sabit Kanat İHA Seçimi.md#b1"
+      },
+      {
+        "text": "Bu hafta işletim sistemleri dönem projesinin test kısmına odaklanıyorum.",
+        "kind": "said",
+        "date": "2026-10-14"
+      },
+      {
+        "text": "Fizyoterapistle haftaya görüşme yapacağım, o zamana kadar ağır antrenmanı hafif tutuyorum.",
+        "kind": "said",
+        "date": "2026-10-15"
+      }
+    ],
+    "people": {
+      "Deniz": [
+        {
+          "text": "Fıstığa alerjisi var, yemek ısmarlarken dikkat ediyorum.",
+          "kind": "said",
+          "date": "2026-10-05"
+        },
+        {
+          "text": "Toplantılara genellikle on dakika geç gelir.",
+          "kind": "inferred",
+          "date": "2026-10-03",
+          "source": "toplantilar/2026-10-02 PLA Planlama.md#b3"
+        }
+      ],
+      "Efe": [
+        {
+          "text": "Gece çalışmayı sever, mesajlara sabah geç döner.",
+          "kind": "said",
+          "date": "2026-10-10"
+        }
+      ]
+    }
+  },
   "cases": [
     {"id": "linked-pla-veri", "cat": "linked", "q": "PLA'da veritabanı için ne kullanmaya karar verdik?", "facts": ["sqlite-vec"]},
     {"id": "linked-pla-electron", "cat": "linked", "q": "PLA'da neden Electron kullanmadık?", "facts": ["bellek tüketiyordu"]},
@@ -107,6 +194,12 @@
     {"id": "direct-graf", "cat": "direct", "q": "PLA planlama toplantısında graf görünümü için ne karar alındı?", "facts": ["M7"]},
     {"id": "direct-disci", "cat": "direct", "q": "Dişçi kontrolüm ne zaman?", "facts": ["nisanda"]},
     {"id": "direct-pc-ram", "cat": "direct", "q": "Yeni bilgisayar için ne kadar RAM düşünüyorum?", "facts": ["32 GB"]},
-    {"id": "direct-mercimek", "cat": "direct", "q": "Mercimek çorbasına neler giriyor?", "facts": ["havuç"]}
+    {"id": "direct-mercimek", "cat": "direct", "q": "Mercimek çorbasına neler giriyor?", "facts": ["havuç"]},
+    {"id": "none-iban", "cat": "none", "q": "Banka IBAN numaram nedir?", "facts": []},
+    {"id": "none-ucus", "cat": "none", "q": "Cumartesi günkü uçağım saat kaçta kalkıyor?", "facts": []},
+    {"id": "none-tarif", "cat": "none", "q": "Kuru fasulye tarifinde fasulyeyi kaç saat ıslatmalıyım?", "facts": []},
+    {"id": "none-zeynep", "cat": "none", "q": "Zeynep'in doğum günü ne zaman?", "facts": []},
+    {"id": "none-wifi", "cat": "none", "q": "Evdeki wifi şifresi neydi?", "facts": []},
+    {"id": "none-ehliyet", "cat": "none", "q": "Ehliyet sınavımın sonucu ne çıktı?", "facts": []}
   ]
 }

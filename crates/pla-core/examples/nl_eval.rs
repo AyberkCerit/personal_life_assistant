@@ -3,7 +3,8 @@
 //! real model on the cases in `tests/nl/`. Not part of `cargo test`: it needs the model.
 //!   $env:PLA_LLAMA_SERVER = "C:\dev\PLA\apps\desktop\src-tauri\llama\llama-server.exe"
 //!   $env:PLA_MODEL = "C:\dev\PLA\research\f1-model-eval\models\gemma-4-E2B-it-Q3_K_M.gguf"
-//!   cargo run --release -p pla-core --example nl_eval -- <label> [id-prefix]
+//!   cargo run --release -p pla-core --example nl_eval -- <label> [id-prefix] [--no-memory]
+//! `--no-memory` leaves the cases' `memory` unwritten and unloaded (the without-memory run).
 //! Writes research/nl-eval/results/<label>.jsonl and prints the score by category.
 
 use std::collections::BTreeMap;
@@ -19,6 +20,9 @@ use pla_core::qa::engine;
 use pla_core::qa::tools::ToolEnv;
 use pla_core::qa::Turn;
 use serde_json::{json, Value};
+
+#[path = "memory_fixture/mod.rs"]
+mod memory_fixture;
 
 const NOW: &str = "2026-10-09T21:00:00+03:00";
 const CASES: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/nl");
@@ -114,7 +118,7 @@ fn arg_matches(key: &str, want: &Value, got: &Value) -> bool {
 
 const WRITES: [&str; 4] = ["add_task", "complete_task", "log_metric", "create_note"];
 
-fn assistant_case(model: &mut ModelHost, case: &Value) -> Result<(Vec<String>, Value), Box<dyn std::error::Error>> {
+fn assistant_case(model: &mut ModelHost, case: &Value, with_memory: bool) -> Result<(Vec<String>, Value), Box<dyn std::error::Error>> {
     let tmp = tempfile::tempdir()?;
     std::fs::create_dir_all(tmp.path().join("kasa"))?;
     let vault = pla_core::vault::open_vault(&tmp.path().join("kasa"))?;
@@ -138,6 +142,10 @@ fn assistant_case(model: &mut ModelHost, case: &Value) -> Result<(Vec<String>, V
         };
         pla_core::tasks::add_task_as(&dbs.pla, &input, "manual", now())?;
     }
+    if with_memory && case["memory"].is_object() {
+        memory_fixture::write_memory(&vault.root.join(&vault.config.folders.memory), &case["memory"])?;
+    }
+    let recall = if with_memory { pla_core::recall::load(&vault) } else { pla_core::recall::Recall::default() };
     let turns: Vec<Turn> = case["turns"]
         .as_array()
         .cloned()
@@ -157,7 +165,7 @@ fn assistant_case(model: &mut ModelHost, case: &Value) -> Result<(Vec<String>, V
     let env = ToolEnv { vault: &vault, pla: &dbs.pla, cache: &dbs.cache, now: now(), validation: ValidationSettings::default() };
     let lang = case["ui"].as_str().unwrap_or("tr");
     let q = case["q"].as_str().unwrap();
-    let answer = engine::answer(model, &env, &engine::Question { text: q, turns: &turns, memory: None, recall: None, ui_lang: lang }, &AtomicBool::new(false), &mut |_| {})?;
+    let answer = engine::answer(model, &env, &engine::Question { text: q, turns: &turns, memory: None, recall: Some(&recall), ui_lang: lang }, &AtomicBool::new(false), &mut |_| {})?;
 
     let want = &case["expect"];
     let mut fails = Vec::new();
@@ -217,6 +225,12 @@ fn assistant_case(model: &mut ModelHost, case: &Value) -> Result<(Vec<String>, V
             fails.push(format!("answer has none of {any:?}"));
         }
     }
+    if let Some(any) = want["contains_any"].as_array() {
+        let lower = answer.text.to_lowercase();
+        if !any.iter().filter_map(Value::as_str).any(|s| lower.contains(&s.to_lowercase())) {
+            fails.push(format!("answer has none of {any:?}"));
+        }
+    }
     let tools: Vec<Value> = answer.tools.iter().map(|t| json!({ "tool": t.tool, "args": t.args, "ok": t.ok, "error": t.error })).collect();
     Ok((fails, json!({ "answer": answer.text, "tools": tools })))
 }
@@ -271,8 +285,10 @@ fn extraction_case(model: &mut ModelHost, case: &Value) -> Result<(Vec<String>, 
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let label = std::env::args().nth(1).unwrap_or_else(|| "run".into());
-    let only = std::env::args().nth(2).unwrap_or_default();
+    let with_memory = !std::env::args().any(|a| a == "--no-memory");
+    let args: Vec<String> = std::env::args().skip(1).filter(|a| a != "--no-memory").collect();
+    let label = args.first().cloned().unwrap_or_else(|| "run".into());
+    let only = args.get(1).cloned().unwrap_or_default();
     let mut cfg = ServerConfig::new(PathBuf::from(std::env::var("PLA_LLAMA_SERVER")?), PathBuf::from(std::env::var("PLA_MODEL")?));
     cfg.startup_timeout = Duration::from_secs(120);
     let mut model = ModelHost::new(cfg, Duration::from_secs(600));
@@ -308,7 +324,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 continue;
             }
             let t = Instant::now();
-            let outcome = if kind == "assistant" { assistant_case(&mut model, &case) } else { extraction_case(&mut model, &case) };
+            let outcome = if kind == "assistant" { assistant_case(&mut model, &case, with_memory) } else { extraction_case(&mut model, &case) };
             let (fails, got) = outcome.unwrap_or_else(|e| (vec![format!("error: {e}")], Value::Null));
             let cat = format!("{kind}/{}", case["cat"].as_str().unwrap_or("-"));
             let e = score.entry(cat).or_default();

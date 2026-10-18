@@ -1,9 +1,14 @@
 //! What the assistant gets to read for a question (FR-MEM-005/009), with and without the notes
 //! the best hits link to: does every fact a case needs reach the context?
-//!   cargo run --release -p pla-core --example retrieval_eval -- <label>
+//!   cargo run --release -p pla-core --example retrieval_eval -- <label> [--no-memory]
+//! The fixture's `memory` is written to a temp vault as the assistant's memory files and loaded, so
+//! the memory block's tokens come out of the found share; `--no-memory` passes an empty memory.
 //! Vault and cases: `tests/retrieval/vault.json`. With PLA_LLAMA_SERVER and PLA_EMBED_MODEL set
 //! (EmbeddingGemma) it measures the hybrid search too; without them, keywords alone.
 //! Results: `research/retrieval-eval/results/<label>.jsonl`.
+
+#[path = "memory_fixture/mod.rs"]
+mod memory_fixture;
 
 use std::io::Write;
 use std::path::PathBuf;
@@ -29,13 +34,27 @@ fn embedder() -> Option<ModelHost> {
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let label = std::env::args().nth(1).unwrap_or_else(|| "run".into());
+    let with_memory = !std::env::args().any(|a| a == "--no-memory");
+    let label = std::env::args().skip(1).find(|a| a != "--no-memory").unwrap_or_else(|| "run".into());
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let fixture: Value = serde_json::from_str(&std::fs::read_to_string(root.join("tests/retrieval/vault.json"))?)?;
     let pad: Vec<&str> = fixture["pad"].as_array().unwrap().iter().map(|p| p.as_str().unwrap()).collect();
 
     let tmp = tempfile::tempdir()?;
-    let dbs = pla_core::db::open_databases(tmp.path())?;
+    // a real vault for the memory files; the notes live in the index only, as before
+    std::fs::create_dir_all(tmp.path().join("kasa"))?;
+    let vault = pla_core::vault::open_vault(&tmp.path().join("kasa"))?;
+    let memory_folder = vault.config.folders.memory.clone();
+    let recall = if with_memory && fixture["memory"].is_object() {
+        memory_fixture::write_memory(&vault.root.join(&memory_folder), &fixture["memory"])?;
+        pla_core::recall::load(&vault)
+    } else {
+        pla_core::recall::Recall::default()
+    };
+    println!("memory: {} (about {}, rules {}, state {}, people {}; warnings {:?})", if with_memory { "on" } else { "off" }, recall.about.len(), recall.rules.len(), recall.state.len(), recall.people.len(), recall.warnings);
+    let dbs_dir = tmp.path().join("data");
+    std::fs::create_dir_all(&dbs_dir)?;
+    let dbs = pla_core::db::open_databases(&dbs_dir)?;
     let ms = now().timestamp_millis();
     for (i, n) in fixture["notes"].as_array().unwrap().iter().enumerate() {
         let mut text = n["text"].as_str().unwrap().to_owned();
@@ -86,6 +105,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut out = std::fs::File::create(out_dir.join(format!("{label}.jsonl")))?;
     // per mode: (passed linked, all linked, passed direct, all direct, found tokens, time)
     let mut totals = vec![(0, 0, 0, 0, 0usize, Duration::ZERO); modes.len()];
+    // per mode, the `none` cases: (count, found tokens, distinct source notes)
+    let mut none = vec![(0usize, 0usize, 0usize); modes.len()];
     for case in fixture["cases"].as_array().unwrap() {
         let q = case["q"].as_str().unwrap();
         let linked_case = case["cat"] == "linked";
@@ -96,12 +117,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         for (m, (name, hybrid, linked)) in modes.iter().enumerate() {
             let memory = if *hybrid { vector.as_deref().map(|v| (v, model_id.as_str())) } else { None };
             let t = Instant::now();
-            let ctx = build_with(&dbs.cache, q, &[], now(), memory, "reports", *linked, &pla_core::recall::Recall::default(), "memory")?;
+            let ctx = build_with(&dbs.cache, q, &[], now(), memory, "reports", *linked, &recall, &memory_folder)?;
             let took = t.elapsed();
             let read = key(&format!("{}\n{}", ctx.recent, ctx.found));
             let missing: Vec<&str> = case["facts"].as_array().unwrap().iter().map(|f| f.as_str().unwrap()).filter(|f| !read.contains(&key(f))).collect();
             let pass = missing.is_empty();
             let tot = &mut totals[m];
+            if case["cat"] == "none" {
+                let n = &mut none[m];
+                n.0 += 1;
+                n.1 += tokens(&ctx.found);
+                n.2 += ctx.sources.len();
+                writeln!(out, "{}", json!({"id": case["id"], "mode": name, "pass": true, "missing": Vec::<&str>::new(), "sources": ctx.sources, "found_tokens": tokens(&ctx.found), "memory_tokens": tokens(&ctx.memory)}))?;
+                continue;
+            }
             if linked_case {
                 tot.1 += 1;
                 tot.0 += usize::from(pass);
@@ -118,15 +147,24 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
     let cases = fixture["cases"].as_array().unwrap().len();
+    let scored = cases - none[0].0;
     println!("\n| Mod | Bağlı | Doğrudan | Toplam | Ort. bulunan token | Ort. süre |\n| --- | --- | --- | --- | --- | --- |");
     for ((name, ..), (pl, l, pd, d, tok, took)) in modes.iter().zip(&totals) {
         println!(
             "| {name} | {pl}/{l} | {pd}/{d} | {}/{} | {} | {:.1} ms |",
             pl + pd,
             l + d,
-            tok / cases,
-            took.as_secs_f64() * 1000.0 / cases as f64
+            tok / scored,
+            took.as_secs_f64() * 1000.0 / scored as f64
         );
     }
+    println!("
+| Mod | `none` vakaları | Ort. bulunan token | Ort. kaynak not |
+| --- | --- | --- | --- |");
+    for ((name, ..), (n, tok, src)) in modes.iter().zip(&none) {
+        println!("| {name} | {n} | {} | {:.1} |", tok / (*n).max(1), *src as f64 / (*n).max(1) as f64);
+    }
+    println!("
+memory block: {} tokens", tokens(&pla_core::recall::block(&recall)));
     Ok(())
 }
