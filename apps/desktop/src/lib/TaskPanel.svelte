@@ -1,9 +1,11 @@
 <script lang="ts">
   import { failure, type Failure } from "./i18n";
   import ErrorBanner from "./ui/ErrorBanner.svelte";
-  import { api, type ReviewItem, type Task, type TaskInput } from "./api";
+  import { api, type ReviewItem, type Routine, type Task, type TaskInput } from "./api";
   import { onMount } from "svelte";
   import { filterByOrigin, groupTasks, msUntilNextDay, taskError, todayIso, type OriginFilter, type TaskList } from "./tasks";
+  import RoutineList from "./RoutineList.svelte";
+  import { routineError } from "./routines";
   import TaskRow from "./TaskRow.svelte";
   import { lang, t, tf } from "./i18n";
   import CalendarCheck from "@lucide/svelte/icons/calendar-check";
@@ -31,12 +33,13 @@
     onChanged = () => {},
   }: { version: number; onOpenSource: (path: string, blockText: string | null) => void; onChanged?: () => void } = $props();
 
-  type Tab = TaskList | "review";
-  const TABS: Tab[] = ["today", "upcoming", "completed", "review"];
+  type Tab = TaskList | "routines" | "review";
+  const TABS: Tab[] = ["today", "upcoming", "completed", "routines", "review"];
   let tab = $state<Tab>("today");
   let filter = $state<OriginFilter>("all");
   let tasks = $state<Task[]>([]);
   let review = $state<ReviewItem[]>([]);
+  let routines = $state<Routine[]>([]);
   let error = $state<string | Failure | null>(null);
   let newTitle = $state("");
   let newDate = $state("");
@@ -45,11 +48,11 @@
   let reviewForms = $state<Record<string, TaskInput>>({});
   let today = $state(todayIso()); // refreshed on every load and at local midnight
   const labels = $derived({ today: t("tasks.today"), tomorrow: t("tasks.tomorrow"), noDate: t("tasks.noDate"), overdue: t("tasks.overdue") });
-  const groups = $derived(tab === "review" ? [] : groupTasks(filterByOrigin(tasks, filter), tab, today, labels, lang));
+  const groups = $derived(tab === "review" || tab === "routines" ? [] : groupTasks(filterByOrigin(tasks, filter), tab, today, labels, lang));
 
   /** The commands' error codes in the UI language (architecture review A2). */
   function errorText(e: unknown): string | Failure {
-    const { key, detail } = taskError(String(e));
+    const { key, detail } = tab === "routines" ? routineError(String(e)) : taskError(String(e));
     return key === "tasks.error.other" ? failure(e) : tf(key, { detail }); // M6: no English inline
   }
 
@@ -73,6 +76,8 @@
       if (tab === "review") {
         review = await api.listReview();
         reviewForms = Object.fromEntries(review.map((r) => [r.review_id, reviewForms[r.review_id] ?? { title: r.title ?? "", date: "", time: "" }]));
+      } else if (tab === "routines") {
+        routines = await api.listRoutines();
       } else {
         tasks = await api.listTasks(tab);
       }
@@ -130,7 +135,15 @@
 
   {#if error}<ErrorBanner {error} />{/if}
 
-  {#if tab !== "review"}
+  {#if tab === "routines"}
+    <RoutineList
+      {routines}
+      onSave={(id, input) => run(() => api.editRoutine(id, input))}
+      onPause={(id, paused) => void run(() => api.setRoutinePaused(id, paused))}
+      onDelete={(id) => void run(() => api.deleteRoutine(id))}
+      {onOpenSource}
+    />
+  {:else if tab !== "review"}
     <div class="tools">
       <label>
         {t("tasks.filter")}

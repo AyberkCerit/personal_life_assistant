@@ -5,6 +5,7 @@ const files = new Map<string, string>([
   ["inbox/Hoş geldin.md", "Bu, PLA'nın tarayıcıdaki deneme kasası.\n"],
 ]);
 import type { Task } from "./tasks";
+import type { Routine } from "./routines";
 import { todayIso } from "./tasks";
 
 export const mockListeners = new Map<string, Array<(payload: unknown) => void>>();
@@ -22,11 +23,18 @@ const day = (offset: number) => {
   d.setDate(d.getDate() + offset);
   return todayIso(d);
 };
-const base = { details: null, time: null, notify_at: null, status: "open" as const, note_path: null, block_text: null, source_missing: false, user_modified: false };
+const base = { details: null, time: null, notify_at: null, status: "open" as const, note_path: null, block_text: null, source_missing: false, user_modified: false, routine_id: null };
 let tasks: Task[] = [
   { ...base, task_id: "t1", title: "Dişçi", date: day(1), time: "09:00", origin: "extracted", note_path: "daily/2026/2026-10-06.md", block_text: "Yarın 9'da dişçi var." },
   { ...base, task_id: "t2", title: "Fatura öde", date: day(-1), origin: "manual" },
   { ...base, task_id: "t3", title: "Kitap oku", date: null, origin: "manual" },
+];
+let routines: Routine[] = [
+  {
+    routine_id: "rt1", title: "Spor", days: [{ day: "mon", time: "20:00" }, { day: "wed", time: "20:00" }, { day: "fri", time: "20:00" }],
+    paused: false, origin: "extracted", note_path: "daily/2026/2026-10-06.md", block_text: "Pazartesi, çarşamba, cuma 20'de spor.",
+    source_missing: false, user_modified: false, week_done: 1, week_due: 3,
+  },
 ];
 let review = [
   {
@@ -480,8 +488,29 @@ export async function mockBackend<T>(cmd: string, args: Record<string, unknown>)
     case "set_task_done":
       tasks = tasks.map((t) => (t.task_id === args.id ? { ...t, status: args.done ? "done" : "open", user_modified: true } : t));
       return undefined as T;
-    case "delete_task":
+    case "list_routines":
+      return routines as T;
+    case "edit_routine": {
+      const input = args.input as { title: string; days: Routine["days"] };
+      if (!input.title.trim()) throw "bad_title||";
+      if (!input.days.length) throw "no_days||";
+      routines = routines.map((r) => (r.routine_id === args.id ? { ...r, title: input.title.trim(), days: input.days, user_modified: true } : r));
+      return undefined as T;
+    }
+    case "set_routine_paused":
+      routines = routines.map((r) => (r.routine_id === args.id ? { ...r, paused: Boolean(args.paused) } : r));
+      return undefined as T;
+    case "delete_routine":
+      routines = routines.filter((r) => r.routine_id !== args.id);
+      return undefined as T;
     case "undo_item":
+      if (args.kind === "routine") {
+        routines = routines.filter((r) => r.routine_id !== args.id);
+        return undefined as T;
+      }
+      tasks = tasks.filter((t) => t.task_id !== args.id);
+      return undefined as T;
+    case "delete_task":
       tasks = tasks.filter((t) => t.task_id !== args.id);
       return undefined as T;
     case "list_review":

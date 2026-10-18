@@ -52,7 +52,7 @@
   {#each shown as toast (toast.key)}
     <div class="toast" in:fly={{ x: 24, duration: motion(BASE) }} out:fade={{ duration: motion(FAST) }}>
       <span class="lead"><Icon icon={Sparkles} size="md" /></span>
-      <span class="text"><span class="label">{t("toast.added")}</span><strong>{toast.item.kind === "metric" && KINDS.includes(toast.item.title as MetricKind) ? t(`metrics.kind.${toast.item.title}` as Key) : toast.item.title}</strong></span>
+      <span class="text"><span class="label">{toast.item.kind === "routine" ? t("toast.routine") : t("toast.added")}</span><strong>{toast.item.kind === "metric" && KINDS.includes(toast.item.title as MetricKind) ? t(`metrics.kind.${toast.item.title}` as Key) : toast.item.title}</strong></span>
       <Button variant="quiet" icon={Undo2} onclick={() => void undo(toast)}>{t("toast.undo")}</Button>
     </div>
   {/each}

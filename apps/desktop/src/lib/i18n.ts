@@ -71,6 +71,30 @@ const dict = {
     "tasks.upcoming": "Yaklaşan",
     "tasks.completed": "Tamamlanan",
     "tasks.review": "İnceleme",
+    "tasks.routines": "Rutinler",
+    "routines.week": "bu hafta {done}/{due}",
+    "routines.badge": "rutin",
+    "routines.edit": "Düzenle",
+    "routines.pause": "Duraklat",
+    "routines.resume": "Sürdür",
+    "routines.paused": "duraklatıldı",
+    "routines.delete": "Sil",
+    "routines.deleteConfirm": "\"{title}\" rutini silinsin mi? Tamamlanan günler kalır.",
+    "routines.empty": "Henüz rutin yok",
+    "routines.emptyHint": "Notuna \"her pazartesi 8'de spor\" gibi yaz, burada görünür.",
+    "routines.error.no_days": "En az bir gün seç.",
+    "routines.title": "Başlık",
+    "routines.save": "Kaydet",
+    "routines.cancel": "Vazgeç",
+    "routines.time": "Saat",
+    "toast.routine": "Rutin eklendi",
+    "day.short.mon": "Pzt",
+    "day.short.tue": "Sal",
+    "day.short.wed": "Çar",
+    "day.short.thu": "Per",
+    "day.short.fri": "Cum",
+    "day.short.sat": "Cmt",
+    "day.short.sun": "Paz",
     "tasks.tomorrow": "Yarın",
     "tasks.noDate": "Tarihsiz",
     "tasks.overdue": "Gecikmiş",
@@ -541,6 +565,30 @@ const dict = {
     "tasks.upcoming": "Upcoming",
     "tasks.completed": "Completed",
     "tasks.review": "Review",
+    "tasks.routines": "Routines",
+    "routines.week": "this week {done}/{due}",
+    "routines.badge": "routine",
+    "routines.edit": "Edit",
+    "routines.pause": "Pause",
+    "routines.resume": "Resume",
+    "routines.paused": "paused",
+    "routines.delete": "Delete",
+    "routines.deleteConfirm": "Delete the routine \"{title}\"? Completed days stay.",
+    "routines.empty": "No routines yet",
+    "routines.emptyHint": "Write something like \"gym every Monday at 8\" in a note and it shows up here.",
+    "routines.error.no_days": "Pick at least one day.",
+    "routines.title": "Title",
+    "routines.save": "Save",
+    "routines.cancel": "Cancel",
+    "routines.time": "Time",
+    "toast.routine": "Routine added",
+    "day.short.mon": "Mon",
+    "day.short.tue": "Tue",
+    "day.short.wed": "Wed",
+    "day.short.thu": "Thu",
+    "day.short.fri": "Fri",
+    "day.short.sat": "Sat",
+    "day.short.sun": "Sun",
     "tasks.tomorrow": "Tomorrow",
     "tasks.noDate": "No date",
     "tasks.overdue": "Overdue",
@@ -955,6 +1003,11 @@ export function setLang(next: Lang) {
 
 export function t(key: Key): string {
   return dict[lang][key];
+}
+
+/** `t` in a given language (for text that is rendered for a language other than the live one). */
+export function tIn(language: Lang, key: Key): string {
+  return dict[language][key];
 }
 
 /** A key built at run time (an error code): the chosen language, else English (FR-I18N-007, the
