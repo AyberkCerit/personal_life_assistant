@@ -37,3 +37,8 @@
 {"id":"rut-tek","cat":"routine","text":"Pazartesi spora gideceğim.","expect":{"items":[{"type":"task"}],"none_of":["routine"]}}
 {"id":"rut-gecmis","cat":"routine","text":"Bu hafta her gün 8 saat uyudum.","expect":{"none_of":["routine"]}}
 {"id":"rut-duygu","cat":"routine","text":"Her zaman geç kalıyorum, sinir bozucu.","expect":{"empty":true}}
+{"id":"hold-yuzme","cat":"routine-holdout","text":"Salı ve perşembe akşamları 19:30'da yüzme kursum var, her hafta.","expect":{"items":[{"type":"routine","days":["tue","thu"],"time":"19:30"}]}}
+{"id":"hold-meditate","cat":"routine-holdout","text":"Every morning at 6:30 I meditate.","expect":{"items":[{"type":"routine","days":["mon","tue","wed","thu","fri","sat","sun"],"time":"06:30"}]}}
+{"id":"hold-pazar","cat":"routine-holdout","text":"Her cumartesi ve pazar saat 10'da semt pazarına gidiyorum.","expect":{"items":[{"type":"routine","days":["sat","sun"],"time":"10:00"}]}}
+{"id":"hold-iki-gun","cat":"routine-holdout","text":"Yarın ve cuma günü spora gideceğim.","expect":{"none_of":["routine"]}}
+{"id":"hold-her-sey","cat":"routine-holdout","text":"Her şey yolunda, bugün harika geçti.","expect":{"empty":true}}
