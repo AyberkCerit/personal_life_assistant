@@ -39,6 +39,7 @@ export const EDITOR_THEME = {
     fontFamily: "var(--font-ui)",
     fontSize: "var(--text-md)",
   },
+  ".cm-tooltip.cm-tooltip-autocomplete > ul": { fontFamily: "inherit" }, // CodeMirror's own is monospace
   ".cm-tooltip.cm-tooltip-autocomplete > ul > li": { padding: "var(--space-1) var(--space-2)", color: "var(--color-text)" },
   ".cm-tooltip.cm-tooltip-autocomplete > ul > li[aria-selected]": { backgroundColor: "var(--color-accent-subtle)", color: "var(--color-text)" },
   ".cm-completionDetail": { color: "var(--color-text-muted)", fontStyle: "normal", marginLeft: "var(--space-2)" },

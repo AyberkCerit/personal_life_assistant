@@ -17,7 +17,9 @@
   import { completionQuery, linkAt, linkRest } from "./links";
   import { autocompletion, type CompletionContext } from "@codemirror/autocomplete";
   import { keymap } from "@codemirror/view";
-  import { t, tf } from "./i18n";
+  import { t, tf, tIn } from "./i18n";
+  import { blocksExtension, completionIcon, slashCompletion, type BlocksConfig } from "./editorBlocks";
+  import { MENU_KINDS, type MenuKind } from "./blocks";
   import { mediaExtension } from "./editorMedia";
   import { ImageCache, mediaError } from "./media";
   import Properties from "./Properties.svelte";
@@ -76,9 +78,21 @@
     return linkAt(line.text, pos - line.from);
   }
 
+  // a line's type without Markdown: the handle, its menu and `/` (headings UI)
+  const blockKey = (kind: MenuKind) => `block.${kind}` as const;
+  const blocks: BlocksConfig = {
+    label: (kind) => t(blockKey(kind)),
+    names: Object.fromEntries(MENU_KINDS.map((k) => [k, [tIn("tr", blockKey(k)), tIn("en", blockKey(k))]])) as Record<MenuKind, string[]>,
+    handle: t("block.handle"),
+    menu: t("block.menu"),
+    hint: t("block.hint"),
+  };
+
   const linkCompletion = autocompletion({
     activateOnTyping: true,
+    addToOptions: [completionIcon],
     override: [
+      slashCompletion(blocks),
       async (ctx: CompletionContext) => {
         const line = ctx.state.doc.lineAt(ctx.pos);
         const found = completionQuery(line.text.slice(0, ctx.pos - line.from));
@@ -157,6 +171,7 @@
             },
           ])),
           linkCompletion,
+          blocksExtension(blocks),
           media,
         ],
       }),

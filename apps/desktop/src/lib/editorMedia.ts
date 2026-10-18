@@ -1,5 +1,5 @@
 /** The editor's frontmatter and images (FR-EDT-006/016/017): dim YAML, previews, paste and drop. */
-import { RangeSetBuilder, StateEffect, StateField, type EditorState, type Extension } from "@codemirror/state";
+import { RangeSetBuilder, StateEffect, StateField, type EditorState, type Extension, type Text } from "@codemirror/state";
 import { Decoration, EditorView, WidgetType, type DecorationSet } from "@codemirror/view";
 import { frontmatterLines, imageEmbeds, isImageFile, MAX_IMAGE, type ImageCache } from "./media";
 
@@ -61,16 +61,21 @@ const dimLine = Decoration.line({ class: "cm-frontmatter" });
 /** An image was saved: the previews are drawn again. */
 const mediaChanged = StateEffect.define<null>();
 
-function decorations(state: EditorState, generation: number, config: MediaConfig): DecorationSet {
-  const builder = new RangeSetBuilder<Decoration>();
-  const { doc } = state;
+/** How many lines at the top are frontmatter (0 when there is none). */
+export function frontmatterEnd(doc: Text): number {
   const head: string[] = [];
   for (let i = 1; i <= doc.lines; i++) {
     head.push(doc.line(i).text);
     if (i === 1 && head[0].replace(/^﻿/, "").trimEnd() !== "---") break;
     if (i > 1 && /^(---|\.\.\.)\s*$/.test(head[i - 1])) break;
   }
-  const front = frontmatterLines(head);
+  return frontmatterLines(head);
+}
+
+function decorations(state: EditorState, generation: number, config: MediaConfig): DecorationSet {
+  const builder = new RangeSetBuilder<Decoration>();
+  const { doc } = state;
+  const front = frontmatterEnd(doc);
   for (let i = 1; i <= doc.lines; i++) {
     const line = doc.line(i);
     if (i <= front) {
