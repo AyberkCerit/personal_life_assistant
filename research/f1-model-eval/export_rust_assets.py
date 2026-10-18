@@ -9,7 +9,7 @@ import os
 from datetime import date
 from pathlib import Path
 
-os.environ["PROMPT"] = "v3"
+os.environ["PROMPT"] = "v4"
 os.environ["WHICH_DEFAULT"] = "1"
 import run_eval as R  # noqa: E402  (ortam değişkenleri içe aktarmadan önce ayarlanmalı)
 
@@ -24,11 +24,12 @@ def dump(path, obj):
 
 
 def main():
-    dump(CORE / "assets" / "extraction_schema_v3.json", R.SCHEMA)
-    dump(CORE / "assets" / "extraction_prompt_v3.json", {
-        "system": R.SYSTEM_V2,
+    # the parity fixture comes from the v3 model runs (they contain no `repeat`); v4 only adds rules for it
+    dump(CORE / "assets" / "extraction_schema_v4.json", R.SCHEMA)
+    dump(CORE / "assets" / "extraction_prompt_v4.json", {
+        "system": R.SYSTEM_V4,
         "few_shot": [{"user": R.user_msg(r, t), "assistant": json.dumps(o, ensure_ascii=False)}
-                     for r, t, o in R.FEW_SHOT_V2],
+                     for r, t, o in R.FEW_SHOT_V4],
     })
     sample_ref, sample_text = "2026-10-06", "yarın 9da dişçi var"
     dump(CORE / "tests" / "fixtures" / "messages_sample.json",

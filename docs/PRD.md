@@ -73,7 +73,7 @@
 - Uygulama içi disk şifrelemesi (V2'de opsiyonel ayar).
 - Obsidian ile aynı anda düzenlemede canlı eşitleme (dosya izleyici). MVP'de dış değişiklik algılanır ve üzerine yazılmaz (§5.1).
 - Notlardaki `- [ ]` onay kutularının görevlerle iki yönlü eşitlenmesi (V2).
-- Tekrarlayan görevler (V2).
+- Aylık/yıllık ya da "iki haftada bir" gibi karmaşık tekrar kuralları (V2). Haftanın günlerine göre tekrar eden **rutinler** 2026-10-18'de öne alındı (§5.3).
 - Giyilebilir cihaz entegrasyonu, sesli komut.
 - Bulut LLM API'leri.
 - Modelin fine-tuning ile uyarlanması (MVP sonrası, §8.2).
@@ -243,7 +243,7 @@ Kullanıcının serbest metin olarak yazdığı notlardan görev, hatırlatıcı
 - **İnceleme kutusu:** Doğrulamayı geçemeyen çıkarımlar görev panelinde ayrı bir sekmede listelenir; kullanıcı düzeltip onaylar veya reddeder.
 - **Hatırlatıcı** = `notify_at` alanı dolu bir görev. Zamanı gelince Tauri bildirim eklentisiyle Windows bildirimi gösterilir.
 - Bildirimler uygulama tepsideyken çalışır (§5.6). Uygulama kapalıyken kaçırılan hatırlatıcılar açılışta "Kaçırılan hatırlatıcılar" listesinde gösterilir.
-- Tekrarlayan görevler V2'dedir.
+- **Rutinler** (2026-10-18'de V2'den öne alındı): "her pazar, pazartesi… 20:00'de spor" gibi bir cümle tek bir rutin olur (başlık, haftanın günleri, gün başına saat). Görevler listesinde yalnız bugünkü ve sıradaki tekrar görünür; işaretlemek yalnız o günü tamamlar; her rutin gününde hatırlatıcı çalar. Kaçırılan gün birikmez, haftalık sayaçta ("bu hafta 2/5") eksik görünür. Rutinler, görev panelinde ayrı bir sekmede düzenlenir, duraklatılır veya silinir. Aylık/yıllık kurallar, bitiş tarihi ve seri sayımı kapsam dışıdır.
 
 ### 5.4. Sağlık ve Verimlilik Metrikleri
 - **İki giriş yolu:** (a) notlardan otomatik çıkarım (§5.2), (b) küçük bir hızlı giriş paneli.

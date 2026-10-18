@@ -17,10 +17,12 @@ export interface ReviewItem {
   block_text: string | null;
   created_at: string;
 }
-export interface AddedItem { kind: "task" | "metric"; id: string; title: string }
+export interface AddedItem { kind: "task" | "metric" | "routine"; id: string; title: string }
 /** `restore_offer`: a backup to offer before the vault is used (FR-BKP-004/008, FR-LOG-007). */
 export interface VaultInfo { path: string; inbox: string; folders: Folders; restore_offer: RestoreOffer | null }
 export type { Task } from "./tasks";
+export type { Routine, RoutineDay, RoutineInput } from "./routines";
+import type { Routine, RoutineInput } from "./routines";
 import type { Task, TaskList } from "./tasks";
 
 export interface TreeEntry { path: string; name: string; is_dir: boolean; depth: number }
@@ -243,6 +245,10 @@ export const api = {
   editTask: (id: string, input: TaskInput) => call<void>("edit_task", { id, input }),
   setTaskDone: (id: string, done: boolean) => call<void>("set_task_done", { id, done }),
   deleteTask: (id: string) => call<void>("delete_task", { id }),
+  listRoutines: () => call<Routine[]>("list_routines"),
+  editRoutine: (id: string, input: RoutineInput) => call<void>("edit_routine", { id, input }),
+  setRoutinePaused: (id: string, paused: boolean) => call<void>("set_routine_paused", { id, paused }),
+  deleteRoutine: (id: string) => call<void>("delete_routine", { id }),
   undoItem: (kind: string, id: string) => call<void>("undo_item", { kind, id }),
   listReview: () => call<ReviewItem[]>("list_review"),
   acceptReview: (id: string, input: TaskInput) => call<string>("accept_review", { id, input }),

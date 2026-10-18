@@ -1,9 +1,11 @@
 <script lang="ts">
   import { failure, type Failure } from "./i18n";
   import ErrorBanner from "./ui/ErrorBanner.svelte";
-  import { api, type ReviewItem, type Task, type TaskInput } from "./api";
+  import { api, type ReviewItem, type Routine, type Task, type TaskInput } from "./api";
   import { onMount } from "svelte";
   import { filterByOrigin, groupTasks, msUntilNextDay, taskError, todayIso, type OriginFilter, type TaskList } from "./tasks";
+  import RoutineList from "./RoutineList.svelte";
+  import { routineError } from "./routines";
   import TaskRow from "./TaskRow.svelte";
   import { lang, t, tf } from "./i18n";
   import CalendarCheck from "@lucide/svelte/icons/calendar-check";
@@ -18,11 +20,20 @@
   let tabsEl: HTMLDivElement | undefined = $state();
   let indicator = $state({ x: 0, w: 0 });
 
-  // The accent underline slides to the selected tab (spec § 6).
-  $effect(() => {
-    void tab;
+  // The accent underline slides to the selected tab (spec § 6), and follows it when a narrow panel shortens the tabs.
+  function measureTab() {
     const el = tabsEl?.querySelector<HTMLElement>('[aria-selected="true"]');
     if (el) indicator = { x: el.offsetLeft, w: el.offsetWidth };
+  }
+  $effect(() => {
+    void tab;
+    measureTab();
+  });
+  $effect(() => {
+    if (!tabsEl) return;
+    const observer = new ResizeObserver(measureTab);
+    observer.observe(tabsEl);
+    return () => observer.disconnect();
   });
 
   let {
@@ -31,12 +42,13 @@
     onChanged = () => {},
   }: { version: number; onOpenSource: (path: string, blockText: string | null) => void; onChanged?: () => void } = $props();
 
-  type Tab = TaskList | "review";
-  const TABS: Tab[] = ["today", "upcoming", "completed", "review"];
+  type Tab = TaskList | "routines" | "review";
+  const TABS: Tab[] = ["today", "upcoming", "completed", "routines", "review"];
   let tab = $state<Tab>("today");
   let filter = $state<OriginFilter>("all");
   let tasks = $state<Task[]>([]);
   let review = $state<ReviewItem[]>([]);
+  let routines = $state<Routine[]>([]);
   let error = $state<string | Failure | null>(null);
   let newTitle = $state("");
   let newDate = $state("");
@@ -45,11 +57,11 @@
   let reviewForms = $state<Record<string, TaskInput>>({});
   let today = $state(todayIso()); // refreshed on every load and at local midnight
   const labels = $derived({ today: t("tasks.today"), tomorrow: t("tasks.tomorrow"), noDate: t("tasks.noDate"), overdue: t("tasks.overdue") });
-  const groups = $derived(tab === "review" ? [] : groupTasks(filterByOrigin(tasks, filter), tab, today, labels, lang));
+  const groups = $derived(tab === "review" || tab === "routines" ? [] : groupTasks(filterByOrigin(tasks, filter), tab, today, labels, lang));
 
   /** The commands' error codes in the UI language (architecture review A2). */
   function errorText(e: unknown): string | Failure {
-    const { key, detail } = taskError(String(e));
+    const { key, detail } = tab === "routines" ? routineError(String(e)) : taskError(String(e));
     return key === "tasks.error.other" ? failure(e) : tf(key, { detail }); // M6: no English inline
   }
 
@@ -73,6 +85,8 @@
       if (tab === "review") {
         review = await api.listReview();
         reviewForms = Object.fromEntries(review.map((r) => [r.review_id, reviewForms[r.review_id] ?? { title: r.title ?? "", date: "", time: "" }]));
+      } else if (tab === "routines") {
+        routines = await api.listRoutines();
       } else {
         tasks = await api.listTasks(tab);
       }
@@ -121,7 +135,7 @@
 <section class="panel" aria-label={t("tasks.today")}>
   <div class="tabs" role="tablist" tabindex="-1" onkeydown={onTabKey} bind:this={tabsEl}>
     {#each TABS as name (name)}
-      <button role="tab" aria-selected={tab === name} tabindex={tab === name ? 0 : -1} onclick={() => (tab = name)}>
+      <button role="tab" aria-selected={tab === name} tabindex={tab === name ? 0 : -1} title={t(`tasks.${name}` as const)} onclick={() => (tab = name)}>
         {t(`tasks.${name}` as const)}
       </button>
     {/each}
@@ -130,7 +144,15 @@
 
   {#if error}<ErrorBanner {error} />{/if}
 
-  {#if tab !== "review"}
+  {#if tab === "routines"}
+    <RoutineList
+      {routines}
+      onSave={(id, input) => run(() => api.editRoutine(id, input))}
+      onPause={(id, paused) => void run(() => api.setRoutinePaused(id, paused))}
+      onDelete={(id) => void run(() => api.deleteRoutine(id))}
+      {onOpenSource}
+    />
+  {:else if tab !== "review"}
     <div class="tools">
       <label>
         {t("tasks.filter")}
@@ -214,9 +236,11 @@
 
 <style>
   .panel { display: flex; flex-direction: column; gap: var(--space-2); min-width: 0; }
-  .tabs { position: relative; display: flex; gap: 0.125rem; border-bottom: 1px solid var(--color-border); }
+  /* Five tabs fit the 20rem side panel; a narrower one shortens the labels (full text in the title) instead of scrolling. */
+  .tabs { position: relative; display: flex; border-bottom: 1px solid var(--color-border); }
   .tabs button {
-    background: none; border: 0; padding: var(--space-2) var(--space-2); cursor: pointer;
+    flex: 0 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    background: none; border: 0; padding: var(--space-2) var(--space-1); cursor: pointer;
     color: var(--color-text-muted); font-size: var(--text-md);
     transition: color var(--duration-fast) var(--ease-standard);
   }

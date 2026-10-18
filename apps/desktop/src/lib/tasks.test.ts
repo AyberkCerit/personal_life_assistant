@@ -7,7 +7,7 @@ const TODAY = "2026-10-06";
 function task(title: string, date: string | null, extra: Partial<Task> = {}): Task {
   return {
     task_id: title, title, details: null, date, time: null, notify_at: null, status: "open", origin: "manual",
-    note_path: null, block_text: null, source_missing: false, user_modified: false, ...extra,
+    note_path: null, block_text: null, source_missing: false, user_modified: false, routine_id: null, ...extra,
   };
 }
 

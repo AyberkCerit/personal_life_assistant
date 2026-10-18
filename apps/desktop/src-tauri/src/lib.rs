@@ -14,6 +14,7 @@ pub mod model_download;
 pub mod model_paths;
 mod notify;
 pub mod qa_cmds;
+pub mod routine_cmds;
 pub mod scheduler;
 pub mod settings_screen;
 pub mod summary_cmds;
@@ -75,6 +76,10 @@ pub fn run() {
             task_cmds::reject_review,
             task_cmds::reminder_done,
             task_cmds::reminder_snooze,
+            routine_cmds::list_routines,
+            routine_cmds::edit_routine,
+            routine_cmds::set_routine_paused,
+            routine_cmds::delete_routine,
             commands::backup_now,
             commands::backup_list,
             commands::restore_backup,

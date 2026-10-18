@@ -35,6 +35,8 @@ pub struct TaskView {
     pub block_text: Option<String>,
     pub source_missing: bool,
     pub user_modified: bool,
+    /// The routine this task is one day of; `None` for an ordinary task.
+    pub routine_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Deserialize)]
@@ -109,7 +111,7 @@ fn notify_for(date: &Option<String>, time: &Option<String>) -> Option<String> {
 }
 
 const SELECT: &str = "SELECT t.task_id, t.title, t.details, t.date, t.time, t.notify_at, t.status, t.origin,
-                             b.note_path, b.text, t.source_missing, t.user_modified
+                             b.note_path, b.text, t.source_missing, t.user_modified, t.routine_id
                       FROM task t LEFT JOIN block b ON b.block_id = t.block_id";
 
 fn task_row(r: &rusqlite::Row) -> rusqlite::Result<TaskView> {
@@ -126,6 +128,7 @@ fn task_row(r: &rusqlite::Row) -> rusqlite::Result<TaskView> {
         block_text: r.get(9)?,
         source_missing: r.get(10)?,
         user_modified: r.get(11)?,
+        routine_id: r.get(12)?,
     })
 }
 
@@ -206,19 +209,21 @@ pub fn set_done(conn: &Connection, id: &str, done: bool, now: DateTime<FixedOffs
 }
 
 /// FR-TSK-006 (the UI confirms first). An extracted task is rejected so it never comes back (FR-EXT-018).
+/// A routine occurrence is not deleted: it is cancelled, which skips that day and keeps the slot taken.
 pub fn delete_task(conn: &Connection, id: &str, now: DateTime<FixedOffset>) -> Result<(), TaskError> {
-    let origin: Option<String> = conn.query_row("SELECT origin FROM task WHERE task_id = ?1", [id], |r| r.get(0)).optional()?;
-    match origin.as_deref() {
-        None => Err(TaskError::NotFound),
-        Some("extracted") => {
-            reject_item(conn, &ItemRef::Task(id.to_owned()), now)?;
-            Ok(())
-        }
-        Some(_) => {
-            conn.execute("DELETE FROM task WHERE task_id = ?1", [id])?;
-            Ok(())
-        }
+    let found: Option<(String, Option<String>)> =
+        conn.query_row("SELECT origin, routine_id FROM task WHERE task_id = ?1", [id], |r| Ok((r.get(0)?, r.get(1)?))).optional()?;
+    let Some((origin, routine_id)) = found else { return Err(TaskError::NotFound) };
+    if routine_id.is_some() {
+        conn.execute("UPDATE task SET status = 'cancelled', user_modified = 1, updated_at = ?1 WHERE task_id = ?2", params![now.to_rfc3339(), id])?;
+        return Ok(());
     }
+    if origin == "extracted" {
+        reject_item(conn, &ItemRef::Task(id.to_owned()), now)?;
+    } else {
+        conn.execute("DELETE FROM task WHERE task_id = ?1", [id])?;
+    }
+    Ok(())
 }
 
 pub fn list_review(conn: &Connection) -> Result<Vec<ReviewView>, TaskError> {
@@ -452,5 +457,46 @@ mod tests {
         let id = add_task(&conn, &input("Kısa", Some("2026-1-5"), Some("9:5")), now()).unwrap();
         let (date, time): (String, String) = conn.query_row("SELECT date, time FROM task WHERE task_id = ?1", [&id], |r| Ok((r.get(0)?, r.get(1)?))).unwrap();
         assert_eq!((date.as_str(), time.as_str()), ("2026-01-05", "09:05"));
+    }
+
+    fn spor_routine(conn: &Connection) -> String {
+        use crate::routines::{insert_routine, RoutineDay};
+        let days = [crate::extraction::Weekday::Mon, crate::extraction::Weekday::Tue].map(|day| RoutineDay { day, time: Some("20:00".into()) });
+        insert_routine(conn, "Spor", &days, Some("b1"), Some("routine:spor"), NOW).unwrap()
+    }
+    fn monday() -> NaiveDate {
+        NaiveDate::from_ymd_opt(2026, 10, 26).unwrap()
+    }
+    fn status_of(conn: &Connection, id: &str) -> String {
+        conn.query_row("SELECT status FROM task WHERE task_id = ?1", [id], |r| r.get(0)).unwrap()
+    }
+
+    #[test]
+    fn deleting_an_occurrence_skips_that_day_only() {
+        let (_t, conn) = setup();
+        spor_routine(&conn);
+        crate::routines::roll(&conn, monday(), now()).unwrap();
+        let occ = list_tasks(&conn, TaskList::Today, monday()).unwrap().remove(0).task_id;
+        delete_task(&conn, &occ, now()).unwrap();
+        let (status, modified): (String, bool) =
+            conn.query_row("SELECT status, user_modified FROM task WHERE task_id = ?1", [&occ], |r| Ok((r.get(0)?, r.get(1)?))).unwrap();
+        assert_eq!((status.as_str(), modified), ("cancelled", true));
+        assert_eq!(conn.query_row::<i64, _, _>("SELECT count(*) FROM rejection", [], |r| r.get(0)).unwrap(), 0);
+        crate::routines::roll(&conn, monday(), now()).unwrap();
+        assert_eq!(status_of(&conn, &occ), "cancelled", "not recreated the same day");
+        let tuesday: String = conn.query_row("SELECT status FROM task WHERE date = '2026-10-27'", [], |r| r.get(0)).unwrap();
+        assert_eq!(tuesday, "open", "only that day is skipped");
+    }
+
+    #[test]
+    fn a_task_view_names_its_routine() {
+        let (_t, conn) = setup();
+        let routine = spor_routine(&conn);
+        crate::routines::roll(&conn, monday(), now()).unwrap();
+        add_task(&conn, &input("Dişçi", Some("2026-10-26"), None), now()).unwrap();
+        let v = list_tasks(&conn, TaskList::Today, monday()).unwrap();
+        let spor = v.iter().find(|t| t.title == "Spor").unwrap();
+        assert_eq!(spor.routine_id.as_deref(), Some(routine.as_str()));
+        assert_eq!(v.iter().find(|t| t.title == "Dişçi").unwrap().routine_id, None);
     }
 }

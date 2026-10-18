@@ -229,6 +229,10 @@ fn extraction_case(model: &mut ModelHost, case: &Value) -> Result<(Vec<String>, 
         .iter()
         .map(|i| match i {
             ValidItem::Action { title, date, time, reminder } => json!({ "type": if *reminder { "reminder" } else { "task" }, "title": title, "date": date.map(|d| d.to_string()), "time": time.map(|t| t.format("%H:%M").to_string()) }),
+            ValidItem::Routine { title, days, time } => {
+                let codes: Vec<Value> = days.iter().map(|d| serde_json::to_value(d).unwrap()).collect();
+                json!({ "type": "routine", "kind": "routine", "title": title, "days": codes, "time": time.map(|t| t.format("%H:%M").to_string()) })
+            }
             ValidItem::Metric { kind, date, value, exercise, sets, reps, .. } => json!({ "type": "metric", "kind": kind, "date": date.to_string(), "value": value, "exercise": exercise, "sets": sets, "reps": reps }),
         })
         .collect();

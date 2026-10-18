@@ -359,6 +359,13 @@ Pazartesi dişçi var.";
     }
 
     #[test]
+    fn a_weekly_habit_passes_the_guard() {
+        let habit = r#"{"items":[{"type":"task","title":"Spor","when":{"repeat":["sun","mon","wed","thu","fri"],"time":"20:00"}}]}"#;
+        let e = guard_one("Her pazar pazartesi çarşamba perşembe cuma akşam 8'de spora gideceğim.", parse_extraction(habit).unwrap());
+        assert_eq!(e.items.len(), 1);
+    }
+
+    #[test]
     fn tasks_and_other_measurements_pass() {
         let mixed = r#"{"items":[{"type":"task","title":"Dişçi"},{"type":"metric","metric":{"kind":"sleep","value":7,"unit":"h"}}]}"#;
         assert_eq!(guard_one("Yarın dişçi. Programım yoğun, 7 saat uyudum.", parse_extraction(mixed).unwrap()).items.len(), 2);

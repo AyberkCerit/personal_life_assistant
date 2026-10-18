@@ -1,6 +1,7 @@
 <script lang="ts">
   import { tick } from "svelte";
   import type { Task, TaskInput } from "./api";
+  import Repeat from "@lucide/svelte/icons/repeat";
   import Bell from "@lucide/svelte/icons/bell";
   import Trash2 from "@lucide/svelte/icons/trash-2";
   import { aiMark, isOverdue, isReminder } from "./tasks";
@@ -125,6 +126,7 @@
     <div class="body">
       <button class="title" bind:this={titleButton} onclick={startEdit} title={t("tasks.edit")}>{task.title}</button>
       <div class="meta">
+        {#if task.routine_id}<Badge kind="neutral"><Icon icon={Repeat} size="sm" />{t("routines.badge")}</Badge>{/if}
         {#if task.time}<span>{task.time}</span>{/if}
         {#if isReminder(task)}<Icon icon={Bell} size="sm" label={t("tasks.reminderLabel")} />{/if}
         {#if isOverdue(task, today)}<span class="overdue">{t("tasks.overdue")}</span>{/if}

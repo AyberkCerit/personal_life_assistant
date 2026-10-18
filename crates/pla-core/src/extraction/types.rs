@@ -1,4 +1,4 @@
-//! Raw model output, exactly as constrained by the v3 extraction schema (SRS C.3).
+//! Raw model output, exactly as constrained by the v4 extraction schema (SRS C.3).
 
 use serde::{Deserialize, Serialize};
 
@@ -32,6 +32,9 @@ pub struct RawItem {
 #[derive(Debug, Clone, Default, PartialEq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct RawWhen {
+    /// First on purpose: the grammar emits properties in this order (schema v4).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub repeat: Option<Vec<Weekday>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub day_offset: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -189,6 +192,12 @@ mod tests {
         assert_eq!(m.kind, Some(MetricKind::Workout));
         assert_eq!(m.value, Some(110.0));
         assert_eq!(m.unit, Some(Unit::Kg));
+    }
+
+    #[test]
+    fn parses_a_repeat() {
+        let ex = parse_extraction(r#"{"items":[{"type":"task","title":"Spor","when":{"repeat":["sun","mon"],"time":"20:00"}}]}"#).unwrap();
+        assert_eq!(ex.items[0].when.as_ref().unwrap().repeat, Some(vec![Weekday::Sun, Weekday::Mon]));
     }
 
     #[test]

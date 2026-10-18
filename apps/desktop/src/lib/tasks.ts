@@ -14,6 +14,7 @@ export interface Task {
   block_text: string | null;
   source_missing: boolean;
   user_modified: boolean;
+  routine_id: string | null;
 }
 
 export type TaskList = "today" | "upcoming" | "completed";

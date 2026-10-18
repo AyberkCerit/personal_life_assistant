@@ -142,7 +142,9 @@ pub fn week_stats(conn: &Connection, week: Week) -> rusqlite::Result<WeekStats> 
     let (from, to) = day_range(week);
     let titles = |sql: &str, a: &str, b: &str| -> rusqlite::Result<Vec<String>> { conn.prepare(sql)?.query_map([a, b], |r| r.get(0))?.collect() };
     let completed = titles("SELECT title FROM task WHERE status = 'done' AND substr(completed_at, 1, 10) BETWEEN ?1 AND ?2 ORDER BY completed_at", &from, &to)?;
-    let added: i64 = conn.query_row("SELECT count(*) FROM task WHERE substr(created_at, 1, 10) BETWEEN ?1 AND ?2", [&from, &to], |r| r.get(0))?;
+    // A routine's occurrences are made by the app, not added by the user.
+    let added: i64 =
+        conn.query_row("SELECT count(*) FROM task WHERE substr(created_at, 1, 10) BETWEEN ?1 AND ?2 AND routine_id IS NULL", [&from, &to], |r| r.get(0))?;
     let open_late = conn
         .prepare("SELECT title FROM task WHERE status = 'open' AND date BETWEEN ?1 AND ?2 ORDER BY date, time")?
         .query_map([&from, &to], |r| r.get(0))?
@@ -504,6 +506,34 @@ mod tests {
         assert_eq!(stats.open_late, ["Rapor yaz"], "this week's, not every open task ever (final review M3)");
         assert_eq!(stats.next_week, [("2026-10-13".to_owned(), None, "Dişçi".to_owned())]);
         assert_eq!(stats.metrics, [MetricLine { kind: MetricKind::Sleep, this_week: Some(6.5), last_week: Some(8.0) }]);
+    }
+
+    #[test]
+    fn a_missed_routine_day_is_not_still_open_in_the_report() {
+        use crate::routines::{insert_routine, roll, RoutineDay};
+        let (_t, conn) = db();
+        let days = [crate::extraction::Weekday::Mon].map(|day| RoutineDay { day, time: None });
+        insert_routine(&conn, "Spor", &days, None, Some("routine:spor"), "2026-10-26T10:00:00+03:00").unwrap();
+        roll(&conn, d("2026-10-26"), at("2026-10-26 10:00")).unwrap();
+        roll(&conn, d("2026-10-27"), at("2026-10-27 10:00")).unwrap();
+        let status: String = conn.query_row("SELECT status FROM task WHERE date = '2026-10-26'", [], |r| r.get(0)).unwrap();
+        assert_eq!(status, "cancelled");
+        let stats = week_stats(&conn, Week::of(d("2026-10-26"))).unwrap();
+        assert!(stats.open_late.is_empty(), "{:?}", stats.open_late);
+    }
+
+    #[test]
+    fn routine_occurrences_are_not_counted_as_added() {
+        use crate::routines::{insert_routine, roll, RoutineDay};
+        let (_t, conn) = db();
+        let days = [crate::extraction::Weekday::Mon, crate::extraction::Weekday::Wed].map(|day| RoutineDay { day, time: None });
+        insert_routine(&conn, "Spor", &days, None, Some("routine:spor"), "2026-10-26T10:00:00+03:00").unwrap();
+        roll(&conn, d("2026-10-26"), at("2026-10-26 10:00")).unwrap();
+        roll(&conn, d("2026-10-28"), at("2026-10-28 10:00")).unwrap();
+        let input = TaskInput { title: "Fatura öde".into(), details: None, date: Some("2026-10-29".into()), time: None, remind: Some(false) };
+        add_task_as(&conn, &input, "manual", at("2026-10-27 09:00")).unwrap();
+        let stats = week_stats(&conn, Week::of(d("2026-10-26"))).unwrap();
+        assert_eq!(stats.added, 1);
     }
 
     #[test]
