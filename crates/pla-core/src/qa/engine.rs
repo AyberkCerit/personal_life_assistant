@@ -510,6 +510,63 @@ fn repeats(done: &[ToolRecord], tool: &str, args: &Value) -> bool {
     done.iter().any(|r| r.ok && ((r.tool == tool && r.args == *args) || same_task(r)))
 }
 
+/// Whether a message may hold more than one plan: two numbers, two future verbs, or a word that
+/// joins them ("sonra", "then"). Only then the extraction model is asked as well; one plan keeps
+/// the decision model's own call (and the prompt cache).
+fn may_hold_several(question: &str) -> bool {
+    let w = words(question);
+    let mut numbers = 0;
+    let mut previous_digit = false;
+    for c in question.chars() {
+        let digit = c.is_ascii_digit();
+        numbers += usize::from(digit && !previous_digit);
+        previous_digit = digit || (previous_digit && (c == ':' || c == '.'));
+    }
+    let future = w.iter().filter(|x| ["acağım", "eceğim", "acağız", "eceğiz", "acagim", "ecegim", "acagiz", "ecegiz"].iter().any(|e| x.ends_with(e))).count()
+        + w.iter().filter(|x| *x == "will" || *x == "'ll").count();
+    let joined = w.iter().any(|x| ["sonra", "ardından", "ardindan", "ayrıca", "ayrica", "then", "also", "afterwards"].contains(&x.as_str()));
+    numbers >= 2 || future >= 2 || joined
+}
+
+/// Several plans in one message ("yarın annemi arayacağım 8 de sonra da 10 da kahvaltıya gideceğiz"):
+/// the decision model adds the first one only and, in English (the owner's report), while the
+/// extraction model finds them all, titled in the user's words. Its tasks as add_task arguments,
+/// when it finds two or more; `None` leaves the decision model's call as it is.
+fn planned_tasks(model: &mut dyn ChatModel, question: &str, now: DateTime<FixedOffset>, cancel: &AtomicBool) -> Result<Option<Vec<Value>>, LlmError> {
+    let today = now.date_naive();
+    let raw = match model.complete(&crate::extraction::request_body(today, question), cancel) {
+        Err(LlmError::Cancelled) => return Err(LlmError::Cancelled),
+        Err(_) => return Ok(None), // the decision model's call still stands
+        Ok(raw) => raw,
+    };
+    let Ok(extraction) = crate::extraction::parse_extraction(&raw) else { return Ok(None) };
+    let extraction = crate::extraction::guard(question, question, extraction);
+    let settings = crate::extraction::ValidationSettings::default();
+    let tasks: Vec<Value> = extraction
+        .items
+        .iter()
+        .filter_map(|item| match crate::extraction::validate(item, today, &settings) {
+            Ok(crate::extraction::ValidItem::Action { reminder, title, date, time }) => {
+                let mut args = json!({ "title": title });
+                // a time needs a day: "8'de" alone is today, as the decision model reads it
+                let date = date.or(time.map(|_| today));
+                if let Some(d) = date {
+                    args["date"] = Value::String(d.to_string());
+                }
+                if let Some(t) = time {
+                    args["time"] = Value::String(t.format("%H:%M").to_string());
+                    if reminder {
+                        args["remind"] = Value::Bool(true);
+                    }
+                }
+                Some(args)
+            }
+            _ => None,
+        })
+        .collect();
+    Ok((tasks.len() >= 2).then_some(tasks))
+}
+
 /// `[[…]]` targets in `text`, in order, once each.
 pub fn cited(text: &str) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
@@ -559,6 +616,7 @@ pub fn answer(model: &mut dyn ChatModel, env: &ToolEnv<'_>, q: &Question<'_>, ca
     let mut shown: Vec<ToolRecord> = Vec::new(); // as the user sees them
     let mut tool_left = ctx.tool_budget;
     let mut refused_once = false;
+    let mut batched = false; // the extraction model's tasks were added
     let stopped = |shown: &[ToolRecord], partial: String| QaError::Stopped { partial, tools: shown.to_vec() };
     while calls.iter().filter(|c| c.error.is_none()).count() < MAX_CALLS {
         on(Progress::Working(None));
@@ -573,10 +631,40 @@ pub fn answer(model: &mut dyn ChatModel, env: &ToolEnv<'_>, q: &Question<'_>, ca
             // asked again what is done already (one task added three times, a search made twice):
             // as good as answering, so the fallback still gets its turn (eval: "elektrikçiyi aradım")
             Ok(Decision::Call { tool, args }) if repeats(&shown, &tool, &args) => None,
+            // all plans of the message are in already; another add_task would be one of them again,
+            // titled otherwise ("Call mom" beside "Annemi ara")
+            Ok(Decision::Call { tool, .. }) if tool == "add_task" && batched => None,
             Ok(Decision::Call { tool, args }) => Some((tool, args)),
             Ok(Decision::Answer) | Err(_) => None, // the grammar makes Err rare
         };
         let Some((tool, args)) = decided.or_else(|| fallback(question, turns, &shown)) else { break };
+        if tool == "add_task" && !batched && !asks(question) && !shown.iter().any(|r| r.ok && r.tool == "add_task") && may_hold_several(question) {
+            on(Progress::Working(Some(tool.clone())));
+            if let Some(tasks) = planned_tasks(model, question, env.now, cancel).map_err(|_| stopped(&shown, String::new()))? {
+                batched = true;
+                for args in tasks {
+                    let args = without_made_up_time(&tool, args, question);
+                    if cancel.load(std::sync::atomic::Ordering::SeqCst) {
+                        return Err(stopped(&shown, String::new())); // no write after Stop
+                    }
+                    if repeats(&shown, &tool, &args) {
+                        continue;
+                    }
+                    match tools::run(env, &tool, &args) {
+                        Ok(rec) => {
+                            calls.push(trimmed(&rec, &mut tool_left));
+                            on(Progress::Tool(Box::new(rec.clone())));
+                            shown.push(rec);
+                        }
+                        Err(error) => calls.push(ToolRecord { tool: tool.clone(), args, ok: false, result: Value::Null, error: Some(error), undo: None }),
+                    }
+                }
+                if tool_left == 0 {
+                    break;
+                }
+                continue;
+            }
+        }
         let args = with_referred_body(&tool, without_made_up_time(&tool, args, question), question, turns);
         if cancel.load(std::sync::atomic::Ordering::SeqCst) {
             return Err(stopped(&shown, String::new())); // no write after Stop
@@ -668,6 +756,8 @@ mod tests {
         decisions: VecDeque<String>,
         answer: String,
         bodies: Vec<Value>,
+        /// What the extraction model answers (no items unless a test sets it).
+        extraction: String,
     }
 
     impl ChatModel for Scripted {
@@ -676,6 +766,9 @@ mod tests {
                 return Err(LlmError::Cancelled);
             }
             self.bodies.push(body.clone());
+            if body["response_format"]["json_schema"]["name"] == "extraction" {
+                return Ok(self.extraction.clone());
+            }
             Ok(self.decisions.pop_front().unwrap_or_else(|| "{\"tool\":\"answer\"}".into()))
         }
         fn stream(&mut self, body: &Value, cancel: &AtomicBool, on_token: &mut dyn FnMut(&str)) -> Result<String, LlmError> {
@@ -691,7 +784,7 @@ mod tests {
     }
 
     fn scripted(decisions: &[&str], answer: &str) -> Scripted {
-        Scripted { decisions: decisions.iter().map(|s| s.to_string()).collect(), answer: answer.into(), bodies: Vec::new() }
+        Scripted { decisions: decisions.iter().map(|s| s.to_string()).collect(), answer: answer.into(), bodies: Vec::new(), extraction: "{\"items\":[]}".into() }
     }
 
     struct Env {
@@ -1326,5 +1419,61 @@ mod tests {
         assert_eq!(msgs[1]["content"], "Yarın ne işim var?");
         assert_eq!(msgs[2]["content"], "Dişçi.");
         assert!(msgs.last().unwrap()["content"].as_str().unwrap().starts_with("Peki ya cuma?"));
+    }
+
+    #[test]
+    fn several_plans_in_one_message_are_all_added() {
+        // the owner's report: only "Call mom" was added, in English, and the answer named the breakfast
+        let e = env();
+        let tool_env = ToolEnv { vault: &e.vault, pla: &e.pla, cache: &e.cache, now: now(), validation: ValidationSettings::default() };
+        let mut model = scripted(
+            &[
+                "{\"tool\":\"add_task\",\"args\":{\"title\":\"Call mom\",\"date\":\"2026-10-07\",\"time\":\"08:00\"}}",
+                "{\"tool\":\"add_task\",\"args\":{\"title\":\"Call mom\",\"date\":\"2026-10-07\",\"time\":\"08:00\"}}",
+            ],
+            "Ekledim.",
+        );
+        model.extraction = r#"{"items":[{"type":"task","title":"Annemi ara","when":{"day_offset":1,"time":"08:00"}},{"type":"task","title":"Kahvaltıya git","when":{"day_offset":1,"time":"10:00"}}]}"#.into();
+        let q = "yarın annemi arayacağım 8 de sonra da 10 da hep birlikte kahvaltıya gideceğiz";
+        let a = answer(&mut model, &tool_env, &Question { text: q, turns: &[], memory: None, ui_lang: "tr" }, &AtomicBool::new(false), &mut |_| {}).unwrap();
+        let added: Vec<(&str, &str, &str)> = a
+            .tools
+            .iter()
+            .filter(|t| t.ok && t.tool == "add_task")
+            .map(|t| (t.args["title"].as_str().unwrap(), t.args["date"].as_str().unwrap(), t.args["time"].as_str().unwrap()))
+            .collect();
+        assert_eq!(added, [("Annemi ara", "2026-10-07", "08:00"), ("Kahvaltıya git", "2026-10-07", "10:00")]);
+        assert!(a.tools.iter().all(|t| t.undo.is_some()), "each one can be undone");
+        // the answer is written knowing both were added
+        let last = model.bodies.last().unwrap()["messages"].to_string();
+        assert!(last.contains("Kahvaltıya git") && last.contains("Annemi ara"));
+    }
+
+    #[test]
+    fn one_plan_keeps_the_models_own_call() {
+        let e = env();
+        let tool_env = ToolEnv { vault: &e.vault, pla: &e.pla, cache: &e.cache, now: now(), validation: ValidationSettings::default() };
+        let mut model = scripted(&["{\"tool\":\"add_task\",\"args\":{\"title\":\"Annemi ara\",\"date\":\"2026-10-07\"}}"], "Ekledim.");
+        model.extraction = r#"{"items":[{"type":"task","title":"Anne","when":{"day_offset":1}}]}"#.into();
+        let a = answer(
+            &mut model,
+            &tool_env,
+            &Question { text: "yarın annemi arayacağım", turns: &[], memory: None, ui_lang: "tr" },
+            &AtomicBool::new(false),
+            &mut |_| {},
+        )
+        .unwrap();
+        assert_eq!(a.tools.iter().map(|t| t.args["title"].as_str().unwrap()).collect::<Vec<_>>(), ["Annemi ara"]);
+        assert!(!model.bodies.iter().any(|b| b["response_format"]["json_schema"]["name"] == "extraction"), "a single plan asks no second model");
+    }
+
+    #[test]
+    fn several_plans_are_told_apart_from_one() {
+        for q in ["yarın annemi arayacağım 8 de sonra da 10 da kahvaltıya gideceğiz", "dişçi 9'da, toplantı 14'te", "I'll call Ali, then go shopping"] {
+            assert!(may_hold_several(q), "{q}");
+        }
+        for q in ["yarın annemi arayacağım", "Yarın saat 10'da doktor randevum var", "7:30'da toplantı", "saat 3'te olsun"] {
+            assert!(!may_hold_several(q), "{q}");
+        }
     }
 }

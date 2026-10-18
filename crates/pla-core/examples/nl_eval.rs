@@ -171,10 +171,20 @@ fn assistant_case(model: &mut ModelHost, case: &Value) -> Result<(Vec<String>, V
         let mut got: Vec<&str> = called.iter().copied().filter(|t| WRITES.contains(t)).collect();
         let mut wanted: Vec<&str> = writes.iter().filter_map(Value::as_str).collect();
         got.sort();
-        got.dedup();
         wanted.sort();
+        // a tool named twice must run twice ("add_task", "add_task"); once means at least once
+        if wanted.windows(2).all(|p| p[0] != p[1]) {
+            got.dedup();
+        }
         if got != wanted {
             fails.push(format!("writes {got:?}, wanted {wanted:?}"));
+        }
+    }
+    // every task wanted, each matched by an add_task of its own
+    for w in want["adds"].as_array().cloned().unwrap_or_default() {
+        let found = answer.tools.iter().any(|t| t.ok && t.tool == "add_task" && w.as_object().unwrap().iter().all(|(k, v)| arg_matches(k, v, &t.args[k])));
+        if !found {
+            fails.push(format!("no add_task {w}"));
         }
     }
     for r in want["reads"].as_array().cloned().unwrap_or_default() {
