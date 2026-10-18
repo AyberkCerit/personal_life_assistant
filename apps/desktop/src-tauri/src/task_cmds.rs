@@ -70,17 +70,19 @@ pub fn delete_task(state: State<AppState>, id: String) -> Result<(), String> {
 /// Undo of an automatic addition (FR-EXT-015): removed and remembered as rejected (FR-EXT-018).
 #[tauri::command]
 pub fn undo_item(state: State<AppState>, kind: String, id: String) -> Result<(), String> {
-    with_db(&state, |db| {
-        let item = match kind.as_str() {
-            "metric" => ItemRef::Metric(id.clone()),
-            "routine" => ItemRef::Routine(id.clone()),
-            _ => ItemRef::Task(id.clone()),
-        };
-        let tx = write_tx(db)?;
-        reject_item(&tx, &item, now())?;
-        tx.commit()?;
-        Ok(())
-    })
+    with_db(&state, |db| undo(db, &kind, &id))
+}
+
+fn undo(db: &mut Connection, kind: &str, id: &str) -> Result<(), tasks::TaskError> {
+    let item = match kind {
+        "metric" => ItemRef::Metric(id.to_owned()),
+        "routine" => ItemRef::Routine(id.to_owned()),
+        _ => ItemRef::Task(id.to_owned()),
+    };
+    let tx = write_tx(db)?;
+    reject_item(&tx, &item, now())?;
+    tx.commit()?;
+    Ok(())
 }
 
 #[tauri::command]
@@ -151,5 +153,24 @@ mod tests {
         // a database failure is a general one, said by `error.db` (M6 translations)
         assert!(task_code(TaskError::Db(rusqlite::Error::InvalidQuery)).starts_with("db||"));
         assert_eq!(NO_VAULT, "no_vault||", "one spelling in every command module");
+    }
+
+    #[test]
+    fn undoing_a_routine_removes_it_and_reopens_the_copies_it_took_over() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut db = pla_core::db::open_databases(tmp.path()).unwrap().pla;
+        let at = "2026-10-26T10:00:00+03:00";
+        db.execute_batch(&format!(
+            "INSERT INTO block (block_id, note_path, position, text, text_hash, first_seen_at, last_seen_at) VALUES ('b1', 'n.md', 0, 'Spor', 'h', '{at}', '{at}');
+             INSERT INTO routine (routine_id, title, days_json, origin, block_id, item_signature, created_at, updated_at)
+               VALUES ('r1', 'Spor', '[{{\"day\":\"mon\",\"time\":null}}]', 'extracted', 'b1', 'routine:spor', '{at}', '{at}');
+             INSERT INTO task (task_id, title, date, status, origin, block_id, item_signature, superseded_by, created_at, updated_at)
+               VALUES ('copy', 'Spor', '2026-10-26', 'cancelled', 'extracted', 'b1', 'action:spor', 'r1', '{at}', '{at}');"
+        ))
+        .unwrap();
+        undo(&mut db, "routine", "r1").unwrap();
+        let routines: i64 = db.query_row("SELECT count(*) FROM routine", [], |r| r.get(0)).unwrap();
+        let status: String = db.query_row("SELECT status FROM task WHERE task_id = 'copy'", [], |r| r.get(0)).unwrap();
+        assert_eq!((routines, status.as_str()), (0, "open"));
     }
 }
