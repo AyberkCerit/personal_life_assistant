@@ -10,6 +10,7 @@ use std::time::{Duration, Instant};
 
 use chrono::{DateTime, FixedOffset, NaiveDate, TimeDelta};
 use pla_core::jobs::{backup, failures_today, maintenance_due, record_failure, record_success, DAILY, MAX_ATTEMPTS_PER_DAY, WEEKLY_REPORT};
+use pla_core::pipeline::write_tx;
 use pla_core::reminders::{complete, due_reminders, local_minute, mark_notified, mark_seen, snooze, unanswered, DueReminder};
 use pla_core::report::{due_week, Week, WeeklySchedule};
 use pla_core::routines;
@@ -156,7 +157,7 @@ impl Scheduler {
         // Before the reminders: a day's missed occurrences are cancelled first, so they never reach the missed list.
         let today = now.date_naive();
         if self.rolled != Some(today) {
-            match routines::roll(&self.conn, today, now) {
+            match write_tx(&mut self.conn).and_then(|tx| routines::roll(&tx, today, now).and_then(|changed| tx.commit().map(|()| changed))) {
                 Ok(changed) => {
                     self.rolled = Some(today);
                     if changed {

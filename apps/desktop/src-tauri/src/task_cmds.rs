@@ -33,7 +33,7 @@ fn with_db<T>(state: &State<AppState>, f: impl FnOnce(&mut Connection) -> Result
     f(&mut db).map_err(task_code)
 }
 
-fn now() -> chrono::DateTime<chrono::FixedOffset> {
+pub(crate) fn now() -> chrono::DateTime<chrono::FixedOffset> {
     Local::now().fixed_offset()
 }
 
