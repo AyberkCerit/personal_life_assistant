@@ -213,6 +213,17 @@ function mockLinks(cmd: string, args: Record<string, unknown>): unknown {
       }
       return out;
     }
+    case "note_graph": {
+      const paths = [...files.keys()];
+      const edges = new Set<string>();
+      paths.forEach((p, from) =>
+        [...files.get(p)!.matchAll(/(?<!!)\[\[([^\]|#]+)/g)].forEach((m) => {
+          const to = paths.findIndex((q) => fold(title(q)) === fold(m[1].trim()));
+          if (to >= 0 && to !== from) edges.add(`${Math.min(from, to)},${Math.max(from, to)}`);
+        }),
+      );
+      return { nodes: paths.map((path) => ({ path, title: title(path) })), edges: [...edges].map((e) => e.split(",").map(Number)) };
+    }
     case "list_tags": {
       const counts = new Map<string, number>();
       for (const text of files.values()) for (const m of new Set(text.match(/#[\p{L}\p{N}_/-]+/gu) ?? [])) counts.set(fold(m.slice(1)), (counts.get(fold(m.slice(1))) ?? 0) + 1);
@@ -373,6 +384,7 @@ export async function mockBackend<T>(cmd: string, args: Record<string, unknown>)
     case "quick_open":
     case "backlinks":
     case "list_tags":
+    case "note_graph":
     case "open_link":
       return mockLinks(cmd, args) as T;
     case "qa_ask":

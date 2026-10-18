@@ -132,6 +132,7 @@ pub fn run() {
             links_cmds::quick_open,
             links_cmds::backlinks,
             links_cmds::list_tags,
+            links_cmds::note_graph,
             links_cmds::open_link,
             metrics_cmds::metrics_overview,
             metrics_cmds::metrics_summary,

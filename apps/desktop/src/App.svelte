@@ -24,6 +24,8 @@
   import MetricsView from "./lib/metrics/MetricsView.svelte";
   import QuickMetric from "./lib/metrics/QuickMetric.svelte";
   import ChartLine from "@lucide/svelte/icons/chart-line";
+  import Network from "@lucide/svelte/icons/network";
+  import GraphView from "./lib/GraphView.svelte";
   import SearchIcon from "@lucide/svelte/icons/search";
   import Backlinks from "./lib/Backlinks.svelte";
   import QuickOpen from "./lib/QuickOpen.svelte";
@@ -66,7 +68,7 @@
   let vaultInAppData = $state(false);
   let settingsOpen = $state(false);
   // The middle pane: the note editor or the metrics view (SRS S-06).
-  let center = $state<"editor" | "metrics">("editor");
+  let center = $state<"editor" | "metrics" | "graph">("editor");
   let metricKind = $state<MetricKind | null>(null);
   let metricsVersion = $state(0);
   let quickMetric = $state<{ record: MetricRecord | null } | null>(null);
@@ -252,15 +254,17 @@
     }
   }
 
-  async function showMetrics() {
+  async function showCenter(view: "metrics" | "graph") {
     try {
       await editor?.close(); // the note is saved before the editor leaves the middle pane
     } catch (e) {
       error = failure(e);
       return;
     }
-    center = "metrics";
+    center = view;
   }
+
+  const showMetrics = () => showCenter("metrics");
 
   let quickOpener: HTMLElement | null = null;
 
@@ -508,6 +512,9 @@
         <button class:on={center === "metrics"} aria-current={center === "metrics" ? "page" : undefined} onclick={showMetrics}>
           <ChartLine size={16} strokeWidth={1.75} aria-hidden="true" />{t("metrics.title")}
         </button>
+        <button class:on={center === "graph"} aria-current={center === "graph" ? "page" : undefined} onclick={() => showCenter("graph")}>
+          <Network size={16} strokeWidth={1.75} aria-hidden="true" />{t("graph.title")}
+        </button>
         <button class:on={leftView === "search"} title={t("search.open")} onclick={() => (leftView === "search" ? (leftView = "tree") : openSearch())}>
           <SearchIcon size={16} strokeWidth={1.75} aria-hidden="true" />{t("search.title")}
         </button>
@@ -535,6 +542,8 @@
           onEdit={(r) => openQuickMetric(r)}
           onOpenSource={openSource}
         />
+      {:else if center === "graph"}
+        <GraphView {current} onOpen={(p) => void openNote(p)} />
       {:else if current}
         {#key current}
           <Editor bind:this={editor} path={current} {reveal} onSavedCopy={() => void refresh()} onOpenLink={(target) => void followLink(target)} suggest={suggestLinks} onTag={(tag) => void searchTag(tag)} onOpenNote={(p) => void openNote(p)} onOpenCited={(target) => void openCited(target)} />

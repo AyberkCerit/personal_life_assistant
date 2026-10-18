@@ -576,6 +576,58 @@ pub fn backlinks(conn: &Connection, rel: &str) -> rusqlite::Result<Vec<Backlink>
     Ok(out)
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct GraphNode {
+    pub path: String,
+    pub title: String,
+}
+
+/// The whole vault as the graph view draws it: every note, and one edge per pair of notes that link
+/// each other (either way), as indexes into `nodes`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Default)]
+pub struct Graph {
+    pub nodes: Vec<GraphNode>,
+    pub edges: Vec<(usize, usize)>,
+}
+
+/// Every note with the links between them. A link resolves like `resolve_link` (path, then title,
+/// then alias; the shortest path wins a tie), but all of them at once from one read of the names.
+/// Links to notes that do not exist yet and notes linking themselves are left out.
+pub fn graph(conn: &Connection) -> rusqlite::Result<Graph> {
+    use std::collections::{BTreeSet, HashMap};
+    let mut all = names(conn)?;
+    all.sort_by(|a, b| a.0.cmp(&b.0));
+    let mut by_path: HashMap<String, usize> = HashMap::new();
+    let mut by_title: HashMap<String, usize> = HashMap::new();
+    let mut by_alias: HashMap<String, usize> = HashMap::new();
+    let put = |map: &mut HashMap<String, usize>, k: String, i: usize| {
+        let wins = map.get(&k).is_none_or(|&current| (all[i].0.len(), &all[i].0) < (all[current].0.len(), &all[current].0));
+        if wins {
+            map.insert(k, i);
+        }
+    };
+    for (i, (path, title, aliases, _)) in all.iter().enumerate() {
+        put(&mut by_path, normalize_name(path), i);
+        put(&mut by_title, key(title), i);
+        for alias in aliases {
+            put(&mut by_alias, key(alias), i);
+        }
+    }
+    let index_of: HashMap<&str, usize> = all.iter().enumerate().map(|(i, n)| (n.0.as_str(), i)).collect();
+    let mut edges = BTreeSet::new();
+    let mut stmt = conn.prepare("SELECT DISTINCT source_path, target_path FROM link")?;
+    for row in stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))? {
+        let (source, target) = row?;
+        let Some(&from) = index_of.get(source.as_str()) else { continue };
+        let Some(&to) = by_path.get(&target).or_else(|| by_title.get(&target)).or_else(|| by_alias.get(&target)) else { continue };
+        if from != to {
+            edges.insert((from.min(to), from.max(to)));
+        }
+    }
+    let nodes = all.into_iter().map(|(path, title, _, _)| GraphNode { path, title }).collect();
+    Ok(Graph { nodes, edges: edges.into_iter().collect() })
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct QuickHit {
     pub note_path: String,
@@ -813,6 +865,30 @@ mod tests {
         assert!(backlinks(&conn, "notes/PLA2.md").unwrap().is_empty(), "a note linking itself is not a backlink");
         remove_note(&conn, "daily/a.md").unwrap();
         assert!(backlinks(&conn, "notes/PLA.md").unwrap().is_empty());
+    }
+
+    #[test]
+    fn the_graph_joins_notes_that_link_each_other_once() {
+        let (_t, conn) = db();
+        put(&conn, "notes/PLA.md", "---\naliases: [Asistan]\n---\n[[Plan]] ve [[Plan]] bir daha; [[Yok Böyle Not]]; [[PLA]]");
+        put(&conn, "notes/Plan.md", "geri [[pla]]");
+        put(&conn, "projeler/eski/PLA.md", "başka PLA");
+        put(&conn, "daily/a.md", "[[Asistan]] ve [[projeler/eski/PLA]]");
+        put(&conn, "daily/b.md", "bağlantı yok");
+        let g = graph(&conn).unwrap();
+        let path = |i: usize| g.nodes[i].path.as_str();
+        let mut pairs: Vec<(&str, &str)> = g.edges.iter().map(|&(a, b)| (path(a), path(b))).collect();
+        pairs.sort();
+        assert_eq!(
+            g.nodes.iter().map(|n| n.path.as_str()).collect::<Vec<_>>(),
+            vec!["daily/a.md", "daily/b.md", "notes/PLA.md", "notes/Plan.md", "projeler/eski/PLA.md"]
+        );
+        assert_eq!(
+            pairs,
+            vec![("daily/a.md", "notes/PLA.md"), ("daily/a.md", "projeler/eski/PLA.md"), ("notes/PLA.md", "notes/Plan.md")],
+            "both directions are one edge; a missing note and a self link draw nothing"
+        );
+        assert!(graph(&db().1).unwrap().nodes.is_empty());
     }
 
     #[test]
