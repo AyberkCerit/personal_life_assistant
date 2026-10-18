@@ -63,6 +63,14 @@
     void focusAfter(`[data-edit="${id}"]`);
   }
 
+  let confirmButton: HTMLButtonElement | undefined = $state();
+
+  async function askDelete(id: string) {
+    confirmingId = id;
+    await tick();
+    confirmButton?.focus(); // keyboard focus lands on "Delete", as in TaskRow (IR-UI-003)
+  }
+
   function cancelDelete() {
     const id = confirmingId;
     confirmingId = null;
@@ -118,7 +126,7 @@
       {:else if confirmingId === r.routine_id}
         <div class="confirm" role="alertdialog" aria-label={t("routines.delete")} tabindex="-1" onkeydown={(e) => onEscape(e, cancelDelete)}>
           <span>{tf("routines.deleteConfirm", { title: r.title })}</span>
-          <Button variant="danger" icon={Trash2} onclick={() => onDelete(r.routine_id)}>{t("routines.delete")}</Button>
+          <Button variant="danger" icon={Trash2} bind:element={confirmButton} onclick={() => onDelete(r.routine_id)}>{t("routines.delete")}</Button>
           <Button variant="quiet" onclick={cancelDelete}>{t("routines.cancel")}</Button>
         </div>
       {:else}
@@ -142,7 +150,7 @@
             label={r.paused ? t("routines.resume") : t("routines.pause")}
             onclick={() => onPause(r.routine_id, !r.paused)}
           />
-          <IconButton icon={Trash2} label={t("routines.delete")} data-delete={r.routine_id} onclick={() => (confirmingId = r.routine_id)} />
+          <IconButton icon={Trash2} label={t("routines.delete")} data-delete={r.routine_id} onclick={() => void askDelete(r.routine_id)} />
         </span>
       {/if}
     </li>

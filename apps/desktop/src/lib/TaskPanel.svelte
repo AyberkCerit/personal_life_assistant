@@ -20,11 +20,20 @@
   let tabsEl: HTMLDivElement | undefined = $state();
   let indicator = $state({ x: 0, w: 0 });
 
-  // The accent underline slides to the selected tab (spec § 6).
-  $effect(() => {
-    void tab;
+  // The accent underline slides to the selected tab (spec § 6), and follows it when a narrow panel shortens the tabs.
+  function measureTab() {
     const el = tabsEl?.querySelector<HTMLElement>('[aria-selected="true"]');
     if (el) indicator = { x: el.offsetLeft, w: el.offsetWidth };
+  }
+  $effect(() => {
+    void tab;
+    measureTab();
+  });
+  $effect(() => {
+    if (!tabsEl) return;
+    const observer = new ResizeObserver(measureTab);
+    observer.observe(tabsEl);
+    return () => observer.disconnect();
   });
 
   let {
@@ -126,7 +135,7 @@
 <section class="panel" aria-label={t("tasks.today")}>
   <div class="tabs" role="tablist" tabindex="-1" onkeydown={onTabKey} bind:this={tabsEl}>
     {#each TABS as name (name)}
-      <button role="tab" aria-selected={tab === name} tabindex={tab === name ? 0 : -1} onclick={() => (tab = name)}>
+      <button role="tab" aria-selected={tab === name} tabindex={tab === name ? 0 : -1} title={t(`tasks.${name}` as const)} onclick={() => (tab = name)}>
         {t(`tasks.${name}` as const)}
       </button>
     {/each}
@@ -227,9 +236,11 @@
 
 <style>
   .panel { display: flex; flex-direction: column; gap: var(--space-2); min-width: 0; }
-  .tabs { position: relative; display: flex; gap: 0.125rem; border-bottom: 1px solid var(--color-border); }
+  /* Five tabs fit the 20rem side panel; a narrower one shortens the labels (full text in the title) instead of scrolling. */
+  .tabs { position: relative; display: flex; border-bottom: 1px solid var(--color-border); }
   .tabs button {
-    background: none; border: 0; padding: var(--space-2) var(--space-2); cursor: pointer;
+    flex: 0 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    background: none; border: 0; padding: var(--space-2) var(--space-1); cursor: pointer;
     color: var(--color-text-muted); font-size: var(--text-md);
     transition: color var(--duration-fast) var(--ease-standard);
   }
