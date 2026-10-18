@@ -69,12 +69,13 @@ pub fn is_generated(text: &str) -> bool {
     })
 }
 
-/// Hidden paths and the reports/templates folders are never extracted (FR-EXT-001, FR-VLT-017).
+/// Hidden paths and the reports/templates/memory folders are never extracted (FR-EXT-001, FR-VLT-017).
 pub fn is_excluded(rel: &str, folders: &Folders) -> bool {
     let path = Path::new(rel);
     path.components().any(|c| c.as_os_str().to_string_lossy().starts_with('.'))
         || is_under(rel, &folders.reports)
         || is_under(rel, &folders.templates)
+        || is_under(rel, &folders.memory)
         || path.file_stem().is_some_and(|s| {
             let s = s.to_string_lossy();
             s.contains(crate::files::CONFLICT_SUFFIX) || s.contains(crate::files::OLD_CONFLICT_SUFFIX)
@@ -156,6 +157,14 @@ mod tests {
         assert!(is_generated("---\nPLA_GENERATED: \"True\"\n---\n"));
         assert!(!is_generated("---\npla_generated: false\n---\n"));
         assert!(!is_generated("pla_generated: true"));
+    }
+
+    #[test]
+    fn memory_notes_are_never_extracted() {
+        let f = Folders::default();
+        assert!(is_excluded("memory/Durum.md", &f));
+        assert!(is_excluded("Memory/Durum.md", &f));
+        assert!(!is_excluded("notes/memory.md", &f));
     }
 
     #[test]

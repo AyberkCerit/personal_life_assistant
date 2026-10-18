@@ -32,6 +32,7 @@ pub struct Folders {
     pub reports: String,
     pub attachments: String,
     pub templates: String,
+    pub memory: String,
 }
 
 impl Default for Folders {
@@ -43,6 +44,7 @@ impl Default for Folders {
             reports: "reports".into(),
             attachments: "attachments".into(),
             templates: "templates".into(),
+            memory: "memory".into(),
         }
     }
 }
@@ -94,12 +96,12 @@ pub fn open_vault(root: &Path) -> Result<Vault, VaultError> {
     }
 
     let f = &config.folders;
-    for dir in [&f.inbox, &f.daily, &f.notes, &f.reports, &f.attachments, &f.templates] {
+    for dir in [&f.inbox, &f.daily, &f.notes, &f.reports, &f.attachments, &f.templates, &f.memory] {
         if !is_valid_folder(dir) {
             return Err(VaultError::InvalidFolder(dir.clone()));
         }
     }
-    for dir in [&f.inbox, &f.daily, &f.notes, &f.attachments, &f.templates] {
+    for dir in [&f.inbox, &f.daily, &f.notes, &f.attachments, &f.templates, &f.memory] {
         std::fs::create_dir_all(root.join(dir))?;
     }
     std::fs::create_dir_all(root.join(&f.reports).join("weekly"))?;
@@ -467,7 +469,7 @@ mod tests {
         assert!(recorded.contains("yeni yer"), "binding must follow the move: {recorded}");
     }
 
-    const SYSTEM_DIRS: [&str; 8] = ["inbox", "daily", "notes", "reports/weekly", "attachments", "templates", ".pla", ".pla/backup"];
+    const SYSTEM_DIRS: [&str; 9] = ["inbox", "daily", "notes", "reports/weekly", "attachments", "templates", "memory", ".pla", ".pla/backup"];
 
     #[test]
     fn new_vault_gets_folders_and_a_persistent_id() {
@@ -499,6 +501,19 @@ mod tests {
         let written = std::fs::read_to_string(tmp.path().join(".pla/config")).unwrap();
         assert!(written.contains("Günlük"));
         assert!(written.contains(&v.config.vault_id));
+    }
+
+    #[test]
+    fn an_old_config_gets_the_memory_folder() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::create_dir(tmp.path().join(".pla")).unwrap();
+        std::fs::write(tmp.path().join(".pla/config"), "[folders]\ndaily = \"Günlük\"\ninbox = \"Gelen\"\n").unwrap();
+
+        let v = open_vault(tmp.path()).unwrap();
+        assert_eq!(v.config.folders.memory, "memory");
+        assert_eq!(v.config.folders.daily, "Günlük");
+        assert_eq!(v.config.folders.inbox, "Gelen");
+        assert!(tmp.path().join("memory").is_dir());
     }
 
     #[test]
