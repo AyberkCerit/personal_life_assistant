@@ -600,8 +600,8 @@ pub fn cited(text: &str) -> Vec<String> {
 /// M6 performance: the model reads the prompt every question starts with (instructions, calendar,
 /// the last 48 hours) while the user is still typing; the server keeps it (`cache_prompt`) and the
 /// question reads only its own part. On 4 cores that part alone took ~30 s.
-pub fn warm(model: &mut dyn ChatModel, cache: &rusqlite::Connection, now: DateTime<FixedOffset>, recall: &Recall, cancel: &AtomicBool) -> Result<(), QaError> {
-    let ctx = context::shared(cache, now, recall)?;
+pub fn warm(model: &mut dyn ChatModel, cache: &rusqlite::Connection, now: DateTime<FixedOffset>, recall: &Recall, memory_folder: &str, cancel: &AtomicBool) -> Result<(), QaError> {
+    let ctx = context::shared(cache, now, recall, memory_folder)?;
     let body = json!({
         "messages": messages(&ctx, "", &[], now, ""),
         "max_tokens": 1,
@@ -1102,7 +1102,7 @@ mod tests {
         crate::index::index_note(&e.cache, "notes/dün.md", "# Dün\n\nProje toplantısında bütçeyi konuştuk.", ms - 3_600_000, 10).unwrap();
         let tool_env = ToolEnv { vault: &e.vault, pla: &e.pla, cache: &e.cache, now: now(), validation: ValidationSettings::default() };
         let mut model = scripted(&[], "Bütçeyi konuştunuz.");
-        warm(&mut model, &e.cache, now() - chrono::Duration::minutes(2), &Recall::default(), &AtomicBool::new(false)).unwrap();
+        warm(&mut model, &e.cache, now() - chrono::Duration::minutes(2), &Recall::default(), "memory", &AtomicBool::new(false)).unwrap();
         answer(&mut model, &tool_env, &Question { text: "Toplantıda ne konuştuk?", turns: &[], memory: None, recall: None, ui_lang: "tr" }, &AtomicBool::new(false), &mut |_| {}).unwrap();
         let (warmed, asked) = (&model.bodies[0], &model.bodies[1]);
         assert_eq!(warmed["max_tokens"], 1);
@@ -1110,6 +1110,31 @@ mod tests {
         let (w, a) = (warmed["messages"][0]["content"].as_str().unwrap(), asked["messages"][0]["content"].as_str().unwrap());
         let recent_end = w.find("Proje toplantısında bütçeyi konuştuk.").unwrap() + "Proje toplantısında bütçeyi konuştuk.".len();
         assert_eq!(w[..recent_end], a[..recent_end], "the question's prompt starts with what was warmed");
+    }
+
+    #[test]
+    fn warming_with_memory_shares_the_prompt_through_the_memory_block() {
+        let e = env();
+        let ms = now().timestamp_millis();
+        crate::index::index_note(&e.cache, "notes/dün.md", "# Dün\n\nProje toplantısında bütçeyi konuştuk.", ms - 3_600_000, 10).unwrap();
+        let mut recall = Recall::default();
+        recall.about.push(crate::recall::Entry {
+            id: String::new(),
+            text: "Sabah erken kalkar".into(),
+            kind: crate::recall::Kind::Manual,
+            topic: String::new(),
+            source: None,
+            date: chrono::NaiveDate::from_ymd_opt(2026, 10, 1).unwrap(),
+            person: None,
+            notes: Vec::new(),
+        });
+        let tool_env = ToolEnv { vault: &e.vault, pla: &e.pla, cache: &e.cache, now: now(), validation: ValidationSettings::default() };
+        let mut model = scripted(&[], "Bütçeyi konuştunuz.");
+        warm(&mut model, &e.cache, now() - chrono::Duration::minutes(2), &recall, "memory", &AtomicBool::new(false)).unwrap();
+        answer(&mut model, &tool_env, &Question { text: "Toplantıda ne konuştuk?", turns: &[], memory: None, recall: Some(&recall), ui_lang: "tr" }, &AtomicBool::new(false), &mut |_| {}).unwrap();
+        let (w, a) = (model.bodies[0]["messages"][0]["content"].as_str().unwrap(), model.bodies[1]["messages"][0]["content"].as_str().unwrap());
+        let end = w.find("Sabah erken kalkar").expect("memory in the warmed prompt") + "Sabah erken kalkar".len();
+        assert_eq!(w[..end], a[..end], "the question's prompt starts with what was warmed, memory included");
     }
 
     #[test]

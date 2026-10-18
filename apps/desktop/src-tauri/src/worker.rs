@@ -742,7 +742,7 @@ impl Worker {
         // the same snapshot the next question of this conversation reads (a new topic loads again)
         let recall = &*self.recall.get_or_insert_with(|| pla_core::recall::load(&self.vault));
         // only a closing session stops it: a question that comes meanwhile wants it finished
-        let _ = engine::warm(model, &cache, (self.clock)(), recall, &self.stops.cancel);
+        let _ = engine::warm(model, &cache, (self.clock)(), recall, &self.vault.config.folders.memory, &self.stops.cancel);
         let model = self.model_state();
         if model != self.status.model {
             self.status.model = model;

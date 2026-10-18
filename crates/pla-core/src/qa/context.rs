@@ -86,12 +86,13 @@ pub type Memory<'a> = Option<(&'a [f32], &'a str)>;
 /// oldest, the last one that fits is cut. Written oldest to newest: the note being written is the
 /// newest, and saving it then changes only the end of what the model server keeps (M6). Also the
 /// notes that went in whole.
-fn recent_notes(cache: &Connection, now: DateTime<FixedOffset>) -> rusqlite::Result<(String, Vec<String>)> {
+fn recent_notes(cache: &Connection, now: DateTime<FixedOffset>, memory_folder: &str) -> rusqlite::Result<(String, Vec<String>)> {
     let since = now.timestamp_millis() - 48 * 3600 * 1000;
     let mut budget = RECENT_TOKENS;
     let mut blocks: Vec<String> = Vec::new();
     let mut in_recent: Vec<String> = Vec::new();
-    for n in index::recent(cache, since, 40)? {
+    // the active memory files are in the prompt through the memory block already
+    for n in index::recent(cache, since, 40)?.into_iter().filter(|n| !is_active_memory(&n.note_path, memory_folder)) {
         let block = note_block(&n, &n.body);
         let cost = tokens(&block);
         if cost <= budget {
@@ -111,8 +112,8 @@ fn recent_notes(cache: &Connection, now: DateTime<FixedOffset>) -> rusqlite::Res
 
 /// What every question starts with (M6 performance: read ahead when the panel opens): the last 48
 /// hours and the memory block, which the conversation's snapshot keeps the same.
-pub fn shared(cache: &Connection, now: DateTime<FixedOffset>, recall: &Recall) -> rusqlite::Result<Context> {
-    Ok(Context { recent: recent_notes(cache, now)?.0, memory: recall::block(recall), ..Default::default() })
+pub fn shared(cache: &Connection, now: DateTime<FixedOffset>, recall: &Recall, memory_folder: &str) -> rusqlite::Result<Context> {
+    Ok(Context { recent: recent_notes(cache, now, memory_folder)?.0, memory: recall::block(recall), ..Default::default() })
 }
 
 /// Whether `path` is one of the active memory files, which the prompt carries whole: finding them
@@ -132,7 +133,7 @@ pub const LINKED: usize = 3;
 /// question's words (the project note names it, its decisions note answers it). Only the links a
 /// note makes: a hub's backlinks are mostly daily notes that mention it, and taking them too gained
 /// nothing in the retrieval eval.
-fn with_linked(cache: &Connection, question: &str, memory: Memory<'_>, hits: Vec<crate::memory::ChunkHit>, limit: usize) -> rusqlite::Result<Vec<crate::memory::ChunkHit>> {
+fn with_linked(cache: &Connection, question: &str, memory: Memory<'_>, hits: Vec<crate::memory::ChunkHit>, limit: usize, memory_folder: &str) -> rusqlite::Result<Vec<crate::memory::ChunkHit>> {
     let mut seeds: Vec<&str> = Vec::new();
     let mut at = hits.len();
     for (i, h) in hits.iter().enumerate() {
@@ -147,7 +148,7 @@ fn with_linked(cache: &Connection, question: &str, memory: Memory<'_>, hits: Vec
     let mut candidates: Vec<String> = Vec::new();
     for list in index::linked_notes(cache, &seeds, false)? {
         for p in list {
-            if !hits.iter().any(|h| h.note_path == p) && !candidates.contains(&p) {
+            if !hits.iter().any(|h| h.note_path == p) && !candidates.contains(&p) && !is_active_memory(&p, memory_folder) {
                 candidates.push(p);
             }
         }
@@ -193,7 +194,7 @@ pub fn build_with(cache: &Connection, question: &str, turns: &[Turn], now: DateT
         kept.insert(0, t.clone());
     }
 
-    let (recent, in_recent) = recent_notes(cache, now)?;
+    let (recent, in_recent) = recent_notes(cache, now, memory_folder)?;
 
     // FR-MEM-005: chunks from the hybrid search (keywords alone until the embedding model is there)
     let mut found = String::new();
@@ -204,10 +205,11 @@ pub fn build_with(cache: &Connection, question: &str, turns: &[Turn], now: DateT
     let day_share = if days.is_empty() { 0 } else { found_budget / 3 };
     found_budget -= day_share;
     let mut hits = crate::memory::hybrid(cache, question, memory, reports, 12)?;
-    if linked > 0 {
-        hits = with_linked(cache, question, memory, hits, linked)?;
-    }
+    // before the links: a memory file must neither lend its links nor take a seed slot
     hits.retain(|h| !is_active_memory(&h.note_path, memory_folder));
+    if linked > 0 {
+        hits = with_linked(cache, question, memory, hits, linked, memory_folder)?;
+    }
     for h in hits {
         if in_recent.contains(&h.note_path) {
             if !sources.contains(&h.note_path) {
@@ -432,5 +434,33 @@ mod tests {
         assert!(ctx.found.contains("Eski kayak planı"), "{}", ctx.found);
         assert!(!ctx.sources.iter().any(|s| s == "memory/Durum.md"), "{:?}", ctx.sources);
         assert!(ctx.sources.iter().any(|s| s == "memory/Arşiv.md"), "{:?}", ctx.sources);
+    }
+
+    #[test]
+    fn a_memory_file_lends_no_links_and_is_not_brought_in_by_one() {
+        let (_t, conn) = cache();
+        let old = now().timestamp_millis() - 30 * 86_400_000;
+        // the memory file ranks first and links to a note; a note links to the memory file
+        index::index_note(&conn, "memory/Durum.md", "# Durum\n\nkayak kayak kayak planı. Bkz [[Otel]].", old, 10).unwrap();
+        index::index_note(&conn, "notes/Otel.md", "# Otel\n\nDağdaki otel rezervasyonu.", old, 10).unwrap();
+        index::index_note(&conn, "notes/Kayak.md", "# Kayak\n\nKayak planı. Durumu: [[Durum]].", old, 10).unwrap();
+        let ctx = build(&conn, "kayak planı", &[], now(), None, "reports", &Recall::default(), "memory").unwrap();
+        assert!(!ctx.found.contains("otel rezervasyonu"), "the memory file lent its link: {}", ctx.found);
+        assert!(!ctx.sources.iter().any(|s| s.starts_with("memory/")), "{:?}", ctx.sources);
+        assert!(ctx.sources.iter().any(|s| s == "notes/Kayak.md"), "{:?}", ctx.sources);
+    }
+
+    #[test]
+    fn active_memory_files_stay_out_of_the_recent_notes() {
+        let (_t, conn) = cache();
+        let ms = now().timestamp_millis();
+        index::index_note(&conn, "memory/Durum.md", "# Durum\n\nDURUM satırı.", ms - 3_600_000, 10).unwrap();
+        index::index_note(&conn, "memory/Arşiv.md", "# Arşiv\n\nARŞİV satırı.", ms - 3_600_000, 10).unwrap();
+        index::index_note(&conn, "notes/bugün.md", "# Bugün\n\nBUGÜN notu.", ms - 3_600_000, 10).unwrap();
+        let ctx = build(&conn, "ne yaptım", &[], now(), None, "reports", &Recall::default(), "memory").unwrap();
+        assert!(!ctx.recent.contains("DURUM satırı"), "{}", ctx.recent);
+        assert!(ctx.recent.contains("ARŞİV satırı") && ctx.recent.contains("BUGÜN notu"), "{}", ctx.recent);
+        let shared = shared(&conn, now(), &Recall::default(), "memory").unwrap();
+        assert_eq!(shared.recent, ctx.recent);
     }
 }

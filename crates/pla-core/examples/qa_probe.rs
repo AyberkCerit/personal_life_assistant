@@ -92,7 +92,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let _ = today;
 
     println!("-- read-ahead (the panel opens)");
-    pla_core::qa::engine::warm(&mut probe, &dbs.cache, now, &pla_core::recall::Recall::default(), &AtomicBool::new(false))?;
+    pla_core::qa::engine::warm(&mut probe, &dbs.cache, now, &pla_core::recall::Recall::default(), "memory", &AtomicBool::new(false))?;
 
     let env = pla_core::qa::tools::ToolEnv { vault: &vault, pla: &dbs.pla, cache: &dbs.cache, now, validation: Default::default() };
     for q in ["Bu hafta neler yaptım?", "Sınav ne zaman?"] {

@@ -145,7 +145,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let (mut ahead, mut plain, mut with_tool) = (Vec::new(), Vec::new(), Vec::new());
         for i in 0..10 {
             host.stop(); // the panel opens with no model loaded: the read-ahead starts it
-            let (ms, warmed) = time(|| pla_core::qa::engine::warm(&mut host, &dbs.cache, now, &pla_core::recall::Recall::default(), &AtomicBool::new(false)));
+            let (ms, warmed) = time(|| pla_core::qa::engine::warm(&mut host, &dbs.cache, now, &pla_core::recall::Recall::default(), "memory", &AtomicBool::new(false)));
             warmed?;
             ahead.push(ms);
             let (ms, tool) = first_token(&mut host, questions[i % questions.len()]);
