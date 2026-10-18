@@ -101,7 +101,7 @@ pub fn open_vault(root: &Path) -> Result<Vault, VaultError> {
             return Err(VaultError::InvalidFolder(dir.clone()));
         }
     }
-    for dir in [&f.inbox, &f.daily, &f.notes, &f.attachments, &f.templates, &f.memory] {
+    for dir in [&f.inbox, &f.daily, &f.notes, &f.attachments, &f.templates] {
         std::fs::create_dir_all(root.join(dir))?;
     }
     std::fs::create_dir_all(root.join(&f.reports).join("weekly"))?;
@@ -469,7 +469,7 @@ mod tests {
         assert!(recorded.contains("yeni yer"), "binding must follow the move: {recorded}");
     }
 
-    const SYSTEM_DIRS: [&str; 9] = ["inbox", "daily", "notes", "reports/weekly", "attachments", "templates", "memory", ".pla", ".pla/backup"];
+    const SYSTEM_DIRS: [&str; 8] = ["inbox", "daily", "notes", "reports/weekly", "attachments", "templates", ".pla", ".pla/backup"];
 
     #[test]
     fn new_vault_gets_folders_and_a_persistent_id() {
@@ -484,6 +484,7 @@ mod tests {
         }
         assert_eq!(v.config.vault_id.len(), 32);
         assert!(!root.join(".obsidian").exists(), "must never create .obsidian");
+        assert!(!root.join("memory").exists(), "the memory folder is created at its first write");
 
         let again = open_vault(&root).unwrap();
         assert_eq!(again.config.vault_id, v.config.vault_id);
@@ -513,7 +514,7 @@ mod tests {
         assert_eq!(v.config.folders.memory, "memory");
         assert_eq!(v.config.folders.daily, "Günlük");
         assert_eq!(v.config.folders.inbox, "Gelen");
-        assert!(tmp.path().join("memory").is_dir());
+        assert!(!tmp.path().join("memory").exists(), "created at the first write, not at open");
     }
 
     #[test]

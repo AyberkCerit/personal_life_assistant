@@ -25,7 +25,7 @@ pub const PER_RUN: usize = 20;
 const INPUT_TOKENS: usize = 5000;
 
 /// A day's notes: its daily note and the other notes last changed that day (reports and
-/// templates left out, FR-MEM-011), with a signature that changes when any of them does.
+/// templates and memory left out, FR-MEM-011), with a signature that changes when any of them does.
 #[derive(Debug, Clone, PartialEq)]
 pub struct DaySources {
     pub date: NaiveDate,
@@ -34,7 +34,7 @@ pub struct DaySources {
 }
 
 fn excluded(rel: &str, folders: &Folders) -> bool {
-    [&folders.reports, &folders.templates].iter().any(|f| crate::vault::is_under(rel, f))
+    [&folders.reports, &folders.templates, &folders.memory].iter().any(|f| crate::vault::is_under(rel, f))
 }
 
 /// The local day a modification time falls on.
@@ -416,6 +416,20 @@ mod tests {
         index_note(&conn, "notes/Plan.md", "# Plan\n\nKarar.", noon(d("2026-10-06")), 1).unwrap();
         index_note(&conn, "Templates/Günlük.md", "# {{date}}", noon(d("2026-10-06")), 1).unwrap();
         index_note(&conn, "Reports/weekly/w41.md", "# Rapor", noon(d("2026-10-06")), 1).unwrap();
+        let day = sources(&conn, &f, d("2026-10-06")).unwrap();
+        let paths: Vec<&str> = day.notes.iter().map(|n| n.note_path.as_str()).collect();
+        assert_eq!(paths, ["notes/Plan.md"]);
+    }
+
+    #[test]
+    fn memory_notes_are_not_a_source_of_their_day() {
+        let (_t, conn) = cache();
+        let f = Folders::default();
+        index_note(&conn, "notes/Plan.md", "# Plan
+
+Karar.", noon(d("2026-10-06")), 1).unwrap();
+        index_note(&conn, "memory/Durum.md", "# Durum", noon(d("2026-10-06")), 1).unwrap();
+        index_note(&conn, "Memory/Kişi.md", "# Kişi", noon(d("2026-10-06")), 1).unwrap();
         let day = sources(&conn, &f, d("2026-10-06")).unwrap();
         let paths: Vec<&str> = day.notes.iter().map(|n| n.note_path.as_str()).collect();
         assert_eq!(paths, ["notes/Plan.md"]);
