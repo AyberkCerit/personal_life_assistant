@@ -106,8 +106,55 @@ pub fn shared(cache: &Connection, now: DateTime<FixedOffset>) -> rusqlite::Resul
     Ok(Context { recent: recent_notes(cache, now)?.0, ..Default::default() })
 }
 
+/// How many of the best notes found lend their links, and how many linked notes come in
+/// (`research/retrieval-eval`: 4 seeds found nothing 2 did not, for 100 more tokens).
+const SEEDS: usize = 2;
+pub const LINKED: usize = 3;
+
+/// The hits with the notes the best `SEEDS` notes among them link to: of each such note not found
+/// already its closest chunk, the closest `limit` of them, right after the seeds' chunks. A note's
+/// own links are the user's map of what belongs together, and a fact one link away rarely shares the
+/// question's words (the project note names it, its decisions note answers it). Only the links a
+/// note makes: a hub's backlinks are mostly daily notes that mention it, and taking them too gained
+/// nothing in the retrieval eval.
+fn with_linked(cache: &Connection, question: &str, memory: Memory<'_>, hits: Vec<crate::memory::ChunkHit>, limit: usize) -> rusqlite::Result<Vec<crate::memory::ChunkHit>> {
+    let mut seeds: Vec<&str> = Vec::new();
+    let mut at = hits.len();
+    for (i, h) in hits.iter().enumerate() {
+        if !seeds.contains(&h.note_path.as_str()) {
+            if seeds.len() == SEEDS {
+                at = i;
+                break;
+            }
+            seeds.push(&h.note_path);
+        }
+    }
+    let mut candidates: Vec<String> = Vec::new();
+    for list in index::linked_notes(cache, &seeds, false)? {
+        for p in list {
+            if !hits.iter().any(|h| h.note_path == p) && !candidates.contains(&p) {
+                candidates.push(p);
+            }
+        }
+    }
+    let mut extra = Vec::new();
+    for p in &candidates {
+        extra.extend(crate::memory::best_chunk(cache, p, question, memory)?);
+    }
+    extra.sort_by(|a, b| b.score.total_cmp(&a.score)); // stable: ties keep the seeds' order
+    extra.truncate(limit);
+    let mut out = hits;
+    out.splice(at..at, extra);
+    Ok(out)
+}
+
 /// Builds the context for `question` with the earlier `turns` (oldest first).
 pub fn build(cache: &Connection, question: &str, turns: &[Turn], now: DateTime<FixedOffset>, memory: Memory<'_>, reports: &str) -> rusqlite::Result<Context> {
+    build_with(cache, question, turns, now, memory, reports, LINKED)
+}
+
+/// `build` with at most `linked` notes brought in by links (0: none), for measuring what they add.
+pub fn build_with(cache: &Connection, question: &str, turns: &[Turn], now: DateTime<FixedOffset>, memory: Memory<'_>, reports: &str, linked: usize) -> rusqlite::Result<Context> {
     let room = WINDOW - RESERVED - tokens(question).min(700);
     let tool_budget = room / 5;
     let mut found_budget = room - RECENT_TOKENS - tool_budget;
@@ -133,7 +180,11 @@ pub fn build(cache: &Connection, question: &str, turns: &[Turn], now: DateTime<F
     let days = crate::summary::find_days(cache, question, memory, 2)?;
     let day_share = if days.is_empty() { 0 } else { found_budget / 3 };
     found_budget -= day_share;
-    for h in crate::memory::hybrid(cache, question, memory, reports, 12)? {
+    let mut hits = crate::memory::hybrid(cache, question, memory, reports, 12)?;
+    if linked > 0 {
+        hits = with_linked(cache, question, memory, hits, linked)?;
+    }
+    for h in hits {
         if in_recent.contains(&h.note_path) {
             if !sources.contains(&h.note_path) {
                 sources.push(h.note_path.clone()); // already in full above
@@ -230,6 +281,23 @@ mod tests {
         assert!(ctx.found.contains("Bütçe kararı: 40 bin"), "the raw note: {}", ctx.found);
         assert!(!ctx.found.contains("Yönetim kurulu buluştu"), "not the summary");
         assert_eq!(ctx.sources, ["notes/Toplantı.md"]);
+    }
+
+    #[test]
+    fn a_note_found_brings_the_notes_it_links_to() {
+        // the question names the project; the answer sits one link away, in words it does not share
+        let (_t, conn) = cache();
+        let old = now().timestamp_millis() - 30 * 86_400_000;
+        index::index_note(&conn, "notes/PLA.md", "# PLA\n\nYerel asistan projesi. Mimari: [[Kararlar]].", old, 10).unwrap();
+        index::index_note(&conn, "notes/Kararlar.md", "# Kararlar\n\nÖnbellek tek bir SQLite dosyasında.", old, 10).unwrap();
+        index::index_note(&conn, "notes/Mutfak.md", "# Mutfak\n\nMercimek çorbası.", old, 10).unwrap();
+        let q = "PLA'da veritabanı için ne seçtik?";
+        let without = build_with(&conn, q, &[], now(), None, "reports", 0).unwrap();
+        assert!(!without.found.contains("SQLite"), "words alone miss it: {}", without.found);
+        let with = build(&conn, q, &[], now(), None, "reports").unwrap();
+        assert!(with.found.contains("SQLite"), "{}", with.found);
+        assert_eq!(with.sources, ["notes/PLA.md", "notes/Kararlar.md"], "after the note that led to it");
+        assert!(!with.found.contains("Mercimek"), "an unlinked note does not come along");
     }
 
     #[test]

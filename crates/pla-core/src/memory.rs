@@ -348,6 +348,50 @@ pub fn hybrid(conn: &Connection, question: &str, query: Option<(&[f32], &str)>, 
     Ok(hits)
 }
 
+fn from_blob(b: &[u8]) -> Vec<f32> {
+    b.as_chunks::<4>().0.iter().map(|c| f32::from_le_bytes(*c)).collect()
+}
+
+fn cosine(a: &[f32], b: &[f32]) -> f64 {
+    let (mut dot, mut na, mut nb) = (0.0f64, 0.0f64, 0.0f64);
+    for (x, y) in a.iter().zip(b) {
+        dot += f64::from(*x) * f64::from(*y);
+        na += f64::from(*x) * f64::from(*x);
+        nb += f64::from(*y) * f64::from(*y);
+    }
+    if na == 0.0 || nb == 0.0 { 0.0 } else { dot / (na.sqrt() * nb.sqrt()) }
+}
+
+/// The chunk of `note` closest to `question`, its `score` how close: the cosine to `query` when the
+/// chunks have this model's vectors, else the keyword match (bm25, higher is better), else 0 for
+/// the first chunk. Scores of one kind compare across notes; `None` when the note has no chunks.
+pub fn best_chunk(conn: &Connection, note: &str, question: &str, query: Option<(&[f32], &str)>) -> rusqlite::Result<Option<ChunkHit>> {
+    let rows: Vec<(i64, ChunkHit, Option<Vec<u8>>)> = conn
+        .prepare(
+            "SELECT c.chunk_id, c.note_path, coalesce(n.title, ''), c.heading, c.text, coalesce(n.mtime, 0),
+                    (SELECT v.embedding FROM chunk_vec v WHERE v.chunk_id = c.chunk_id AND c.embedded_model = ?2)
+             FROM chunk c LEFT JOIN note_index n ON n.note_path = c.note_path WHERE c.note_path = ?1 ORDER BY c.ord",
+        )?
+        .query_map(params![note, query.map(|q| q.1)], |r| {
+            Ok((r.get(0)?, ChunkHit { note_path: r.get(1)?, title: r.get(2)?, heading: r.get(3)?, text: r.get(4)?, mtime: r.get(5)?, score: 0.0 }, r.get(6)?))
+        })?
+        .collect::<Result<_, _>>()?;
+    let pick = |scored: Vec<(f64, ChunkHit)>| scored.into_iter().max_by(|a, b| a.0.total_cmp(&b.0)).map(|(s, h)| ChunkHit { score: s, ..h });
+    if let Some((vector, _)) = query.filter(|_| rows.iter().any(|r| r.2.is_some())) {
+        return Ok(pick(rows.into_iter().filter_map(|(_, h, v)| Some((cosine(vector, &from_blob(&v?)), h))).collect()));
+    }
+    if let Some(q) = crate::index::or_query(question) {
+        let ranked: Vec<(i64, f64)> = conn
+            .prepare("SELECT rowid, -bm25(chunk_fts, 8.0, 1.0) FROM chunk_fts WHERE chunk_fts MATCH ?1 AND rowid IN (SELECT chunk_id FROM chunk WHERE note_path = ?2)")?
+            .query_map(params![q, note], |r| Ok((r.get(0)?, r.get(1)?)))?
+            .collect::<Result<_, _>>()?;
+        if !ranked.is_empty() {
+            return Ok(pick(rows.into_iter().filter_map(|(id, h, _)| ranked.iter().find(|r| r.0 == id).map(|r| (r.1, h))).collect()));
+        }
+    }
+    Ok(rows.into_iter().next().map(|(_, h, _)| h))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -442,6 +486,22 @@ mod tests {
         // vectors of another model are not compared (FR-MEM-013)
         assert!(hybrid(&conn, "xyz", Some((&q, "other-model")), "reports", 3).unwrap().is_empty());
         assert_eq!(pending(&conn, "other-model").unwrap(), total(&conn).unwrap(), "a new model embeds everything again");
+    }
+
+    #[test]
+    fn the_best_chunk_of_a_note_is_the_closest_by_meaning_then_by_words() {
+        let (_t, conn) = cache();
+        let filler = "Genel notlar, sonra bakılacak. ".repeat(60); // its own chunk
+        crate::index::index_note(&conn, "notes/a.md", &format!("# Giriş\n\n{filler}\n\n# Sağlık\n\nCuma günü dişçi var."), 1, 1).unwrap();
+        let mut model = Topics { calls: 0 };
+        // keywords only: the chunk with the word wins; no word at all: the first chunk
+        assert!(best_chunk(&conn, "notes/a.md", "dişçi ne zaman", None).unwrap().unwrap().text.contains("dişçi"));
+        assert!(best_chunk(&conn, "notes/a.md", "xyz", None).unwrap().unwrap().text.starts_with("Genel"));
+        embed_pending(&conn, &mut model, 8, far(), &AtomicBool::new(false)).unwrap();
+        let q = model.embed(&[query_text("ağız sağlığı")], &AtomicBool::new(false)).unwrap().remove(0);
+        let hit = best_chunk(&conn, "notes/a.md", "ağız sağlığı", Some((&q, "test-topics-1"))).unwrap().unwrap();
+        assert!(hit.text.contains("dişçi") && hit.score > 0.5, "by meaning: {hit:?}");
+        assert!(best_chunk(&conn, "notes/yok.md", "x", None).unwrap().is_none());
     }
 
     #[test]
