@@ -126,7 +126,11 @@ fn system(ctx: &Context, now: DateTime<FixedOffset>) -> String {
         s.push_str(&ctx.found);
     }
     if ctx.recent.is_empty() && ctx.found.is_empty() {
-        s.push_str("\n(No notes matched this question.)\n");
+        if ctx.memory.is_empty() && ctx.people.is_empty() {
+            s.push_str("\n(No notes matched this question.)\n");
+        } else {
+            s.push_str("\n(No notes matched this question. Answer from the memory above if it holds the answer.)\n");
+        }
     }
     s.push_str(&format!("\nTime now: {}.\n", now.format("%H:%M")));
     s
@@ -1036,9 +1040,14 @@ mod tests {
         // nothing to say: no empty headings
         let bare = system(&Context::default(), now());
         assert!(!bare.contains("from memory") && !bare.contains("People mentioned"), "{bare}");
-        // memory without notes: the notes are still missing
+        assert!(bare.contains("
+(No notes matched this question.)
+"), "{bare}");
+        // memory without notes: the notes are missing, but the prompt points to the memory
         let only_memory = system(&Context { memory: ctx.memory.clone(), ..Default::default() }, now());
-        assert!(only_memory.contains("(No notes matched this question.)"), "{only_memory}");
+        assert!(only_memory.contains("(No notes matched this question. Answer from the memory above if it holds the answer.)"), "{only_memory}");
+        let only_people = system(&Context { people: "Deniz: arkadaş".into(), ..Default::default() }, now());
+        assert!(only_people.contains("Answer from the memory above if it holds the answer."), "{only_people}");
     }
 
     #[test]
