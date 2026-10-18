@@ -33,22 +33,22 @@ verilirse ikisi de tutmalıdır.
   olmadığından "kısa cevap" kuralı vakası yazılmadı. Saklı vakalar örnek bankasına Jaccard 0,5
   denetiminden geçti (düzenek başlangıçta denetler; koşu hata vermedi).
 
-## Arama sonucu (EmbeddingGemma, `memory-p1` ve `memory-p1-nomem`)
+## Arama sonucu (EmbeddingGemma, `memory-p1c` ve `memory-p1c-nomem`)
 
-Hafıza bloğu 507 token ve bulunan payın içinden harcanır.
+Bütçe payları: son 48 saat + hafıza bloğu birlikte eski %40'ı oluşturur (`RECENT_TOKENS` + `MEMORY_TOKENS`,
+her biri sabit); bulunan payı hafızadan önceki değerindedir, yalnız anılan kişilerin bloğu kadar küçülür.
+Bu fixture'da hafıza bloğu 507 token.
 
 | Mod | Hafızasız (Bağlı / Doğrudan) | Hafızalı (Bağlı / Doğrudan) | Ort. bulunan token (hafızasız → hafızalı) |
 | --- | --- | --- | --- |
-| kelime | 7/12 · 10/10 | 7/12 · 10/10 | 1143 → 1097 |
-| kelime + bağ | 10/12 · 10/10 | 10/12 · 10/10 | 1328 → 1242 |
-| hibrit | 10/12 · 10/10 | 10/12 · 10/10 | 1316 → 1278 |
-| hibrit + bağ | **11/12** · 10/10 | **10/12** · 10/10 | 1472 → 1341 |
+| kelime | 7/12 · 10/10 | 7/12 · 10/10 | 1143 → 1143 |
+| kelime + bağ | 10/12 · 10/10 | 10/12 · 10/10 | 1328 → 1328 |
+| hibrit | 10/12 · 10/10 | 10/12 · 10/10 | 1316 → 1316 |
+| hibrit + bağ | 11/12 · 10/10 | 11/12 · 10/10 | 1472 → 1472 |
 
-Hafızasız koşu `final` sonucunu (hibrit + bağ 21/22) aynen yeniden üretti. Hafızalı koşuda hibrit + bağ
-**20/22**: `linked-iha-ucuz` bu kez "6.800" olgusunu kaybetti ("9.500" kaldı). Neden: hafıza bloğu bulunan
-payı yaklaşık 130 token daraltıyor ve bağlı not sıranın sonunda kesiliyor. Doğrudan vakalarda gerileme yok.
-Beklenen "≥ 21/22" şartı bu tek vakada karşılanmadı; gerileme bütçe/yer sorusu olarak Aşama 2'den önce
-değerlendirilmeli.
+Hafızalı ve hafızasız koşu aynı: hibrit + bağ 21/22, hafıza bulunan notlara hiçbir şey kaybettirmiyor.
+Doğrudan vakalarda gerileme yok. (`memory-p1.jsonl` ve `memory-p1-nomem.jsonl` dengelemeden önceki
+sonuçlardır; güncel sonuç `memory-p1c*.jsonl`.)
 
 ### `none` vakaları (cevap vault'ta yok, 6 vaka)
 
@@ -56,12 +56,16 @@ değerlendirilmeli.
 | --- | --- | --- |
 | kelime | 443 | 5,0 |
 | kelime + bağ | 600 | 6,0 |
-| hibrit (hafızalı) | 1204 | 12,0 |
-| hibrit + bağ (hafızalı) | 1310 | 12,5 |
-| hibrit + bağ (hafızasız) | 1349 | 13,0 |
+| hibrit | 1204 | 12,0 |
+| hibrit + bağ | 1349 | 13,0 |
 
-Cevabı olmayan sorularda model hibrit modda yaklaşık 12 not ve 1200+ token okuyor; yani boş yere geniş
-bağlam gidiyor. Hafıza bu sayıyı biraz azaltıyor (bütçe payı).
+Hafızalı ve hafızasız aynı. Cevabı olmayan sorularda model hibrit modda yaklaşık 12 not ve 1200+ token okuyor.
+
+### Geçmiş: dengelemenin nedeni
+
+İlk uygulamada hafıza bloğu bulunan payın içinden harcanıyordu (`memory-p1`): hibrit + bağ **20/22**,
+`linked-iha-ucuz` "6.800" olgusunu kaybetti, ort. bulunan token 1472 → 1341. Bu yüzden hafıza son 48
+saat payının yanına, kendi diliminde alındı (karar L, düzeltme M); sonuç yukarıdaki tablo.
 
 ## Duman testi (gerçek model, tek vaka)
 
@@ -81,14 +85,3 @@ Doldurulacak:
 - [ ] `nl_eval -- memory-p1 memory` ve `-- memory-p1-nomem memory --no-memory` (8 + 5 vaka; kapı: hafızasızda geçmeyen, hafızalıda geçen)
 - [ ] Eski 122 vakada gerileme: `nl_eval -- memory-p1-all` ve `-- memory-p1-all-nomem --no-memory`
 - [ ] `qa_probe -- <ref>` hafızalı ve hafızasız: ilk cevap süresi ve `cache_n`
-
-## Dengeleme (hafıza payı son 48 saatten)
-
-Karar L: `RECENT_TOKENS` artık `(WINDOW - RESERVED) * 2 / 5 - MEMORY_TOKENS` (sabit; önbellek için her soruda ve her hafıza içeriğinde aynı). Bulunanlar payı hafıza bloğuyla küçülmez, yalnız anılan kişilerle küçülür. Hafızalı (507 token) `memory-p1b`:
-
-| Mod | Bağlı | Doğrudan | Toplam | Ort. bulunan token |
-| --- | --- | --- | --- | --- |
-| hibrit | 10/12 | 10/10 | 20/22 | 1316 |
-| hibrit + bağ | 11/12 | 10/10 | 21/22 | 1472 |
-
-`none` vakalarında hibrit + bağ: 1349 token, 13,0 not. `linked-iha-ucuz` yeniden geçiyor; hafızasız ölçümle (21/22, 1472) aynı sonuç.
