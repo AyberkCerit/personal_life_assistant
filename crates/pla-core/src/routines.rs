@@ -279,12 +279,15 @@ pub fn set_paused(conn: &Connection, id: &str, paused: bool, today: NaiveDate, n
 }
 
 /// The UI confirms first. The routine is remembered as rejected so extraction does not bring it back.
+/// The one-off copies it took over stay cancelled: only Undo (`reject_item` alone) reopens them.
 pub fn delete_routine(conn: &Connection, id: &str, now: DateTime<FixedOffset>) -> Result<(), RoutineError> {
-    let known: Option<i64> = conn.query_row("SELECT 1 FROM routine WHERE routine_id = ?1", [id], |r| r.get(0)).optional()?;
-    if known.is_none() || !reject_item(conn, &ItemRef::Routine(id.to_owned()), now)? {
-        return Err(RoutineError::NotFound);
-    }
-    Ok(())
+    atomically(conn, "delete_routine", || {
+        conn.execute("UPDATE task SET superseded_by = NULL WHERE superseded_by = ?1", [id])?;
+        if !reject_item(conn, &ItemRef::Routine(id.to_owned()), now)? {
+            return Err(RoutineError::NotFound);
+        }
+        Ok(())
+    })
 }
 
 #[cfg(test)]
