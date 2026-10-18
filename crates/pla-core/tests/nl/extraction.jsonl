@@ -42,3 +42,7 @@
 {"id":"hold-pazar","cat":"routine-holdout","text":"Her cumartesi ve pazar saat 10'da semt pazarına gidiyorum.","expect":{"items":[{"type":"routine","days":["sat","sun"],"time":"10:00"}]}}
 {"id":"hold-iki-gun","cat":"routine-holdout","text":"Yarın ve cuma günü spora gideceğim.","expect":{"none_of":["routine"]}}
 {"id":"hold-her-sey","cat":"routine-holdout","text":"Her şey yolunda, bugün harika geçti.","expect":{"empty":true}}
+{"id": "dbg-iki-cumle", "cat": "debug", "text": "Her pazar pazartesi çarşamba perşembe cuma akşam 8 de spora gideceğim.Her akşam yatmadan ingilizce kelime tekrarı yapacağım.", "expect": {"items": [{"type": "routine", "time": "20:00"}, {"type": "routine", "days": ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]}]}}
+{"id": "dbg-iki-cumle-bosluk", "cat": "debug", "text": "Her pazar pazartesi çarşamba perşembe cuma akşam 8 de spora gideceğim. Her akşam yatmadan ingilizce kelime tekrarı yapacağım.", "expect": {"items": [{"type": "routine", "time": "20:00"}, {"type": "routine", "days": ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]}]}}
+{"id": "dbg-kelime", "cat": "debug", "text": "Her akşam yatmadan ingilizce kelime tekrarı yapacağım.", "expect": {"items": [{"type": "routine", "days": ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]}]}}
+{"id": "dbg-anne-not", "cat": "debug", "text": "yarın annemi arayacağım 8 de sonra da 10 da hep birlikte kahvaltıya gideceğiz", "expect": {"items": [{"type": "task", "time": "08:00"}, {"type": "task", "time": "10:00"}]}}

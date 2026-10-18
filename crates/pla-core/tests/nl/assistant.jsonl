@@ -92,3 +92,4 @@
 {"id":"heldout-kutuphane","cat":"heldout","q":"bugün kütüphanede veri tabanları çalıştım, normalizasyonu bitirdim","expect":{"lang":"tr","writes":[],"suggest":true}}
 {"id":"heldout-gym-closed","cat":"heldout","q":"spor salonu bayramda kapalıymış, öğrendim","expect":{"lang":"tr","writes":[],"suggest":true}}
 {"id":"heldout-selam-hal","cat":"heldout","q":"hey, ne var ne yok","expect":{"lang":"tr","writes":[],"suggest":false}}
+{"id": "dbg-anne", "cat": "debug", "q": "yarın annemi arayacağım 8 de sonra da 10 da hep birlikte kahvaltıya gideceğiz", "expect": {"lang": "tr", "writes": ["add_task"]}}
