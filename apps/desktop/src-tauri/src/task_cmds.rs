@@ -71,7 +71,11 @@ pub fn delete_task(state: State<AppState>, id: String) -> Result<(), String> {
 #[tauri::command]
 pub fn undo_item(state: State<AppState>, kind: String, id: String) -> Result<(), String> {
     with_db(&state, |db| {
-        let item = if kind == "metric" { ItemRef::Metric(id.clone()) } else { ItemRef::Task(id.clone()) };
+        let item = match kind.as_str() {
+            "metric" => ItemRef::Metric(id.clone()),
+            "routine" => ItemRef::Routine(id.clone()),
+            _ => ItemRef::Task(id.clone()),
+        };
         let tx = write_tx(db)?;
         reject_item(&tx, &item, now())?;
         tx.commit()?;

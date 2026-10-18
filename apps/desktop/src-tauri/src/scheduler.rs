@@ -8,10 +8,11 @@ use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
-use chrono::{DateTime, FixedOffset, TimeDelta};
+use chrono::{DateTime, FixedOffset, NaiveDate, TimeDelta};
 use pla_core::jobs::{backup, failures_today, maintenance_due, record_failure, record_success, DAILY, MAX_ATTEMPTS_PER_DAY, WEEKLY_REPORT};
 use pla_core::reminders::{complete, due_reminders, local_minute, mark_notified, mark_seen, snooze, unanswered, DueReminder};
 use pla_core::report::{due_week, Week, WeeklySchedule};
+use pla_core::routines;
 use rusqlite::Connection;
 use serde::Serialize;
 
@@ -108,11 +109,13 @@ pub struct Scheduler {
     weekly: Option<(PathBuf, Arc<Mutex<WeeklySchedule>>)>,
     /// The report last asked for, and when: not asked again while it is being written.
     asked: Option<(Week, DateTime<FixedOffset>)>,
+    /// The day the routines were last rolled to: rolled again when the date changes.
+    rolled: Option<NaiveDate>,
 }
 
 impl Scheduler {
     pub fn new(vault_root: PathBuf, conn: Connection, notifier: Box<dyn Notifier>, probe: Box<dyn SystemProbe>, clock: Clock) -> Self {
-        Self { vault_root, conn, notifier, probe, clock, pending: Arc::default(), every: Duration::from_secs(30), weekly: None, asked: None }
+        Self { vault_root, conn, notifier, probe, clock, pending: Arc::default(), every: Duration::from_secs(30), weekly: None, asked: None, rolled: None }
     }
 
     /// The weekly report (FR-SCH-007): written into `dir` (`<vault>/reports/weekly`) on `schedule`.
@@ -150,6 +153,20 @@ impl Scheduler {
 
     pub fn tick(&mut self) {
         let now = (self.clock)();
+        // Before the reminders: a day's missed occurrences are cancelled first, so they never reach the missed list.
+        let today = now.date_naive();
+        if self.rolled != Some(today) {
+            match routines::roll(&self.conn, today, now) {
+                Ok(changed) => {
+                    self.rolled = Some(today);
+                    if changed {
+                        self.notifier.tasks_changed();
+                    }
+                }
+                // not marked as rolled: tried again on the next tick, and the reminders go on
+                Err(e) => crate::applog::error(&format!("rolling routines failed: {e}")),
+            }
+        }
         if let Ok(due) = due_reminders(&self.conn, now) {
             let late = local_minute(now - TimeDelta::minutes(LATE_AFTER_MINUTES));
             // Marked before anyone hears of it: the banner asks for the list as soon as the event comes.
@@ -657,5 +674,83 @@ mod tests {
         let started = std::time::Instant::now();
         drop(handle);
         assert!(started.elapsed() < Duration::from_secs(2));
+    }
+
+    fn add_spor(r: &Rig) {
+        // Sunday, Monday, Wednesday, Thursday, Friday at 20:00
+        let days = ["sun", "mon", "wed", "thu", "fri"].map(|d| serde_json::json!({"day": d, "time": "20:00"}));
+        r.sched
+            .conn
+            .execute(
+                "INSERT INTO routine (routine_id, title, days_json, origin, created_at, updated_at) VALUES ('r1', 'Spor', ?1, 'extracted', 't', 't')",
+                [serde_json::to_string(&days).unwrap()],
+            )
+            .unwrap();
+    }
+
+    fn status_on(r: &Rig, date: &str) -> String {
+        r.sched.conn.query_row("SELECT status FROM task WHERE routine_id = 'r1' AND date = ?1", [date], |x| x.get(0)).unwrap()
+    }
+
+    fn open_dates(r: &Rig) -> Vec<String> {
+        let mut stmt = r.sched.conn.prepare("SELECT date FROM task WHERE routine_id = 'r1' AND status = 'open' ORDER BY date").unwrap();
+        stmt.query_map([], |x| x.get(0)).unwrap().collect::<Result<_, _>>().unwrap()
+    }
+
+    fn changed_count(r: &Rig) -> usize {
+        r.seen().iter().filter(|s| *s == "changed").count()
+    }
+
+    #[test]
+    fn midnight_cancels_yesterdays_occurrence_and_opens_todays() {
+        let mut r = rig("2026-10-26T23:59:00+03:00"); // Monday
+        add_spor(&r);
+        r.walk("2026-10-27T00:01:00+03:00");
+        assert_eq!(status_on(&r, "2026-10-26"), "cancelled");
+        r.walk("2026-10-28T00:01:00+03:00");
+        assert_eq!(open_dates(&r), ["2026-10-28", "2026-10-29"]);
+        assert!(changed_count(&r) >= 2, "the panel hears of each day change");
+    }
+
+    #[test]
+    fn the_roll_runs_once_a_day_and_only_a_change_is_announced() {
+        let mut r = rig("2026-10-26T09:00:00+03:00");
+        add_spor(&r);
+        r.at("2026-10-26T09:00:00+03:00");
+        assert_eq!(changed_count(&r), 1, "first tick opens today's and the next");
+        r.walk("2026-10-26T09:05:00+03:00");
+        assert_eq!(changed_count(&r), 0, "same day: not rolled again");
+    }
+
+    #[test]
+    fn days_spent_closed_do_not_flood_the_missed_list() {
+        // rolled on Monday 26, the app opens on Friday 30 at 22:00
+        let mut r = rig("2026-10-26T09:00:00+03:00");
+        add_spor(&r);
+        r.at("2026-10-26T09:00:00+03:00");
+        r.seen();
+        *r.clock.lock().unwrap() = at("2026-10-30T22:00:00+03:00");
+        let mut fresh = Scheduler::new(
+            r.vault.clone(),
+            Connection::open(r._tmp.path().join(".data/pla.db")).unwrap(),
+            Box::new(Seen::default()),
+            Box::new(Probe(Arc::clone(&r.probe))),
+            Box::new({
+                let c = Arc::clone(&r.clock);
+                move || *c.lock().unwrap()
+            }),
+        );
+        fresh.tick();
+        let titles: Vec<String> = fresh.pending().current(&fresh.conn).missed.into_iter().map(|m| m.title).collect();
+        assert_eq!(titles, ["Spor"], "only today's 20:00, not Monday's or Wednesday's");
+    }
+
+    #[test]
+    fn a_failing_roll_does_not_stop_reminders() {
+        let mut r = rig("2026-10-26T09:00:00+03:00");
+        r.remind("İlaç", "2026-10-26", "09:01");
+        r.sched.conn.execute_batch("DROP TABLE routine").unwrap();
+        r.walk("2026-10-26T09:01:10+03:00");
+        assert_eq!(r.seen(), vec!["reminder İlaç"]);
     }
 }
