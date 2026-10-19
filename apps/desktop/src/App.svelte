@@ -75,6 +75,9 @@
   // Owner decision (2026-10-07): the assistant is the right panel's first tab and its default.
   let sideTab = $state<"assistant" | "tasks" | "links">("assistant");
   let assistant: ReturnType<typeof AssistantPanel> | undefined = $state();
+  /** Settings > AI: the assistant's own name, shown on its tab ("" = the default title). */
+  let assistantName = $state("");
+  const loadAssistantName = () => void api.settingsGet().then((v) => (assistantName = v.persona.name)).catch(() => {});
   let quickOpen = $state(false);
   let treeDialog = $state(false); // a tree dialog (move, delete, template…) is open
   let memory = $state<{ pending: number; total: number } | null>(null); // FR-MEM-003 progress
@@ -190,6 +193,7 @@
 
   function closeSettings() {
     settingsOpen = false;
+    loadAssistantName();
     // A language switch re-renders the app, so the element that opened the window may be gone.
     const back = settingsOpener?.isConnected ? settingsOpener : document.querySelector<HTMLElement>(".status .end button");
     back?.focus();
@@ -404,6 +408,7 @@
     const unPaused = api.onPausedChanged((p) => (status = { ...status, paused: p }));
     const unModel = api.onModelDownload((s) => (modelDownload = s));
     const unSettings = api.onOpenSettings(openSettings);
+    loadAssistantName();
     // FR-SCH-007: the weekly report's notification opens the report
     // (only in the vault it was written in: another may be open since, final review M6)
     const unOpen = api.onOpenNote((note) => {
@@ -547,7 +552,7 @@
       <!-- owner choice B: one segmented control; the assistant segment is wider, with an icon -->
       <div class="segments" role="tablist" aria-label={t("links.panel")}>
         <button role="tab" class="ai" aria-selected={sideTab === "assistant"} class:on={sideTab === "assistant"} title={t("qa.open")} onclick={openAssistant}>
-          <Sparkles size={14} strokeWidth={2} aria-hidden="true" />{t("qa.title")}
+          <Sparkles size={14} strokeWidth={2} aria-hidden="true" /><span class="ai-name">{assistantName || t("qa.title")}</span>
         </button>
         <button role="tab" aria-selected={sideTab === "tasks"} class:on={sideTab === "tasks"} onclick={() => (sideTab = "tasks")}>{t("links.tab.tasks")}</button>
         <button role="tab" aria-selected={sideTab === "links"} class:on={sideTab === "links"} onclick={() => (sideTab = "links")}>{t("links.tab.links")}</button>
@@ -558,6 +563,7 @@
             bind:this={assistant}
             modelMissing={status.model === "not_installed"}
             paused={status.paused}
+            {assistantName}
             onOpenNote={(p) => void openNote(p)}
             onOpenLink={(target) => void openCited(target)}
             onShowModel={() => (showModel = true)}
@@ -611,6 +617,7 @@
   .segments button.on { color: var(--color-text); background: var(--color-surface-selected); }
   .segments button.ai { color: var(--color-accent); font-weight: 600; }
   .segments button.ai.on { background: var(--color-accent-subtle); color: var(--color-accent); }
+  .ai-name { overflow: hidden; text-overflow: ellipsis; }
   .segments button:focus-visible { outline: 2px solid var(--color-accent); outline-offset: -2px; }
   .tab-body { flex: 1; min-height: 0; display: flex; flex-direction: column; }
   .tab-body[hidden] { display: none; }

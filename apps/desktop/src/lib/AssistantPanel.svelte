@@ -18,6 +18,7 @@
   let {
     modelMissing,
     paused = false,
+    assistantName = "",
     onOpenNote,
     onOpenLink,
     onShowModel,
@@ -25,6 +26,8 @@
     modelMissing: boolean;
     /** Background AI paused: no read-ahead (and none counted, so it comes once resumed). */
     paused?: boolean;
+    /** The name the user gave the assistant ("" = the default title). */
+    assistantName?: string;
     onOpenNote: (path: string) => void;
     onOpenLink: (target: string) => void;
     onShowModel: () => void;
@@ -161,7 +164,7 @@
 </script>
 
 <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-<div class="assistant" role="region" aria-label={t("qa.title")} onkeydown={panelKey}>
+<div class="assistant" role="region" aria-label={assistantName || t("qa.title")} onkeydown={panelKey}>
     <header>
       <Button variant="quiet" onclick={startTopic} disabled={newTopic} title={t("qa.newTopicHint")}>{t("qa.newTopic")}</Button>
       <IconButton icon={Trash} label={t("qa.clear")} onclick={() => (confirmClear = true)} disabled={turns.length === 0 || live !== null} />

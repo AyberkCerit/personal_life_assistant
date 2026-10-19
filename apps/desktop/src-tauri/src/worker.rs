@@ -735,7 +735,7 @@ impl Worker {
         let Some(model) = self.extractor.as_mut().and_then(|x| x.chat_model()) else { return };
         let Ok(cache) = pla_core::db::connect(cache_path) else { return };
         // only a closing session stops it: a question that comes meanwhile wants it finished
-        let _ = engine::warm(model, &cache, (self.clock)(), &self.stops.cancel);
+        let _ = engine::warm(model, &cache, &crate::qa_cmds::persona(), (self.clock)(), &self.stops.cancel);
         let model = self.model_state();
         if model != self.status.model {
             self.status.model = model;
@@ -783,7 +783,7 @@ impl Worker {
         let result = engine::answer(
             model,
             &env,
-            &engine::Question { text: &question, turns: &turns, memory: memory_arg, ui_lang: crate::notify::ui_lang() },
+            &engine::Question { text: &question, turns: &turns, memory: memory_arg, ui_lang: crate::notify::ui_lang(), persona: &crate::qa_cmds::persona() },
             &cancel,
             &mut |p| {
                 let event = match p {

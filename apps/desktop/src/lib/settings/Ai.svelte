@@ -4,7 +4,7 @@
   import { onMount } from "svelte";
   import FolderOpen from "@lucide/svelte/icons/folder-open";
   import Trash2 from "@lucide/svelte/icons/trash-2";
-  import { api, type ModelStatus } from "../api";
+  import { api, type ModelStatus, type Persona, type PersonaKey } from "../api";
   import { lang, t, tf } from "../i18n";
   import { formatBytes } from "../modelText";
   import { describeError } from "../settings";
@@ -23,6 +23,7 @@
   let error = $state<string | Failure | null>(null);
 
   let memoryStatus = $state<MemoryStatus | null>(null);
+  let persona = $state<Persona | null>(null);
 
   async function refresh() {
     status = await api.modelStatus();
@@ -53,9 +54,20 @@
     }
   }
 
+  /** Saved as soon as the field is left; the field shows the text as it was kept (one line, 40 characters). */
+  async function setPersona(key: PersonaKey, field: HTMLInputElement | HTMLSelectElement) {
+    await act(async () => {
+      persona = (await api.settingsSet(key, field.value)).persona;
+      field.value = key === "assistant_name" ? persona.name : key === "user_address" ? persona.address : persona.formality;
+    });
+  }
+
   onMount(() => {
     void refresh();
-    void api.settingsGet().then((v) => (paused = v.paused));
+    void api.settingsGet().then((v) => {
+      paused = v.paused;
+      persona = v.persona;
+    });
     const unChanged = api.onModelChanged(() => {
       notice = null;
       void refresh();
@@ -104,6 +116,21 @@
 <Row label={t("settings.ai.pause")} hint={t("settings.ai.pause.hint")}>
   <Checkbox checked={paused} label={t("settings.ai.pause")} hideLabel onchange={(on) => void act(() => api.setPaused(on))} />
 </Row>
+{#if persona}
+  <h3 class="sub">{t("settings.ai.persona")}</h3>
+  <Row label={t("settings.ai.name")} hint={t("settings.ai.name.hint")} forId="set-ai-name">
+    <input id="set-ai-name" maxlength="40" placeholder="PLA" value={persona.name} onchange={(e) => void setPersona("assistant_name", e.currentTarget)} />
+  </Row>
+  <Row label={t("settings.ai.address")} hint={t("settings.ai.address.hint")} forId="set-ai-address">
+    <input id="set-ai-address" maxlength="40" placeholder={t("settings.ai.address.placeholder")} value={persona.address} onchange={(e) => void setPersona("user_address", e.currentTarget)} />
+  </Row>
+  <Row label={t("settings.ai.formality")} hint={t("settings.ai.formality.hint")} forId="set-ai-formality">
+    <select id="set-ai-formality" value={persona.formality} onchange={(e) => void setPersona("formality", e.currentTarget)}>
+      <option value="informal">{t("settings.ai.formality.informal")}</option>
+      <option value="formal">{t("settings.ai.formality.formal")}</option>
+    </select>
+  </Row>
+{/if}
 {#if error}<ErrorBanner {error} />{/if}
 
 <style>
@@ -116,6 +143,7 @@
   p { margin: 0 0 var(--space-2); font-size: var(--text-md); }
   .hint { color: var(--color-text-muted); }
   .sub { margin: var(--space-3) 0 0; font-size: var(--text-md); font-weight: 600; }
+  input { width: 14rem; }
   .confirm { padding: var(--space-2) 0; }
   .actions { display: flex; gap: var(--space-2); padding-bottom: var(--space-3); border-bottom: 1px solid var(--color-border); }
 </style>

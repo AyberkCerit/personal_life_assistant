@@ -51,6 +51,8 @@ pub struct Context {
     pub sources: Vec<String>,
     /// Tokens left for tool results (FR-MEM-009: 20%).
     pub tool_budget: usize,
+    /// The assistant's name and how it addresses the user (Settings > AI).
+    pub persona: crate::settings::Persona,
 }
 
 fn stamp(ms: i64) -> String {
@@ -181,7 +183,7 @@ pub fn build(cache: &Connection, question: &str, turns: &[Turn], now: DateTime<F
             }
         }
     }
-    Ok(Context { recent, found, turns: kept, sources, tool_budget })
+    Ok(Context { recent, found, turns: kept, sources, tool_budget, ..Default::default() })
 }
 
 #[cfg(test)]
