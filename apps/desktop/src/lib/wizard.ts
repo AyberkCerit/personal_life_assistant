@@ -1,6 +1,6 @@
 // First-run wizard rules that need no backend (FR-SET-001…009).
 import type { DownloadState, VaultInfo } from "./api";
-import type { Key } from "./i18n";
+import { splitError, type Key } from "./i18n";
 
 export const STEPS = ["language", "vault", "model", "done"] as const;
 export type Step = (typeof STEPS)[number];
@@ -43,9 +43,8 @@ const REASONS: Record<string, Key> = { access_denied: "wizard.reason.access_deni
 
 /** Reads `setup_vault`'s `<code>|<path>|<reason>` errors; anything else is shown as it came. */
 export function setupError(err: string): { key: Key; path: string; reason: string; reasonKey?: Key } {
-  const [code, path = "", ...rest] = err.split("|");
+  const { code, detail: path, reason } = splitError(err);
   if (code === "network" || code === "not_folder" || code === "not_writable" || code === "relative" || code === "app_data") {
-    const reason = rest.join("|");
     return reason in REASONS ? { key: `wizard.error.${code}` as Key, path, reason: "", reasonKey: REASONS[reason] } : { key: `wizard.error.${code}` as Key, path, reason };
   }
   return { key: "wizard.error.other", path: "", reason: err };

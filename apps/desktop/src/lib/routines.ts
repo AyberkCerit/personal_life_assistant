@@ -1,5 +1,5 @@
 // Weekly routines for the Routines tab (spec: docs/superpowers/specs/2026-10-18-rutinler-design.md). No framework code.
-import { tf, tIn, type Key, type Lang } from "./i18n";
+import { splitError, tf, tIn, type Key, type Lang } from "./i18n";
 
 export type DayKey = "mon" | "tue" | "wed" | "thu" | "fri" | "sat" | "sun";
 /** ISO week order, Monday first. */
@@ -46,7 +46,7 @@ const SHARED_CODES = ["bad_title", "bad_time", "not_found"];
 
 /** Reads the routine commands' `<code>|<detail>|<reason>` errors; task codes reuse the task texts. */
 export function routineError(err: string): { key: Key; detail: string } {
-  const [code, detail = ""] = err.split("|");
+  const { code, detail } = splitError(err);
   if (code === "no_days") return { key: "routines.error.no_days", detail };
   if (SHARED_CODES.includes(code)) return { key: `tasks.error.${code}` as Key, detail };
   return { key: "tasks.error.other", detail: err };

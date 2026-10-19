@@ -1,7 +1,15 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { errorText, lookup, sayAgain, setLang } from "./i18n";
+import { errorText, fill, lookup, sayAgain, setLang, splitError } from "./i18n";
 
 // M6 translations (FR-I18N-001/002/007): a command's `code|detail|reason` said in the chosen language
+describe("shared helpers", () => {
+  it("split an error once and fill placeholders", () => {
+    expect(splitError("not_removed|C:/m.gguf|a|b")).toEqual({ code: "not_removed", detail: "C:/m.gguf", reason: "a|b" });
+    expect(splitError("busy")).toEqual({ code: "busy", detail: "", reason: "" });
+    expect(fill("{a} ve {b}{c}", { a: 1, b: "iki" })).toBe("1 ve iki");
+  });
+});
+
 describe("errorText", () => {
   afterEach(() => setLang("tr"));
 

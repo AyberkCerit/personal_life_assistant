@@ -55,6 +55,16 @@ impl ChatModel for Probe {
     }
 }
 
+/// The llama-server this probe started: ended with the probe, also when a step fails (`?`).
+struct Server(Child);
+
+impl Drop for Server {
+    fn drop(&mut self) {
+        let _ = self.0.kill();
+        let _ = self.0.wait();
+    }
+}
+
 fn start() -> Result<Child, Box<dyn std::error::Error>> {
     let bin = PathBuf::from(std::env::var("PLA_LLAMA_SERVER")?);
     let model = PathBuf::from(std::env::var("PLA_MODEL")?);
@@ -78,7 +88,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let today = NaiveDate::from_ymd_opt(2026, 10, 10).unwrap();
     let now: DateTime<FixedOffset> = DateTime::parse_from_rfc3339("2026-10-10T20:00:00+03:00").unwrap();
 
-    let mut child = start()?;
+    let _server = Server(start()?);
     let agent: ureq::Agent = ureq::Agent::config_builder().timeout_global(Some(Duration::from_secs(600))).build().into();
     let mut probe = Probe { agent, log: Vec::new() };
 
@@ -89,7 +99,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             probe.post("extract", &pla_core::extraction::request_body(today, &block))?;
         }
     }
-    let _ = today;
 
     println!("-- read-ahead (the panel opens)");
     pla_core::qa::engine::warm(&mut probe, &dbs.cache, &Default::default(), now, &AtomicBool::new(false))?;
@@ -102,6 +111,5 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let tools: Vec<String> = r.as_ref().map(|a| a.tools.iter().map(|c| c.tool.clone()).collect()).unwrap_or_default();
         println!("   total {:.1} s, tools {tools:?}", t.elapsed().as_secs_f64());
     }
-    child.kill()?;
     Ok(())
 }

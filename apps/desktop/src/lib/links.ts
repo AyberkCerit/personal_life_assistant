@@ -46,6 +46,11 @@ export function linkRest(after: string): { length: number; closed: boolean } {
   return m ? { length: m[1].length, closed: true } : { length: 0, closed: false };
 }
 
+/** A note's name from its vault path or file name: the last part, without `.md`. */
+export function noteName(path: string): string {
+  return (path.split("/").pop() ?? path).replace(/\.md$/i, "");
+}
+
 /** A search snippet as parts: the matched words sit between U+0002 and U+0003 (never HTML). */
 export function snippetParts(snippet: string): { text: string; hit: boolean }[] {
   const parts: { text: string; hit: boolean }[] = [];

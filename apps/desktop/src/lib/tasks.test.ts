@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { aiMark, taskError, dayLabel, filterByOrigin, groupTasks, isOverdue, isReminder, msUntilNextDay, revealRange, todayIso, type Labels, type Task } from "./tasks";
+import { aiMark, reviewReason, taskError, dayLabel, filterByOrigin, groupTasks, isOverdue, isReminder, msUntilNextDay, revealRange, todayIso, type Labels, type Task } from "./tasks";
 
 const L: Labels = { today: "Bugün", tomorrow: "Yarın", noDate: "Tarihsiz", overdue: "Gecikmiş" };
 const TODAY = "2026-10-06";
@@ -70,6 +70,20 @@ describe("tasks", () => {
   it("knows a reminder by its notification time", () => {
     expect(isReminder(task("a", TODAY, { notify_at: "2026-10-06T09:00" }))).toBe(true);
     expect(isReminder(task("b", TODAY))).toBe(false);
+  });
+});
+
+describe("review reasons", () => {
+  it("are said in the interface language, old English rows included", () => {
+    expect(reviewReason("reminder without a date")).toBe("review.reason.no_date");
+    expect(reviewReason("block too long for the model")).toBe("review.reason.too_long");
+    expect(reviewReason("llama-server did not answer in time")).toBe("review.reason.model");
+    expect(reviewReason("Sleep value 30 is outside its plausible range")).toBe("review.reason.out_of_range");
+    expect(reviewReason("invalid calendar date: 2026-02-30")).toBe("review.reason.bad_date");
+    expect(reviewReason("repeat without a day")).toBe("review.reason.bad_repeat");
+    expect(reviewReason("task or reminder without a title")).toBe("review.reason.no_title");
+    expect(reviewReason("metric without a value")).toBe("review.reason.incomplete");
+    expect(reviewReason("EOF while parsing a value at line 1 column 20")).toBe("review.reason.unreadable");
   });
 });
 

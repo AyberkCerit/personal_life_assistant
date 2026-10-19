@@ -1,6 +1,6 @@
 // Images and frontmatter in the editor (FR-EDT-006/007/016/017): which lines are frontmatter,
 // which embeds are images, which files may be pasted, and what a failed save means.
-import { errorText, type Key } from "./i18n";
+import { errorText, splitError, type Key } from "./i18n";
 import { wikilinks } from "./links";
 
 const IMAGE = /\.(png|jpe?g|gif|webp)$/i;
@@ -44,7 +44,7 @@ export function isImageFile(file: { type: string; name: string }): boolean {
 
 /** Reads `<code>|<detail>|<reason>` from `save_image`. */
 export function mediaError(err: string): { key: Key; reason: string } {
-  const [code] = err.split("|");
+  const { code } = splitError(err);
   if (code === "not_image") return { key: "image.error.not_image", reason: "" };
   if (code === "too_big") return { key: "image.error.too_big", reason: "" };
   return { key: "image.error.io", reason: errorText(err).text }; // said, not the raw reason (M6)

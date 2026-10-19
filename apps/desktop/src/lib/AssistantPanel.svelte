@@ -7,6 +7,7 @@
   import Square from "@lucide/svelte/icons/square";
   import Trash from "@lucide/svelte/icons/trash-2";
   import { api } from "./api";
+  import { noteName } from "./links";
   import { failure, say, t, tf, type Key } from "./i18n";
   import { answerParts, apply, qaError, shown, started, toolLine, warmDue, type QaEvent, type ShownTurn } from "./qa";
   import Button from "./ui/Button.svelte";
@@ -148,7 +149,7 @@
     }
   }
 
-  const name = (path: string) => path.split("/").pop()!.replace(/\.md$/i, "");
+  const name = noteName;
   // the reason comes as a code too (M6 final review): said, never the model server's English
   const turnFailure = (turn: ShownTurn) => (turn.error ? tf(qaError(turn.error.code), { detail: say(failure(turn.error.detail)) }) : "");
 

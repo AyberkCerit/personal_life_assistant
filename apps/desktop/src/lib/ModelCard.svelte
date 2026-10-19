@@ -7,7 +7,7 @@
   import Play from "@lucide/svelte/icons/play";
   import { api, inTauri, type DownloadState, type ModelStatus } from "./api";
   import { failure, lang, say, t, type Key } from "./i18n";
-  import { failureKey, formatBytes, progressLine } from "./modelText";
+  import { downloadFailureText, formatBytes, progressLine } from "./modelText";
   import { describeError } from "./settings";
   import Button from "./ui/Button.svelte";
 
@@ -18,19 +18,7 @@
   let localError = $state<string | null>(null);
   const m = $derived(status.recommended);
 
-  function fill(text: string, values: Record<string, string>) {
-    return text.replace(/\{(\w+)\}/g, (_, k) => values[k] ?? "");
-  }
-
-  const failureText = $derived(
-    download?.state === "failed"
-      ? fill(t(failureKey(download.failure.kind) as Key), {
-          needed: formatBytes(download.failure.needed ?? 0, lang),
-          available: formatBytes(download.failure.available ?? 0, lang),
-          status: String(download.failure.status ?? ""),
-        })
-      : "",
-  );
+  const failureText = $derived(download?.state === "failed" ? downloadFailureText(download.failure, lang) : "");
 
   async function start() {
     confirming = false;

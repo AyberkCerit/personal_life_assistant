@@ -1,7 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { completionQuery, linkAt, linkRest, snippetParts, wikilinks } from "./links";
+import { completionQuery, linkAt, linkRest, noteName, snippetParts, wikilinks } from "./links";
 
 describe("links helpers", () => {
+  it("names a note by its path or file name", () => {
+    expect(noteName("notes/Proje Planı.md")).toBe("Proje Planı");
+    expect(noteName("Günlük.MD")).toBe("Günlük");
+  });
+
   it("lists the wikilinks of a text in order, one line each", () => {
     const text = "a [[Not|takma]] b ![[resim.png]] [[açık";
     expect(wikilinks(text)).toEqual([

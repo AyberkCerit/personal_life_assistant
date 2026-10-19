@@ -5,6 +5,7 @@
   import Folder from "@lucide/svelte/icons/folder";
   import type { TreeEntry } from "./api";
   import { t, tf, type Key } from "./i18n";
+  import { noteName } from "./links";
   import { ancestors, moveTargets, openAfterMove, parentOf, systemFolder, visibleEntries, type Folders, type TreeActions } from "./tree";
   import Button from "./ui/Button.svelte";
   import Icon from "./ui/Icon.svelte";
@@ -99,7 +100,7 @@
     });
   });
   const shown = $derived(visibleEntries(entries, open));
-  const stem = (name: string) => name.replace(/\.md$/i, "");
+  const stem = noteName;
   /** What a row says: a system folder in the interface language, a note without `.md`. */
   const label = (e: TreeEntry) => {
     const kind = e.is_dir && folders ? systemFolder(e.path, folders) : null;

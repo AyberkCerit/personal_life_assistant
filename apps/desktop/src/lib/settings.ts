@@ -1,5 +1,5 @@
 // Settings screen rules that need no backend (FR-SET-011).
-import { t, tf, type Key, errorText, failure, type Failure } from "./i18n";
+import { t, tf, type Key, errorText, failure, splitError, type Failure } from "./i18n";
 import { setupError } from "./wizard";
 
 export const SECTIONS = ["general", "vault", "ai", "scheduler", "notifications", "privacy", "about"] as const;
@@ -15,13 +15,13 @@ const OWN_CODES = ["not_removed", "not_found", "model_busy", "invalid_setting", 
 
 /** Reads the commands' `<code>|<path>|<reason>` errors; folder errors share the wizard's texts. */
 export function settingsError(err: string): { key: Key; path: string; reason: string; reasonKey?: Key } {
-  const [code, path = "", ...rest] = err.split("|");
+  const { code, detail: path, reason } = splitError(err);
   // `missing` names a folder of its own; with none it is the general "not found" (M6 final review)
   if (code === "missing" && !path) return { key: "settings.error.other", path: "", reason: err };
   // the previous vault's own failure is a code too: said, not shown raw (M6 final review)
-  if (code === "vault_lost") return { key: "settings.error.vault_lost", path, reason: errorText(rest.join("|")).text };
+  if (code === "vault_lost") return { key: "settings.error.vault_lost", path, reason: errorText(reason).text };
   if (OWN_CODES.includes(code)) {
-    const parsed = setupError(`not_writable|${path}|${rest.join("|")}`);
+    const parsed = setupError(`not_writable|${path}|${reason}`);
     return { ...parsed, key: `settings.error.${code}` as Key };
   }
   const folder = setupError(err);
@@ -47,6 +47,22 @@ export function reportLine(job: JobStatus): { key: Key; at?: string; error?: str
 
 /** The weekly report's days, Monday first (0 = Monday, as the settings file keeps them). */
 export const WEEKDAYS: Key[] = ["day.mon", "day.tue", "day.wed", "day.thu", "day.fri", "day.sat", "day.sun"];
+
+/** Runs a settings action; resolves to its error as the user reads it, or `null` when it worked. */
+export async function attempt(action: () => Promise<void>): Promise<string | Failure | null> {
+  try {
+    await action();
+    return null;
+  } catch (e) {
+    return describeError(e);
+  }
+}
+
+/** A `YYYY-MM-DD` day written out ("19 Ekim 2026"), for the backups the restore offers. */
+export function longDay(iso: string, language: string): string {
+  const [y, m, d] = iso.split("-").map(Number);
+  return new Intl.DateTimeFormat(language, { day: "numeric", month: "long", year: "numeric" }).format(new Date(y, m - 1, d));
+}
 
 /** An error from a settings command as text for the user, naming the folder and the reason. */
 export function describeError(e: unknown): string | Failure {

@@ -7,7 +7,7 @@
   import { api, type ModelStatus, type Persona, type PersonaKey } from "../api";
   import { lang, t, tf } from "../i18n";
   import { formatBytes } from "../modelText";
-  import { describeError } from "../settings";
+  import { attempt, describeError } from "../settings";
   import ModelCard from "../ModelCard.svelte";
   import MemoryCard from "../MemoryCard.svelte";
   import type { MemoryStatus } from "../api";
@@ -47,11 +47,7 @@
 
   async function act(action: () => Promise<void>) {
     error = null;
-    try {
-      await action();
-    } catch (e) {
-      error = describeError(e);
-    }
+    error = await attempt(action);
   }
 
   /** Saved as soon as the field is left; the field shows the text as it was kept (one line, 40 characters). */

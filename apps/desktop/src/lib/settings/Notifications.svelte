@@ -7,7 +7,7 @@
   import ExternalLink from "@lucide/svelte/icons/external-link";
   import { api } from "../api";
   import { t } from "../i18n";
-  import { describeError } from "../settings";
+  import { attempt, describeError } from "../settings";
   import Button from "../ui/Button.svelte";
   import Icon from "../ui/Icon.svelte";
 
@@ -18,11 +18,7 @@
 
   async function act(action: () => Promise<void>) {
     error = null;
-    try {
-      await action();
-    } catch (e) {
-      error = describeError(e);
-    }
+    error = await attempt(action);
   }
 
   onMount(() => {

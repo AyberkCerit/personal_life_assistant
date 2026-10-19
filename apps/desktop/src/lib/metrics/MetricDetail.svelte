@@ -13,7 +13,7 @@
   import { api, type MetricRecord, type Summary } from "../api";
   import { lang, t, tf, type Key } from "../i18n";
   import { fillDays, formatDelta, formatValue, metricError, trendDirection, type MetricKind } from "../metrics";
-  import { todayIso } from "../tasks";
+  import { addDays, todayIso } from "../tasks";
   import Badge from "../ui/Badge.svelte";
   import Banner from "../ui/Banner.svelte";
   import Button from "../ui/Button.svelte";
@@ -35,11 +35,6 @@
   let records = $state<MetricRecord[]>([]);
   let confirming = $state<string | null>(null);
   let error = $state<string | Failure | null>(null);
-
-  function addDays(iso: string, n: number): string {
-    const [y, m, d] = iso.split("-").map(Number);
-    return new Date(Date.UTC(y, m - 1, d + n)).toISOString().slice(0, 10);
-  }
 
   let request = 0;
 
