@@ -72,6 +72,7 @@ let setupDone = false;
 let mockLang: "tr" | "en" | null = null;
 let mockTheme: "dark" | "light" = "dark";
 let mockAutostart = false;
+const mockPersona: { name: string; address: string; formality: "informal" | "formal" } = { name: "", address: "", formality: "informal" };
 let lastBackup: string | null = null;
 let mockWeekly = { enabled: true, weekday: 6, time: "20:00" };
 
@@ -405,11 +406,14 @@ export async function mockBackend<T>(cmd: string, args: Record<string, unknown>)
     case "open_today":
       return mockTree(cmd, args) as T;
     case "settings_get":
-      return { language: mockLang, theme: mockTheme, autostart: mockAutostart, paused: false, vault_path: vault } as T;
+      return { language: mockLang, theme: mockTheme, autostart: mockAutostart, paused: false, vault_path: vault, persona: { ...mockPersona } } as T;
     case "settings_set":
       if (args.key === "language") mockLang = args.value as "tr" | "en" | null;
       else if (args.key === "theme") mockTheme = args.value as "dark" | "light";
-      return { language: mockLang, theme: mockTheme, autostart: mockAutostart, paused: false, vault_path: vault } as T;
+      else if (args.key === "assistant_name") mockPersona.name = String(args.value).trim().slice(0, 40);
+      else if (args.key === "user_address") mockPersona.address = String(args.value).trim().slice(0, 40);
+      else if (args.key === "formality") mockPersona.formality = args.value as "informal" | "formal";
+      return { language: mockLang, theme: mockTheme, autostart: mockAutostart, paused: false, vault_path: vault, persona: { ...mockPersona } } as T;
     case "set_autostart":
       mockAutostart = Boolean(args.enabled);
       emit("autostart-changed", mockAutostart);

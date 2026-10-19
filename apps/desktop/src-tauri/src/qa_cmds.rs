@@ -6,6 +6,7 @@ use std::sync::{Arc, Mutex};
 
 use chrono::Local;
 use pla_core::qa::{self, Turn};
+use pla_core::settings::{Formality, Persona};
 use tauri::{AppHandle, Emitter, State};
 
 use crate::commands::{with_db, with_session, AppState};
@@ -17,6 +18,18 @@ static CURRENT: Mutex<Option<(String, Arc<AtomicBool>)>> = Mutex::new(None);
 static NEXT: AtomicU64 = AtomicU64::new(0);
 
 const MAX_QUESTION: usize = 2000;
+
+/// The assistant's name and how it addresses the user, as the settings keep them.
+static PERSONA: Mutex<Persona> = Mutex::new(Persona { name: String::new(), address: String::new(), formality: Formality::Informal });
+
+/// Called at startup and whenever Settings > AI changes the persona.
+pub fn set_persona(persona: Persona) {
+    *PERSONA.lock().expect("persona lock") = persona;
+}
+
+pub fn persona() -> Persona {
+    PERSONA.lock().expect("persona lock").clone()
+}
 
 /// Ends a turn that never got its last event (the worker was gone, or the job was dropped): the
 /// panel hears `Failed` and the next question is not refused as `busy` forever (final review I1).

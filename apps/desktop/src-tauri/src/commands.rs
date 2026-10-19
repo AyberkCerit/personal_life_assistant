@@ -13,7 +13,7 @@ use pla_core::db::open_databases;
 use pla_core::files::{self, FileError, NoteFile, TreeEntry};
 use pla_core::llm::ModelHost;
 use pla_core::pipeline::Extractor;
-use pla_core::settings::{load_settings, save_settings, AppSettings, Theme};
+use pla_core::settings::{load_settings, save_settings, AppSettings, Formality, Persona, Theme};
 use pla_core::vault::{default_app_root, open_vault as open_vault_dir, resolve_data_dir, Vault};
 use rusqlite::Connection;
 
@@ -504,6 +504,7 @@ pub struct SettingsView {
     autostart: bool,
     paused: bool,
     vault_path: Option<String>,
+    persona: pla_core::settings::Persona,
 }
 
 /// One plain setting from the settings screen; anything else is refused and changes nothing.
@@ -514,6 +515,10 @@ pub fn apply_setting(s: &mut AppSettings, key: &str, value: &serde_json::Value) 
         ("language", Value::String(l)) if l == "tr" || l == "en" => s.language = Some(l.clone()),
         ("theme", Value::String(t)) if t == "dark" => s.theme = Theme::Dark,
         ("theme", Value::String(t)) if t == "light" => s.theme = Theme::Light,
+        ("assistant_name", Value::String(n)) => s.persona.name = Persona::clean(n),
+        ("user_address", Value::String(a)) => s.persona.address = Persona::clean(a),
+        ("formality", Value::String(f)) if f == "informal" => s.persona.formality = Formality::Informal,
+        ("formality", Value::String(f)) if f == "formal" => s.persona.formality = Formality::Formal,
         _ => return Err(format!("invalid_setting|{key}|{value}")),
     }
     Ok(())
@@ -527,6 +532,7 @@ fn settings_view(app: &AppHandle, state: &State<AppState>, settings: &AppSetting
         autostart: app.autolaunch().is_enabled().unwrap_or(false),
         paused: state.paused.load(Ordering::SeqCst),
         vault_path: settings.vault_path.as_ref().map(|p| p.to_string_lossy().into_owned()),
+        persona: settings.persona.clone(),
     }
 }
 
@@ -555,6 +561,7 @@ pub fn settings_set(app: AppHandle, state: State<AppState>, key: String, value: 
         crate::notify::set_ui_language(settings.language.as_deref());
         crate::tray::refresh(&app);
     }
+    crate::qa_cmds::set_persona(settings.persona.clone());
     Ok(settings_view(&app, &state, &settings))
 }
 
@@ -767,10 +774,24 @@ mod tests {
             ("theme", serde_json::json!("blue")),
             ("vault_path", serde_json::json!("C:/x")),
             ("theme", serde_json::json!(1)),
+            ("formality", serde_json::json!("siz")),
+            ("assistant_name", serde_json::Value::Null),
         ] {
             assert!(apply_setting(&mut s, key, &value).is_err(), "{key} = {value}");
         }
         assert_eq!(s, before, "a refused value changes nothing");
+    }
+
+    #[test]
+    fn the_assistant_gets_a_name_and_a_form_of_address() {
+        let mut s = AppSettings::default();
+        apply_setting(&mut s, "assistant_name", &serde_json::json!("  Atlas
+")).unwrap();
+        apply_setting(&mut s, "user_address", &serde_json::json!("Ayberk Bey")).unwrap();
+        apply_setting(&mut s, "formality", &serde_json::json!("formal")).unwrap();
+        assert_eq!(s.persona, Persona { name: "Atlas".into(), address: "Ayberk Bey".into(), formality: Formality::Formal });
+        apply_setting(&mut s, "assistant_name", &serde_json::json!(" ")).unwrap();
+        assert_eq!(s.persona.name(), "PLA", "empty = PLA again");
     }
 
     #[test]
