@@ -27,7 +27,7 @@ const TICK: Duration = Duration::from_secs(1);
 /// Decision 5: an outside change is extracted after this long without further changes to the note.
 const EXTERNAL_DELAY: Duration = Duration::from_secs(45);
 /// FR-MDL-013: the model process stops after this long without requests.
-const MODEL_IDLE_AFTER: Duration = Duration::from_secs(60);
+pub(crate) const MODEL_IDLE_AFTER: Duration = Duration::from_secs(60);
 
 #[derive(Debug)]
 pub enum Command {

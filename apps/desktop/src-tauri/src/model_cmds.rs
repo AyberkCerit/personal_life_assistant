@@ -163,18 +163,7 @@ pub fn model_download_start(app: AppHandle, state: State<AppState>) -> Result<()
     state
         .downloads
         .start(
-            move |cancel, report| {
-                let req = dl::Request {
-                    entry,
-                    dir: &dir,
-                    policy: policy.as_ref(),
-                    free_space: &dl::free_space,
-                    cancel,
-                    progress_every: Duration::from_secs(1),
-                    stall_after: Duration::from_secs(60),
-                };
-                dl::download(&req, report)
-            },
+            move |cancel, report| crate::model_download::download(entry, &dir, policy.as_ref(), cancel, report),
             move |s| {
                 let _ = events.emit("model-download", s);
             },

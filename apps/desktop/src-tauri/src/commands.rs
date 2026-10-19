@@ -5,7 +5,6 @@
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
 
 use chrono::Local;
 use pla_core::db::connect;
@@ -160,7 +159,7 @@ pub fn bundled_server(app: &AppHandle) -> Option<PathBuf> {
 /// The model host for these settings, or none while no model is installed (FR-SET-010).
 fn extractor(app: &AppHandle, settings: &AppSettings) -> Option<Box<dyn Extractor + Send>> {
     let cfg = crate::model_paths::server_config(settings, &crate::model_paths::process_env, bundled_server(app))?;
-    Some(Box::new(ModelHost::new(cfg, Duration::from_secs(60))))
+    Some(Box::new(ModelHost::new(cfg, crate::worker::MODEL_IDLE_AFTER)))
 }
 
 fn start_session(app: &AppHandle, root: &Path, settings: &AppSettings, own: Arc<SelfWrites>, paused: bool) -> Result<Session, String> {

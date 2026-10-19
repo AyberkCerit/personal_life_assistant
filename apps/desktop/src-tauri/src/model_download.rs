@@ -6,7 +6,9 @@ use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
-use pla_core::models::download::{DownloadError, Progress};
+use pla_core::models::catalog::CatalogEntry;
+use pla_core::models::download::{self as dl, DownloadError, Progress};
+use pla_core::models::policy::UrlPolicy;
 use serde::Serialize;
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -46,6 +48,21 @@ pub enum DownloadState {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AlreadyRunning;
+
+/// Downloads `entry` into `dir` as the app does: progress every second, and a connection silent
+/// for a minute gives up with the part kept (FR-MDL-001…007).
+pub fn download(entry: &CatalogEntry, dir: &std::path::Path, policy: &dyn UrlPolicy, cancel: &AtomicBool, report: &mut dyn FnMut(Progress)) -> Result<PathBuf, DownloadError> {
+    let req = dl::Request {
+        entry,
+        dir,
+        policy,
+        free_space: &dl::free_space,
+        cancel,
+        progress_every: Duration::from_secs(1),
+        stall_after: Duration::from_secs(60),
+    };
+    dl::download(&req, report)
+}
 
 type Run = dyn FnOnce(&AtomicBool, &mut dyn FnMut(Progress)) -> Result<PathBuf, DownloadError> + Send;
 

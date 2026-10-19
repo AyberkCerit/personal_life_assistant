@@ -6,7 +6,7 @@ use std::path::Path;
 use chrono::NaiveDate;
 
 use crate::markdown::{frontmatter_end, is_heading, list_item_body, Fences};
-use crate::vault::{is_note_name, is_under, walk_vault, Folders, Vault};
+use crate::vault::{is_hidden_rel, is_note_name, is_under, walk_vault, Folders, Vault};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Block {
@@ -72,7 +72,7 @@ pub fn is_generated(text: &str) -> bool {
 /// Hidden paths and the reports/templates folders are never extracted (FR-EXT-001, FR-VLT-017).
 pub fn is_excluded(rel: &str, folders: &Folders) -> bool {
     let path = Path::new(rel);
-    path.components().any(|c| c.as_os_str().to_string_lossy().starts_with('.'))
+    is_hidden_rel(rel)
         || is_under(rel, &folders.reports)
         || is_under(rel, &folders.templates)
         || path.file_stem().is_some_and(|s| {

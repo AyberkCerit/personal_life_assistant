@@ -255,7 +255,7 @@ fn without_made_up_time(tool: &str, mut args: Value, question: &str) -> Value {
 
 /// Words of `text`, folded as the index folds them, without punctuation.
 fn words(text: &str) -> Vec<String> {
-    crate::index::key(text).split(|c: char| !c.is_alphanumeric()).filter(|w| !w.is_empty()).map(str::to_owned).collect()
+    crate::index::key_words(text)
 }
 
 /// "saat 3'te" is 15:00, as people say it (the eval saw 03:00 for a barber's appointment). Only a

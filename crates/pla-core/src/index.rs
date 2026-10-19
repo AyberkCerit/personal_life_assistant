@@ -42,8 +42,23 @@ pub fn key(s: &str) -> String {
     fold(s).replace('ı', "i")
 }
 
+/// The words of `text` as `key` reads them, punctuation dropped (the assistant's and the guard's
+/// word matching; search keeps `_` in a word, see `fts_query`).
+pub(crate) fn key_words(text: &str) -> Vec<String> {
+    split_words(&key(text))
+}
+
+/// Like `key_words`, with Turkish diacritics dropped too ("deneyecegim" is "deneyeceğim").
+pub(crate) fn loose_words(text: &str) -> Vec<String> {
+    split_words(&loose(text))
+}
+
+fn split_words(folded: &str) -> Vec<String> {
+    folded.split(|c: char| !c.is_alphanumeric()).filter(|w| !w.is_empty()).map(str::to_owned).collect()
+}
+
 /// `key` without the Turkish diacritics FTS5 also drops (ç ğ ş ö ü), for finding the matching line.
-fn loose(s: &str) -> String {
+pub(crate) fn loose(s: &str) -> String {
     key(s)
         .chars()
         .map(|c| match c {
@@ -226,10 +241,6 @@ pub struct SyncReport {
     pub unreadable: usize,
 }
 
-fn is_hidden(rel: &str) -> bool {
-    rel.split('/').any(|part| part.starts_with('.'))
-}
-
 /// Every `.md` file of the vault outside hidden folders, as `/`-separated relative paths. Links and
 /// junctions are not followed.
 fn markdown_files(root: &Path) -> Vec<String> {
@@ -330,7 +341,7 @@ pub fn sync_vault_until(conn: &Connection, root: &Path, stop: &AtomicBool) -> ru
 
 /// A watcher event for one path: re-index, or remove when it is gone. Returns whether the index changed.
 pub fn touch(conn: &Connection, root: &Path, rel: &str) -> rusqlite::Result<bool> {
-    if is_hidden(rel) || !crate::vault::is_note_name(rel) {
+    if crate::vault::is_hidden_rel(rel) || !crate::vault::is_note_name(rel) {
         return Ok(false);
     }
     Ok(matches!(refresh(conn, root, rel, known_stamp(conn, rel)?)?, Refresh::Indexed | Refresh::Removed))
