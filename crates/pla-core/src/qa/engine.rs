@@ -163,6 +163,7 @@ Call a tool first when:\n\
 - the user tells you about a plan, appointment, deadline or something to do on a day and no add_task for it is in the tool results yet: call add_task. Never ask whether to add it;\n\
 - the user says they did one of their tasks (\"faturayı ödedim\", \"I called the bank\"): call query_tasks with a word of it, then complete_task with the task_id it gives;\n\
 - the question asks for numbers, counts, totals or dates of tasks or measurements, also in a follow-up, and this question has no query result yet: call query_tasks or query_metrics;\n\
+- the user asks about their health, body or how they are doing without naming one measurement: call query_metrics with kind all and days 7;\n\
 - the user reports a measurement of today or a past day, their body weight included (\"92 kiloyum\", \"I slept 7 hours\", \"walked 5000 steps\"): call log_metric; a wish or goal (\"75 kilo olmak istiyorum\") is not a measurement;\n\
 - the user asks to keep something as a note (\"notlarıma ekle\", \"not al:\", \"kaydet\", \"make a note\", \"save this\"): call create_note. Choose the title yourself and never ask for it. When they say \"bunu\", \"onu\" or \"this\", the body is what they told you just before;\n\
 - the user tells you something worth keeping (what they did, learned, decided, an idea) without asking for anything: call suggest_note once, then answer.\n\
@@ -462,6 +463,12 @@ fn asked_for_note(text: &str) -> bool {
         || w.windows(2).any(|p| p[0] == "not" && ["al", "et", "ekle", "oluştur", "olustur", "aç", "ac", "yaz"].contains(&p[1].as_str()))
 }
 
+/// A question about the user's health as a whole ("sağlık durumum nasıl", "how is my health?"): the
+/// measurements answer it, not the notes (the owner's screenshot: "no information" beside five cards).
+fn asks_about_health(question: &str) -> bool {
+    asks(question) && words(question).iter().any(|w| ["sağl", "sagl", "health", "fitness", "ölçüm", "olcum", "measurement"].iter().any(|p| w.starts_with(p)))
+}
+
 /// What the code does when the model only answers but the user's words leave no doubt (the eval's
 /// remaining misses, narrowly): a task the model found alone and the user says they did gets completed
 /// (with its Undo); "sen karar ver" right after asking for a note writes that note. Never after
@@ -469,6 +476,9 @@ fn asked_for_note(text: &str) -> bool {
 fn fallback(question: &str, turns: &[Turn], done: &[ToolRecord]) -> Option<(String, Value)> {
     if done.iter().any(|r| r.ok && WRITES.contains(&r.tool.as_str())) {
         return None;
+    }
+    if asks_about_health(question) && !done.iter().any(|r| r.ok && r.tool == "query_metrics") {
+        return Some(("query_metrics".into(), json!({ "kind": "all", "days": 7 })));
     }
     if let Some(found) = done.iter().rev().find(|r| r.ok && r.tool == "query_tasks") {
         let tasks = found.result["tasks"].as_array()?;
@@ -837,6 +847,27 @@ mod tests {
         assert!(system.contains("2026-10-07 Wednesday (Çarşamba) = tomorrow / yarın"));
         assert!(system.contains("2026-10-09 Friday (Cuma)"), "\"cuma\" needs no arithmetic");
         assert!(a.sources.is_empty(), "an answer about what a tool did names no notes");
+    }
+
+    #[test]
+    fn a_health_question_reads_the_measurements() {
+        // the owner's screenshot: "sağlık durumum nasıl" was answered from the notes ("no information")
+        // beside five measurement cards; the model answered without a call
+        let e = env();
+        let tool_env = ToolEnv { vault: &e.vault, pla: &e.pla, cache: &e.cache, now: now(), validation: ValidationSettings::default() };
+        tools::run(&tool_env, "log_metric", &json!({ "kind": "weight", "date": "2026-10-05", "value": 130, "unit": "kg" })).unwrap();
+        let mut model = scripted(&["{\"tool\":\"answer\"}"], "Kilon 130 kg.");
+        let ask = |model: &mut Scripted, text: &str| {
+            answer(model, &tool_env, &Question { text, turns: &[], memory: None, ui_lang: "tr" }, &AtomicBool::new(false), &mut |_| {}).unwrap()
+        };
+        let a = ask(&mut model, "sağlık durumum nasıl");
+        assert_eq!(a.tools.len(), 1);
+        assert_eq!((a.tools[0].tool.as_str(), a.tools[0].args["kind"].as_str()), ("query_metrics", Some("all")));
+        assert_eq!(a.tools[0].result["measurements"][0]["latest"]["value"], json!(130.0));
+        let last = model.bodies.last().unwrap()["messages"].as_array().unwrap().last().unwrap()["content"].as_str().unwrap().to_owned();
+        assert!(last.contains("\"measurements\""), "the answer sees the values");
+        let a = ask(&mut scripted(&[], "Merhaba!"), "merhaba");
+        assert!(a.tools.is_empty(), "no measurements for small talk");
     }
 
     #[test]

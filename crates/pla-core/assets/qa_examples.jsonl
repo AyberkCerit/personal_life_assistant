@@ -30,6 +30,8 @@
 {"q":"how much water did I drink this week?","d":{"tool":"query_metrics","args":{"kind":"water","days":7}}}
 {"q":"peki son 3 günde?","prev":"bu hafta kaç adım attım?","d":{"tool":"query_metrics","args":{"kind":"steps","days":3}}}
 {"q":"and in the last 2 days?","prev":"how many hours did I sleep this week?","d":{"tool":"query_metrics","args":{"kind":"sleep","days":2}}}
+{"q":"sağlık durumum nasıl","d":{"tool":"query_metrics","args":{"kind":"all","days":7}}}
+{"q":"how am I doing health-wise?","d":{"tool":"query_metrics","args":{"kind":"all","days":7}}}
 {"q":"bugün neler yapmam lazım?","d":{"tool":"query_tasks","args":{"list":"today"}}}
 {"q":"önümüzdeki günlerde ne işlerim var","d":{"tool":"query_tasks","args":{"list":"upcoming"}}}
 {"q":"what's on my list for tomorrow?","d":{"tool":"query_tasks","args":{"list":"upcoming"}}}
