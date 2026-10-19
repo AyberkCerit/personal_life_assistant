@@ -5,7 +5,7 @@ use serde::Serialize;
 use tauri::State;
 
 use crate::commands::{with_session, AppState};
-use crate::errors::ue;
+use crate::errors::{own_code, ue};
 use crate::worker::Command;
 
 #[derive(Serialize)]
@@ -30,7 +30,7 @@ pub fn day_summary(state: State<AppState>, path: String) -> Result<Option<DayInf
 #[tauri::command]
 pub fn summary_regenerate(state: State<AppState>, path: String) -> Result<(), String> {
     with_session(&state, |session| {
-        let date = pla_core::notes::daily_note_date(&path, &session.vault.config.folders).ok_or("bad_path||")?;
+        let date = pla_core::notes::daily_note_date(&path, &session.vault.config.folders).ok_or_else(|| own_code("bad_path", "", ""))?;
         session.worker.send(Command::Summarize { only: Some(date), cache_path: session.cache_path.clone() });
         Ok(())
     })

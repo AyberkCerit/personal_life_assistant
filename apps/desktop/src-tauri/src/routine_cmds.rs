@@ -6,16 +6,16 @@ use rusqlite::Connection;
 use tauri::{AppHandle, Emitter, State};
 
 use crate::commands::{in_write_tx, AppState};
-use crate::errors::ue;
+use crate::errors::{own_code, ue};
 use crate::task_cmds::now;
 
 /// A routine error as a code the UI turns into a sentence in its language (like `task_code`).
 pub fn routine_code(e: RoutineError) -> String {
     match e {
-        RoutineError::BadTitle => "bad_title||".into(),
-        RoutineError::NoDays => "no_days||".into(),
-        RoutineError::BadTime(t) => format!("bad_time|{t}|"),
-        RoutineError::NotFound => "not_found||".into(),
+        RoutineError::BadTitle => own_code("bad_title", "", ""),
+        RoutineError::NoDays => own_code("no_days", "", ""),
+        RoutineError::BadTime(t) => own_code("bad_time", t, ""),
+        RoutineError::NotFound => own_code("not_found", "", ""),
         RoutineError::Db(e) => ue(e),
     }
 }

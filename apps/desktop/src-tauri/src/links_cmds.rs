@@ -6,7 +6,7 @@ use serde::Serialize;
 use tauri::State;
 
 use crate::commands::{with_cache, with_session, AppState};
-use crate::errors::ue;
+use crate::errors::{own_code, ue};
 use crate::indexer::IndexCommand;
 
 #[tauri::command(async)]
@@ -66,7 +66,7 @@ pub fn open_link(state: State<AppState>, target: String) -> Result<OpenedLink, S
         }
         let title = new_note_title(&target);
         if !is_note_target(&title) {
-            return Err(format!("not_a_note|{target}|"));
+            return Err(own_code("not_a_note", &target, ""));
         }
         let inbox = &session.vault.config.folders.inbox;
         // Clicked again before the index caught up: the note made a moment ago, not a second one.

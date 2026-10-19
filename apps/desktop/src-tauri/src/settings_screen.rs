@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, State};
 
 use crate::commands::{app_root, AppState};
-use crate::errors::ue;
+use crate::errors::{own_code, ue};
 
 /// The region's list separator and decimal mark, as Windows reports them, made safe for CSV.
 pub fn csv_style(list: &str, decimal: &str) -> CsvStyle {
@@ -160,7 +160,7 @@ pub fn backup_status(state: State<AppState>) -> Result<BackupStatus, String> {
 pub fn export_data(state: State<AppState>, dir: String, lang: String) -> Result<Vec<String>, String> {
     let dir = PathBuf::from(dir);
     if !dir.is_absolute() || !dir.is_dir() {
-        return Err(format!("missing|{}|", dir.display()));
+        return Err(own_code("missing", dir.display(), ""));
     }
     let style = region_style();
     let (tasks, metrics) = crate::commands::with_db(&state, ue, |db| {
@@ -171,7 +171,7 @@ pub fn export_data(state: State<AppState>, dir: String, lang: String) -> Result<
     for (name, text) in [(tasks_name, tasks), (metrics_name, metrics)] {
         let path = dir.join(name);
         pla_core::fs_atomic::write_atomic(&path, text.as_bytes())
-            .map_err(|e| format!("not_writable|{}|{}", dir.display(), crate::wizard::write_failure(&e)))?;
+            .map_err(|e| own_code("not_writable", dir.display(), crate::wizard::write_failure(&e)))?;
         written.push(path.to_string_lossy().into_owned());
     }
     Ok(written)
@@ -192,9 +192,9 @@ pub fn open_place(state: State<AppState>, kind: PlaceKind) -> Result<(), String>
         local_root: std::env::var_os("LOCALAPPDATA").map(|p| PathBuf::from(p).join("PLA")),
         model: settings.model_path,
     };
-    let target = place(kind, &places).ok_or("not_found||")?;
+    let target = place(kind, &places).ok_or_else(|| own_code("not_found", "", ""))?;
     if kind != PlaceKind::NotificationSettings && !Path::new(&target).exists() {
-        return Err(format!("not_found|{}|", Path::new(&target).display()));
+        return Err(own_code("not_found", Path::new(&target).display(), ""));
     }
     let mut explorer = std::process::Command::new("explorer.exe");
     #[cfg(windows)]

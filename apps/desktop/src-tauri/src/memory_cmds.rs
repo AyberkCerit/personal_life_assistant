@@ -11,7 +11,7 @@ use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::commands::{bundled_server, AppState};
-use crate::errors::{ue, UserError};
+use crate::errors::{own_code, ue, UserError};
 
 /// The embedding server both the indexer (in the background) and the worker (for a question) use.
 pub type Embeds = Arc<Mutex<Option<Box<dyn Embedder + Send>>>>;
@@ -85,7 +85,7 @@ pub fn start_download(app: &AppHandle) -> Result<(), String> {
                 let _ = done_app.emit("memory-changed", ());
             },
         )
-        .map_err(|_| "download_running".to_owned())
+        .map_err(|_| own_code("download_running", "", ""))
 }
 
 #[tauri::command]

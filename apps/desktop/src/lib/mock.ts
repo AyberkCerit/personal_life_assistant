@@ -158,7 +158,7 @@ function mockMetrics(cmd: string, args: Record<string, unknown>): unknown {
     case "metric_edit": {
       const input = args.input as { kind: string; date: string; value: number | null; unit: string | null; exercise: string | null; sets: number | null; reps: number | null; confirmed: boolean };
       const value = input.kind === "water" && input.unit === "glass" ? (input.value ?? 0) * 250 : input.value;
-      if (input.kind !== "workout" && value === null) throw "missing_value";
+      if (input.kind !== "workout" && value === null) throw "missing_value||";
       if (input.kind === "weight" && value !== null && value > 400 && !input.confirmed) throw `out_of_range|value|${value}`;
       const fields = { kind: input.kind, date: input.date, value, exercise: input.exercise, sets: input.sets, reps: input.reps };
       if (cmd === "metric_edit") {
@@ -580,7 +580,7 @@ export async function mockBackend<T>(cmd: string, args: Record<string, unknown>)
       return undefined as T;
     case "model_use_local": {
       const path = String(args.path);
-      if (!path.toLowerCase().endsWith(".gguf")) throw new Error("not_gguf");
+      if (!path.toLowerCase().endsWith(".gguf")) throw new Error("not_gguf||");
       installed = { name: path.split(/[\\/]/).pop() ?? path, size: 2_536_786_016, path, local: true };
       emit("model-changed", installed);
       return installed as T;

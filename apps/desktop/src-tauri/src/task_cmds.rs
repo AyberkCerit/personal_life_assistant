@@ -9,18 +9,18 @@ use rusqlite::Connection;
 use tauri::{AppHandle, Emitter, State};
 
 use crate::commands::{in_write_tx, AppState};
-use crate::errors::ue;
+use crate::errors::{own_code, ue};
 use crate::scheduler::PendingLists;
 
 /// A task error as a code the UI turns into a sentence in its language (architecture review A2).
 pub fn task_code(e: tasks::TaskError) -> String {
     use tasks::TaskError;
     match e {
-        TaskError::BadTitle => "bad_title||".into(),
-        TaskError::BadDate(d) => format!("bad_date|{d}|"),
-        TaskError::BadTime(t) => format!("bad_time|{t}|"),
-        TaskError::NotFound => "not_found||".into(),
-        TaskError::NotAnAction => "not_an_action||".into(),
+        TaskError::BadTitle => own_code("bad_title", "", ""),
+        TaskError::BadDate(d) => own_code("bad_date", d, ""),
+        TaskError::BadTime(t) => own_code("bad_time", t, ""),
+        TaskError::NotFound => own_code("not_found", "", ""),
+        TaskError::NotAnAction => own_code("not_an_action", "", ""),
         TaskError::Db(e) => ue(e),
     }
 }

@@ -10,7 +10,7 @@ use pla_core::settings::{Formality, Persona};
 use tauri::{AppHandle, Emitter, State};
 
 use crate::commands::{with_db, with_session, AppState};
-use crate::errors::{ue, unexpected};
+use crate::errors::{own_code, ue, unexpected};
 use crate::worker::{AskJob, QaEvent};
 
 /// The question being answered: its turn and its Stop switch. One at a time.
@@ -61,13 +61,13 @@ fn finished(turn_id: &str) {
 pub fn qa_ask(app: AppHandle, state: State<AppState>, question: String, new_topic: bool) -> Result<String, String> {
     let question = question.trim().to_owned();
     if question.is_empty() || question.chars().count() > MAX_QUESTION {
-        return Err("bad_question||".into());
+        return Err(own_code("bad_question", "", ""));
     }
     let guard = state.session.lock().expect("session lock");
     let session = guard.as_ref().ok_or(crate::commands::NO_VAULT)?;
     let mut current = CURRENT.lock().expect("qa lock");
     if current.is_some() {
-        return Err("busy||".into());
+        return Err(own_code("busy", "", ""));
     }
     let turn_id = format!("{}-{}", Local::now().format("%Y%m%d%H%M%S%3f"), NEXT.fetch_add(1, Ordering::SeqCst));
     let cancel = Arc::new(AtomicBool::new(false));
@@ -134,7 +134,7 @@ pub fn qa_warm(state: State<AppState>) {
 #[tauri::command]
 pub fn qa_clear(state: State<AppState>) -> Result<(), String> {
     if CURRENT.lock().expect("qa lock").is_some() {
-        return Err("busy||".into());
+        return Err(own_code("busy", "", ""));
     }
     with_db(&state, ue, |db| qa::clear_history(db).map(drop))
 }
@@ -144,7 +144,7 @@ pub fn qa_clear(state: State<AppState>) -> Result<(), String> {
 pub fn qa_save_suggestion(app: AppHandle, state: State<AppState>, turn_id: String, index: usize) -> Result<String, String> {
     let rel = with_session(&state, |session| {
         let db = session.db.lock().expect("db lock");
-        qa::save_suggestion(&db, &session.vault, &turn_id, index).map_err(unexpected)?.ok_or_else(|| "missing||".to_owned())
+        qa::save_suggestion(&db, &session.vault, &turn_id, index).map_err(unexpected)?.ok_or_else(|| own_code("missing", "", ""))
     })?;
     let _ = app.emit("tree-changed", ());
     Ok(rel)
@@ -155,7 +155,7 @@ pub fn qa_save_suggestion(app: AppHandle, state: State<AppState>, turn_id: Strin
 pub fn qa_undo(app: AppHandle, state: State<AppState>, turn_id: String, index: usize) -> Result<(), String> {
     let kind = with_session(&state, |session| {
         let db = session.db.lock().expect("db lock");
-        let undo = qa::take_undo(&db, &turn_id, index).map_err(ue)?.ok_or_else(|| "missing||".to_owned())?;
+        let undo = qa::take_undo(&db, &turn_id, index).map_err(ue)?.ok_or_else(|| own_code("missing", "", ""))?;
         let done = if undo.kind == "note" {
             crate::fileops_cmds::deletable(&session.vault, &undo.id).and_then(|abs| crate::fileops_cmds::to_recycle_bin(&abs))
         } else {
