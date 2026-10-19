@@ -5,11 +5,10 @@ use chrono::{DateTime, Datelike, Duration, FixedOffset, NaiveDate, NaiveTime};
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 
+use crate::db::atomically;
 use crate::extraction::Weekday;
 use crate::pipeline::items::{reject_item, ItemRef};
-use crate::util::new_id;
-
-const MAX_TITLE_CHARS: usize = 200;
+use crate::util::{new_id, MAX_TITLE_CHARS};
 
 /// One day of a routine, optionally with a time of day (`HH:MM`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -97,21 +96,6 @@ pub(crate) fn insert_routine(
         params![id, title.chars().take(MAX_TITLE_CHARS).collect::<String>(), serde_json::to_string(days).expect("days serialize"), block_id, signature, now],
     )?;
     Ok(id)
-}
-
-/// Runs `f` as one step: a savepoint works alone and inside a caller's transaction (as in `reject_item`).
-fn atomically<T, E: From<rusqlite::Error>>(conn: &Connection, name: &str, f: impl FnOnce() -> Result<T, E>) -> Result<T, E> {
-    conn.execute_batch(&format!("SAVEPOINT {name}"))?;
-    match f() {
-        Ok(v) => {
-            conn.execute_batch(&format!("RELEASE {name}"))?;
-            Ok(v)
-        }
-        Err(e) => {
-            conn.execute_batch(&format!("ROLLBACK TO {name}; RELEASE {name}"))?;
-            Err(e)
-        }
-    }
 }
 
 fn fmt_date(date: NaiveDate) -> String {

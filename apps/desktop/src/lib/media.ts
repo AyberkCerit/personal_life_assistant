@@ -1,6 +1,7 @@
 // Images and frontmatter in the editor (FR-EDT-006/007/016/017): which lines are frontmatter,
 // which embeds are images, which files may be pasted, and what a failed save means.
 import { errorText, type Key } from "./i18n";
+import { wikilinks } from "./links";
 
 const IMAGE = /\.(png|jpe?g|gif|webp)$/i;
 const IMAGE_TYPES = ["image/png", "image/jpeg", "image/gif", "image/webp"];
@@ -26,11 +27,11 @@ export function frontmatterLines(lines: string[]): number {
 /** The image targets of the `![[…]]` embeds on a line (code spans left out), size/heading cut. */
 export function imageEmbeds(line: string): string[] {
   const out: string[] = [];
-  const re = /!\[\[([^\]\n]+)\]\]/g;
-  for (let m = re.exec(line); m; m = re.exec(line)) {
-    const ticks = line.slice(0, m.index).split("`").length - 1;
+  for (const { start, inner } of wikilinks(line)) {
+    if (line[start - 1] !== "!") continue; // a link, not an embed
+    const ticks = line.slice(0, start).split("`").length - 1;
     if (ticks % 2 === 1) continue; // inside inline code
-    const target = m[1].replace(/\\\|/g, "|").split("|")[0].split("#")[0].trim();
+    const target = inner.replace(/\\\|/g, "|").split("|")[0].split("#")[0].trim();
     if (IMAGE.test(target)) out.push(target);
   }
   return out;

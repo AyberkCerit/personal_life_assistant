@@ -62,7 +62,7 @@ pub fn classify(vault: &Vault, paths: &[PathBuf], own: &SelfWrites) -> Changes {
         if is_excluded(&rel, &vault.config.folders) {
             continue;
         }
-        if !rel.to_lowercase().ends_with(".md") {
+        if !pla_core::vault::is_note_name(&rel) {
             if crate::indexer::is_folder_event(path) {
                 out.rescan = true;
             }

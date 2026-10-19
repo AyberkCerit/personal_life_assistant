@@ -9,6 +9,7 @@ use serde_json::{json, Value};
 use super::context::{self, Context, ANSWER_TOKENS};
 use super::tools::{self, Decision, ToolEnv};
 use super::{ChatModel, ToolRecord, Turn};
+use crate::lang::{weekday_name, Lang};
 use crate::llm::LlmError;
 
 /// Tool calls one question may make.
@@ -42,31 +43,13 @@ pub enum QaError {
     Db(#[from] rusqlite::Error),
 }
 
-const DAYS: [(&str, &str); 7] = [
-    ("Monday", "Pazartesi"),
-    ("Tuesday", "Salı"),
-    ("Wednesday", "Çarşamba"),
-    ("Thursday", "Perşembe"),
-    ("Friday", "Cuma"),
-    ("Saturday", "Cumartesi"),
-    ("Sunday", "Pazar"),
-];
-
-fn day_names(date: chrono::NaiveDate) -> (&'static str, &'static str) {
-    DAYS[date.format("%u").to_string().parse::<usize>().unwrap_or(1) - 1]
-}
-
-fn weekday(now: DateTime<FixedOffset>) -> &'static str {
-    day_names(now.date_naive()).0
-}
-
 /// The coming week with day names, so "Friday" or "cuma" needs no date arithmetic from a small model.
 fn calendar(now: DateTime<FixedOffset>) -> String {
     let today = now.date_naive();
     (0..8)
         .map(|i| {
             let d = today + chrono::Duration::days(i);
-            let (en, tr) = day_names(d);
+            let (en, tr) = (weekday_name(d, Lang::En), weekday_name(d, Lang::Tr));
             let label = match i {
                 0 => " = today / bugün",
                 1 => " = tomorrow / yarın",
@@ -99,7 +82,7 @@ fn system(ctx: &Context, now: DateTime<FixedOffset>) -> String {
          Calendar:\n{}\n",
         tools::descriptions(),
         now.format("%Y-%m-%d"),
-        weekday(now),
+        weekday_name(now.date_naive(), Lang::En),
         calendar(now),
     );
     if !ctx.recent.is_empty() {
@@ -570,14 +553,11 @@ fn planned_tasks(model: &mut dyn ChatModel, question: &str, now: DateTime<FixedO
 /// `[[…]]` targets in `text`, in order, once each.
 pub fn cited(text: &str) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
-    let mut rest = text;
-    while let Some(open) = rest.find("[[") {
-        let Some(close) = rest[open + 2..].find("]]") else { break };
-        let target = rest[open + 2..open + 2 + close].split(['|', '#']).next().unwrap_or_default().trim().to_owned();
+    for link in crate::markdown::wikilinks(text) {
+        let target = link.inner.split(['|', '#']).next().unwrap_or_default().trim().to_owned();
         if !target.is_empty() && !out.contains(&target) {
             out.push(target);
         }
-        rest = &rest[open + 2 + close + 2..];
     }
     out
 }
@@ -784,7 +764,12 @@ mod tests {
     }
 
     fn scripted(decisions: &[&str], answer: &str) -> Scripted {
-        Scripted { decisions: decisions.iter().map(|s| s.to_string()).collect(), answer: answer.into(), bodies: Vec::new(), extraction: "{\"items\":[]}".into() }
+        Scripted {
+            decisions: decisions.iter().map(|s| s.to_string()).collect(),
+            answer: answer.into(),
+            bodies: Vec::new(),
+            extraction: "{\"items\":[]}".into(),
+        }
     }
 
     struct Env {
@@ -1001,7 +986,14 @@ mod tests {
             &[r#"{"tool":"delete_task","args":{"task_id":"*"}}"#, &format!(r#"{{"tool":"add_task","args":{{"title":"{}"}}}}"#, "x".repeat(300))],
             "Yapamam.",
         );
-        let a = answer(&mut model, &tool_env, &Question { text: "Notlarımda ne var?", turns: &[], memory: None, ui_lang: "tr" }, &AtomicBool::new(false), &mut |_| {}).unwrap();
+        let a = answer(
+            &mut model,
+            &tool_env,
+            &Question { text: "Notlarımda ne var?", turns: &[], memory: None, ui_lang: "tr" },
+            &AtomicBool::new(false),
+            &mut |_| {},
+        )
+        .unwrap();
         // the grammar the model is held to names the fixed tools, whatever the notes say
         let schema = model.bodies[0]["response_format"]["json_schema"]["schema"].to_string();
         assert!(model.bodies[0]["messages"][0]["content"].as_str().unwrap().contains("delete_task"), "the note was read");
@@ -1023,7 +1015,14 @@ mod tests {
         let tool_env = ToolEnv { vault: &e.vault, pla: &e.pla, cache: &e.cache, now: now(), validation: ValidationSettings::default() };
         let mut model = scripted(&[], "Bütçeyi konuştunuz.");
         warm(&mut model, &e.cache, now() - chrono::Duration::minutes(2), &AtomicBool::new(false)).unwrap();
-        answer(&mut model, &tool_env, &Question { text: "Toplantıda ne konuştuk?", turns: &[], memory: None, ui_lang: "tr" }, &AtomicBool::new(false), &mut |_| {}).unwrap();
+        answer(
+            &mut model,
+            &tool_env,
+            &Question { text: "Toplantıda ne konuştuk?", turns: &[], memory: None, ui_lang: "tr" },
+            &AtomicBool::new(false),
+            &mut |_| {},
+        )
+        .unwrap();
         let (warmed, asked) = (&model.bodies[0], &model.bodies[1]);
         assert_eq!(warmed["max_tokens"], 1);
         assert_eq!(warmed["cache_prompt"], true);

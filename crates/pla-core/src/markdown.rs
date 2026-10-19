@@ -52,6 +52,26 @@ pub fn list_item_body(trimmed: &str) -> Option<&str> {
     })
 }
 
+/// One `[[…]]` in a text: the byte range from its `[[` to past its `]]`, and what is between.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct WikiLink<'a> {
+    pub start: usize,
+    pub end: usize,
+    pub inner: &'a str,
+}
+
+/// The `[[…]]` of `text` in order, as written (no alias, heading or embed handling: the callers
+/// read those their own way). An `[[` that never closes ends the scan.
+pub fn wikilinks(text: &str) -> impl Iterator<Item = WikiLink<'_>> {
+    let mut at = 0;
+    std::iter::from_fn(move || {
+        let open = at + text[at..].find("[[")?;
+        let close = open + 2 + text[open + 2..].find("]]")?;
+        at = close + 2;
+        Some(WikiLink { start: open, end: close + 2, inner: &text[open + 2..close] })
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -85,5 +105,15 @@ mod tests {
         assert_eq!(list_item_body("3. üç"), Some("üç"));
         assert_eq!(list_item_body("3.14 pi"), None);
         assert_eq!(list_item_body("-süt"), None);
+    }
+
+    #[test]
+    fn wikilinks_in_order_with_their_ranges() {
+        let text = "a [[Not|takma]] b ![[resim.png]] [[açık";
+        let found: Vec<(usize, usize, &str)> = wikilinks(text).map(|l| (l.start, l.end, l.inner)).collect();
+        assert_eq!(found, [(2, 15, "Not|takma"), (19, 32, "resim.png")]);
+        assert_eq!(&text[19..32], "[[resim.png]]");
+        assert_eq!(wikilinks("[[]] [[x]]").map(|l| l.inner).collect::<Vec<_>>(), ["", "x"]);
+        assert_eq!(wikilinks("düz metin").count(), 0);
     }
 }

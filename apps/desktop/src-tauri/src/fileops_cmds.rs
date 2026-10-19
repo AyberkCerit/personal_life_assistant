@@ -11,9 +11,9 @@ use pla_core::index;
 use pla_core::vault::Vault;
 use tauri::{AppHandle, Emitter, State};
 
-use crate::commands::{AppState, Session};
-use crate::indexer::IndexCommand;
+use crate::commands::{with_session, AppState, Session};
 use crate::errors::{ue, UserError};
+use crate::indexer::IndexCommand;
 
 /// A file error as a code the UI turns into a sentence in its language.
 pub fn code(e: FileError) -> String {
@@ -31,11 +31,6 @@ fn join(folder: &str, name: &str) -> String {
     } else {
         format!("{folder}/{name}")
     }
-}
-
-fn with_session<T>(state: &State<AppState>, f: impl FnOnce(&Session) -> Result<T, String>) -> Result<T, String> {
-    let guard = state.session.lock().expect("session lock");
-    f(guard.as_ref().ok_or(crate::commands::NO_VAULT)?)
 }
 
 /// Notes (other than `rel`) with a link to it, by the index.
@@ -243,7 +238,7 @@ pub fn list_templates(state: State<AppState>) -> Result<Vec<String>, String> {
                 entries
                     .flatten()
                     .map(|e| e.file_name().to_string_lossy().into_owned())
-                    .filter(|n| n.to_lowercase().ends_with(".md") && !n.starts_with('.'))
+                    .filter(|n| pla_core::vault::is_note_name(n) && !n.starts_with('.'))
                     .map(|n| index::strip_md(&n).to_owned())
                     .collect()
             })

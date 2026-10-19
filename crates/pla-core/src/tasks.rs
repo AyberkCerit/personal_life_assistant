@@ -7,9 +7,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::extraction::{ItemType, RawItem};
 use crate::pipeline::items::{action_signature, reject_item, ItemRef};
-use crate::util::new_id;
+use crate::util::{new_id, MAX_TITLE_CHARS};
 
-const MAX_TITLE_CHARS: usize = 200;
 const COMPLETED_LIMIT: i64 = 200;
 const DEFAULT_REMINDER_TIME: &str = "09:00";
 

@@ -24,10 +24,7 @@ fn today() -> NaiveDate {
 }
 
 fn with_db<T>(state: &State<AppState>, f: impl FnOnce(&Connection) -> Result<T, MetricError>) -> Result<T, String> {
-    let guard = state.session.lock().expect("session lock");
-    let session = guard.as_ref().ok_or(crate::commands::NO_VAULT)?;
-    let db = session.db.lock().expect("db lock");
-    f(&db).map_err(metric_code)
+    crate::commands::with_db(state, metric_code, |db| f(db))
 }
 
 /// The measurements screen reads these codes itself (`metrics.error.<code>`, metrics.ts); a
