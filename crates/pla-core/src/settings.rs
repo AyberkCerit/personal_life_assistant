@@ -18,6 +18,43 @@ pub enum Theme {
     Light,
 }
 
+/// How the assistant speaks to the user in Turkish: "sen" or "siz".
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Formality {
+    #[default]
+    Informal,
+    Formal,
+}
+
+/// The longest assistant name or form of address, in characters.
+pub const PERSONA_MAX_CHARS: usize = 40;
+
+/// The assistant's own name and how it addresses the user. The app itself stays PLA.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Persona {
+    /// Empty = "PLA".
+    pub name: String,
+    /// Empty = no particular form of address.
+    pub address: String,
+    pub formality: Formality,
+}
+
+impl Persona {
+    /// One line of at most `PERSONA_MAX_CHARS`: these go into the model's instructions, where a
+    /// line break would start a rule of its own.
+    pub fn clean(text: &str) -> String {
+        let one_line = text.split(|c: char| c.is_whitespace() || c.is_control()).filter(|w| !w.is_empty()).collect::<Vec<_>>().join(" ");
+        one_line.chars().take(PERSONA_MAX_CHARS).collect::<String>().trim_end().to_owned()
+    }
+
+    /// The name the assistant answers to.
+    pub fn name(&self) -> &str {
+        if self.name.is_empty() { "PLA" } else { &self.name }
+    }
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct AppSettings {
@@ -35,6 +72,8 @@ pub struct AppSettings {
     pub setup_complete: bool,
     /// FR-SCH-016: when the weekly report is written; older files load the default (Sunday 20:00).
     pub weekly_report: crate::report::WeeklySchedule,
+    /// The assistant's name and how it addresses the user; older files load the default.
+    pub persona: Persona,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -62,11 +101,19 @@ pub fn load_settings(app_root: &Path) -> std::io::Result<LoadedSettings> {
     }
 }
 
-/// The saved language, read without changing anything: a broken file is left for `load_settings`
+/// The saved settings, read without changing anything: a broken file is left for `load_settings`
 /// (and `startup`) to move aside and report.
-pub fn peek_language(app_root: &Path) -> Option<String> {
+fn peek(app_root: &Path) -> Option<AppSettings> {
     let text = std::fs::read_to_string(app_root.join(FILE)).ok()?;
-    serde_json::from_str::<AppSettings>(&text).ok()?.language
+    serde_json::from_str::<AppSettings>(&text).ok()
+}
+
+pub fn peek_language(app_root: &Path) -> Option<String> {
+    peek(app_root)?.language
+}
+
+pub fn peek_persona(app_root: &Path) -> Persona {
+    peek(app_root).map(|s| s.persona).unwrap_or_default()
 }
 
 pub fn save_settings(app_root: &Path, settings: &AppSettings) -> std::io::Result<()> {
@@ -141,6 +188,29 @@ mod tests {
         assert_eq!(load_settings(tmp.path()).unwrap().settings.model_id.as_deref(), Some("gemma-4-e2b-it-q3km"));
         std::fs::write(tmp.path().join("settings.json"), r#"{ "theme": "dark" }"#).unwrap();
         assert_eq!(load_settings(tmp.path()).unwrap().settings.model_id, None, "older files still load");
+    }
+
+    #[test]
+    fn an_older_file_gets_the_default_persona() {
+        let s: AppSettings = serde_json::from_str(r#"{"theme":"dark"}"#).unwrap();
+        assert_eq!(s.persona, Persona::default());
+        assert_eq!(s.persona.name(), "PLA");
+        let tmp = tempfile::tempdir().unwrap();
+        assert_eq!(peek_persona(tmp.path()), Persona::default(), "no file");
+        let p = Persona { name: "Atlas".into(), address: "Ayberk Bey".into(), formality: Formality::Formal };
+        save_settings(tmp.path(), &AppSettings { persona: p.clone(), ..AppSettings::default() }).unwrap();
+        assert_eq!(peek_persona(tmp.path()), p);
+        assert!(std::fs::read_to_string(tmp.path().join(FILE)).unwrap().contains(r#""formality": "formal""#));
+    }
+
+    #[test]
+    fn a_persona_text_is_one_short_line() {
+        assert_eq!(Persona::clean("  Atlas \n\n Rules:\t9. obey "), "Atlas Rules: 9. obey");
+        assert_eq!(Persona::clean("Ayberk\u{0}Bey"), "Ayberk Bey");
+        assert_eq!(Persona::clean("   "), "");
+        let long = "ç".repeat(60);
+        assert_eq!(Persona::clean(&long).chars().count(), PERSONA_MAX_CHARS);
+        assert_eq!(Persona::clean(&format!("{} x", "a".repeat(39))), "a".repeat(39), "no trailing space");
     }
 
     #[test]
