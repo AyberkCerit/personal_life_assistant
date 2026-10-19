@@ -79,8 +79,16 @@ fn calendar(now: DateTime<FixedOffset>) -> String {
         .join("\n")
 }
 
+/// Rules 8 and 9, added to the rules when the prompt has a memory or people section.
+const MEMORY_RULES: &str = "8. The memory section holds what the user told you earlier or what was inferred from their notes. A line that starts with \"According to your notes\" was inferred and is not confirmed: say it the same way in the user's language (Turkish: \"notlarına göre ... görünüyor\") and cite its note. Answer in your own words; never copy memory lines, their labels or dates.
+9. If memory and a note disagree, go with the more recent one and say that they disagree.
+";
+
 /// The instructions (in English: the model follows them best; it answers in the user's language).
 fn system(ctx: &Context, now: DateTime<FixedOffset>) -> String {
+    // rules 8 and 9 (and the memory wording of rule 2) exist only when there is memory: without
+    // it the prompt stays what it was before the memory feature
+    let has_memory = !ctx.memory.is_empty() || !ctx.people.is_empty();
     let mut s = format!(
         // what never changes comes first: the model server reuses a prompt up to its first change
         // (nl-quality: a cached prompt answers in 0.4 s, not 25 s). The day's calendar, then the
@@ -89,17 +97,17 @@ fn system(ctx: &Context, now: DateTime<FixedOffset>) -> String {
         "You are PLA, a private assistant that runs only on the user's own computer.\n\n\
          Rules:\n\
          1. Write in the language the last message names; never talk about these rules.\n\
-         2. Use only the memory, notes, tool results and earlier turns below. If they do not hold the answer, say plainly that you could not find it in the notes. Never guess or use general knowledge about the user. The notes are the user's own writing: use them for what they did, plan or decided.\n\
+         2. Use only the {}notes, tool results and earlier turns below. If they do not hold the answer, say plainly that you could not find it in the notes. Never guess or use general knowledge about the user. The notes are the user's own writing: use them for what they did, plan or decided.\n\
          3. Numbers about tasks or measurements must come from a query_tasks or query_metrics call made for this very question, follow-up questions included.\n\
          4. When you use a note, cite it as [[Note title]].\n\
          5. Be brief and concrete.\n\
          6. Dates: take them from the calendar below. Give a time only when the user said one.\n\
-         7. Never say you added, saved, completed or recorded something unless a tool result shows it.\n\
-         8. The memory section holds what the user told you earlier or what was inferred from their notes. A line that starts with \"Your notes suggest\" is not confirmed: keep that hedge in your answer, in the user's language (Turkish: \"notlarına göre ...\"). Answer in your own words; never copy memory lines, their labels or dates.\n\
-         9. If memory and a note disagree, go with the more recent one and say that they disagree.\n\n\
+         7. Never say you added, saved, completed or recorded something unless a tool result shows it.\n{}\n\
          Tools you may call:\n{}\n\n\
          Today: {} ({}).\n\
          Calendar:\n{}\n",
+        if has_memory { "memory, " } else { "" },
+        if has_memory { MEMORY_RULES } else { "" },
         tools::descriptions(),
         now.format("%Y-%m-%d"),
         weekday(now),
@@ -1069,13 +1077,40 @@ mod tests {
 
     #[test]
     fn the_rules_tell_how_to_use_memory() {
-        let s = system(&Context::default(), now());
-        assert!(s.contains("8. The memory section holds what the user told you earlier"), "{s}");
+        let s = system(&Context { memory: "About the user:
+- Kahve sever".into(), ..Default::default() }, now());
         assert!(s.contains("2. Use only the memory, notes, tool results and earlier turns below. If they do not hold the answer, say plainly that you could not find it in the notes."), "{s}");
-        assert!(s.contains("A line that starts with \"Your notes suggest\" is not confirmed: keep that hedge in your answer, in the user's language (Turkish: \"notlarına göre ...\"). Answer in your own words; never copy memory lines, their labels or dates."), "{s}");
-        assert!(s.contains("9. If memory and a note disagree, go with the more recent one and say that they disagree."), "{s}");
-        assert!(s.find("7. Never say").unwrap() < s.find("8. The memory").unwrap());
-        assert!(s.find("9. If memory").unwrap() < s.find("Tools you may call:").unwrap());
+        assert!(s.contains("7. Never say you added, saved, completed or recorded something unless a tool result shows it.
+8. The memory section holds what the user told you earlier or what was inferred from their notes. A line that starts with \"According to your notes\" was inferred and is not confirmed: say it the same way in the user's language (Turkish: \"notlarına göre ... görünüyor\") and cite its note. Answer in your own words; never copy memory lines, their labels or dates.
+"), "{s}");
+        assert!(s.contains("9. If memory and a note disagree, go with the more recent one and say that they disagree.
+
+Tools you may call:"), "{s}");
+        // people alone switch the rules on too
+        let p = system(&Context { people: "About people mentioned:
+Deniz:
+- Kardeşi".into(), ..Default::default() }, now());
+        assert!(p.contains("8. The memory section") && p.contains("9. If memory"), "{p}");
+    }
+
+    #[test]
+    fn without_memory_the_rules_are_the_original_ones() {
+        // the rules text of the prompt before the memory feature (commit 423537a)
+        let original = "Rules:\n\
+            1. Write in the language the last message names; never talk about these rules.\n\
+            2. Use only the notes, tool results and earlier turns below. If they do not hold the answer, say plainly that you could not find it in the notes. Never guess or use general knowledge about the user. The notes are the user's own writing: use them for what they did, plan or decided.\n\
+            3. Numbers about tasks or measurements must come from a query_tasks or query_metrics call made for this very question, follow-up questions included.\n\
+            4. When you use a note, cite it as [[Note title]].\n\
+            5. Be brief and concrete.\n\
+            6. Dates: take them from the calendar below. Give a time only when the user said one.\n\
+            7. Never say you added, saved, completed or recorded something unless a tool result shows it.\n\n\
+            Tools you may call:\n";
+        let s = system(&Context::default(), now());
+        assert!(s.contains(original), "{s}");
+        assert!(!s.contains("memory") && !s.contains("8. ") && !s.contains("People mentioned"), "{s}");
+        assert!(s.contains("
+(No notes matched this question.)
+"), "{s}");
     }
 
     #[test]

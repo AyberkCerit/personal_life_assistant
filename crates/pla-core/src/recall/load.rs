@@ -96,7 +96,7 @@ fn line(e: &Entry) -> String {
         Kind::Inferred => {
             let path = e.source.as_deref().unwrap_or("").split('#').next().unwrap_or("");
             let file = path.rsplit('/').next().unwrap_or(path);
-            format!("- Your notes suggest: {} (inferred from [[{}]], {date})", e.text, file.strip_suffix(".md").unwrap_or(file))
+            format!("- According to your notes ([[{}]], {date}): {}", file.strip_suffix(".md").unwrap_or(file), e.text)
         }
     }
 }
@@ -267,7 +267,7 @@ mod tests {
         let b = block(&r);
         assert!(b.starts_with("About the user:\n"), "{b}");
         assert!(b.contains("- Sabah spor. (said by the user, 2026-10-18)"), "{b}");
-        assert!(b.contains("- Your notes suggest: X8 önde. (inferred from [[Skywalker X8]], 2026-10-10)"), "{b}");
+        assert!(b.contains("- According to your notes ([[Skywalker X8]], 2026-10-10): X8 önde."), "{b}");
         assert!(b.ends_with("- Çay sever."), "{b}");
         assert!(!b.contains("arşiv") && !b.contains("yok"));
     }
@@ -280,9 +280,9 @@ mod tests {
 ";
         let r = load(&vault_with(&[("Hakkımda.md", md)]).1);
         let b = block(&r);
-        let hedged: Vec<&str> = b.lines().filter(|l| l.starts_with("- Your notes suggest: ")).collect();
+        let hedged: Vec<&str> = b.lines().filter(|l| l.starts_with("- According to your notes (")).collect();
         assert_eq!(hedged.len(), 1, "{b}");
-        assert!(hedged[0].contains("(inferred from [[Skywalker X8]], 2026-10-10)"), "{b}");
+        assert_eq!(hedged[0], "- According to your notes ([[Skywalker X8]], 2026-10-10): X8 önde.", "{b}");
         assert!(b.contains("- Sabah spor. (said by the user, 2026-10-18)") && b.contains("- Çay sever."), "{b}");
     }
 
