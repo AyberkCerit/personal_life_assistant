@@ -12,7 +12,7 @@ use pla_core::vault::Vault;
 use tauri::{AppHandle, Emitter, State};
 
 use crate::commands::{with_session, AppState, Session};
-use crate::errors::{ue, UserError};
+use crate::errors::{own_code, ue, UserError};
 use crate::indexer::IndexCommand;
 
 /// A file error as a code the UI turns into a sentence in its language.
@@ -158,11 +158,11 @@ pub fn rename_folder(app: AppHandle, state: State<AppState>, path: String, name:
 /// What may be deleted: a note or a folder inside the vault, never a system folder or the root.
 pub fn deletable(vault: &Vault, rel: &str) -> Result<std::path::PathBuf, String> {
     if rel.trim_matches('/').is_empty() || fileops::is_system_folder(&vault.config.folders, rel) {
-        return Err(format!("bad_path|{rel}|"));
+        return Err(own_code("bad_path", rel, ""));
     }
     let path = files::resolve(vault, rel).map_err(code)?;
     if !path.exists() {
-        return Err("missing||".into());
+        return Err(own_code("missing", "", ""));
     }
     Ok(path)
 }
@@ -220,7 +220,7 @@ pub fn create_folder(app: AppHandle, state: State<AppState>, parent: String, nam
     with_session(&state, |s| {
         let path = files::resolve(&s.vault, &rel).map_err(code)?;
         if path.exists() {
-            return Err(format!("exists|{rel}|"));
+            return Err(own_code("exists", &rel, ""));
         }
         std::fs::create_dir_all(&path).map_err(ue)
     })?;
@@ -252,7 +252,7 @@ pub fn list_templates(state: State<AppState>) -> Result<Vec<String>, String> {
 fn write_new(state: &State<AppState>, vault: &Vault, rel: &str, text: &str) -> Result<(), String> {
     let path = files::resolve(vault, rel).map_err(code)?;
     if path.exists() {
-        return Err(format!("exists|{rel}|"));
+        return Err(own_code("exists", rel, ""));
     }
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(ue)?;
@@ -273,7 +273,7 @@ pub fn create_note_in(app: AppHandle, state: State<AppState>, folder: String, ti
         let title = title.trim();
         check_name(title).map_err(code)?;
         let source = files::resolve(&s.vault, &join(&s.vault.config.folders.templates, &format!("{template}.md"))).map_err(code)?;
-        let body = std::fs::read_to_string(source).map_err(|_| format!("missing|{template}|"))?;
+        let body = std::fs::read_to_string(source).map_err(|_| own_code("missing", &template, ""))?;
         let rel = join(&folder, &format!("{title}.md"));
         write_new(&state, &s.vault, &rel, &fileops::fill_template(&body, title, Local::now().fixed_offset()))?;
         Ok(rel)

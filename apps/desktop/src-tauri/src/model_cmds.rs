@@ -11,7 +11,7 @@ use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::commands::{app_root, bundled_server, update_settings, AppState};
 use crate::worker::Command;
-use crate::errors::{ue, UserError};
+use crate::errors::{own_code, ue, UserError};
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct InstalledModel {
@@ -43,14 +43,14 @@ pub(crate) fn describe_model(path: &Path, id: Option<&str>) -> Option<InstalledM
 /// FR-MDL-008: a checked GGUF file becomes the active model, used where it is.
 fn apply_local_model(settings: &mut AppSettings, path: &Path) -> Result<InstalledModel, String> {
     let model = local::validate_gguf(path).map_err(|e| match e {
-        local::LocalModelError::NotFound(_) => "not_found".to_owned(),
-        local::LocalModelError::NotGguf(_) => "not_gguf".to_owned(),
-        local::LocalModelError::Incomplete { .. } => "incomplete".to_owned(),
+        local::LocalModelError::NotFound(p) => own_code("not_found", p.display(), ""),
+        local::LocalModelError::NotGguf(p) => own_code("not_gguf", p.display(), ""),
+        local::LocalModelError::Incomplete { expected, actual } => own_code("incomplete", "", format!("{actual} of {expected} bytes")),
         local::LocalModelError::Io(e) => format!("io:{e}"),
     })?;
     settings.model_path = Some(model.path.clone());
     settings.model_id = None;
-    describe_model(&model.path, None).ok_or_else(|| "not_found".to_owned())
+    describe_model(&model.path, None).ok_or_else(|| own_code("not_found", "", ""))
 }
 
 /// Saves the model in the settings, hands it to the running worker and tells the UI.
@@ -83,7 +83,7 @@ pub fn model_remove(app: AppHandle, state: State<AppState>) -> Result<(), String
     if asked {
         // The run stops before its next model call and the call in flight within a second
         // (Extractor::set_interrupt); only a model still starting can hold it, two tries of 30 s.
-        done.recv_timeout(Duration::from_secs(90)).map_err(|_| "model_busy".to_owned())?;
+        done.recv_timeout(Duration::from_secs(90)).map_err(|_| own_code("model_busy", "", ""))?;
     }
     if let crate::model_paths::Removal::Delete(path) = &plan {
         // llama-server may need a moment to release the file after it exits
@@ -100,7 +100,7 @@ pub fn model_remove(app: AppHandle, state: State<AppState>) -> Result<(), String
         match result {
             Ok(()) => {}
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-            Err(e) => return Err(format!("not_removed|{}|{}", path.display(), crate::wizard::write_failure(&e))),
+            Err(e) => return Err(own_code("not_removed", path.display(), crate::wizard::write_failure(&e))),
         }
     }
     // A model chosen or downloaded meanwhile stays (settings final review M1).
@@ -178,7 +178,7 @@ pub fn model_download_start(app: AppHandle, state: State<AppState>) -> Result<()
                 }
             },
         )
-        .map_err(|_| "download_running".to_owned())
+        .map_err(|_| own_code("download_running", "", ""))
 }
 
 #[tauri::command]

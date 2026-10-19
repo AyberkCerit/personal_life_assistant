@@ -20,7 +20,7 @@ use crate::worker::{AddedItem, WorkerStatus};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State};
 
-use crate::errors::ue;
+use crate::errors::{own_code, ue};
 use crate::notify::{show_info, strings, AppNotifier};
 use crate::scheduler::{Pending, SchedCommand, Scheduler, SchedulerHandle};
 use crate::system::WindowsProbe;
@@ -360,7 +360,7 @@ pub fn open_vault(app: AppHandle, state: State<AppState>, path: String) -> Resul
 fn open_vault_locked(app: &AppHandle, state: &State<AppState>, path: &Path) -> Result<VaultInfo, String> {
     // NFR-SEC-010: the uninstaller may delete PLA's own folders, so a vault never lives there
     if pla_core::vault::inside_app_data(path, &pla_core::vault::app_data_roots()) {
-        return Err(format!("app_data|{}", path.display()));
+        return Err(own_code("app_data", path.display(), ""));
     }
     let root = app_root()?;
     let settings = load_settings(&root).map_err(ue)?.settings;
@@ -386,7 +386,7 @@ fn open_vault_locked(app: &AppHandle, state: &State<AppState>, path: &Path) -> R
                 *state.session.lock().expect("session lock") = Some(back);
                 error
             }
-            Err(_) => format!("vault_lost|{}|{error}", old.display()),
+            Err(_) => own_code("vault_lost", old.display(), &error),
         }
     };
     let session = match start_session(app, path, &settings, Arc::clone(&state.self_writes), paused) {
@@ -486,7 +486,7 @@ pub fn weekly_report_settings(state: State<AppState>) -> Result<WeeklyReportView
 #[tauri::command]
 pub fn set_weekly_report(state: State<AppState>, schedule: pla_core::report::WeeklySchedule) -> Result<(), String> {
     if schedule.weekday > 6 || chrono::NaiveTime::parse_from_str(&schedule.time, "%H:%M").is_err() {
-        return Err(format!("invalid_setting|weekly_report|{} {}", schedule.weekday, schedule.time));
+        return Err(own_code("invalid_setting", "weekly_report", format!("{} {}", schedule.weekday, schedule.time)));
     }
     update_settings(&app_root()?, &state.settings_lock, |s| s.weekly_report = schedule.clone())?;
     if let Some(session) = state.session.lock().expect("session lock").as_ref() {
@@ -518,7 +518,7 @@ pub fn apply_setting(s: &mut AppSettings, key: &str, value: &serde_json::Value) 
         ("user_address", Value::String(a)) => s.persona.address = Persona::clean(a),
         ("formality", Value::String(f)) if f == "informal" => s.persona.formality = Formality::Informal,
         ("formality", Value::String(f)) if f == "formal" => s.persona.formality = Formality::Formal,
-        _ => return Err(format!("invalid_setting|{key}|{value}")),
+        _ => return Err(own_code("invalid_setting", key, value)),
     }
     Ok(())
 }

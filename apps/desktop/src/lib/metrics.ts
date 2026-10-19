@@ -109,5 +109,5 @@ const CODES = ["out_of_range", "missing_value", "empty_workout", "invalid_date",
 export function metricError(err: string): { key: Key; field: string | null; value: number | null; detail?: string } {
   const [code, field, value] = err.split("|");
   if (!CODES.includes(code)) return { key: "metrics.error.other", field: null, value: null, detail: err };
-  return { key: `metrics.error.${code}` as Key, field: field ?? null, value: value !== undefined ? Number(value) : null };
+  return { key: `metrics.error.${code}` as Key, field: field || null, value: value ? Number(value) : null };
 }
