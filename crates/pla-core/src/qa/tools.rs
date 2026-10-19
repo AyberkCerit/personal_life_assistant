@@ -250,13 +250,13 @@ pub fn run(env: &ToolEnv<'_>, tool: &str, args: &Value) -> Result<ToolRecord, St
         "add_task" => {
             unknown_keys(args, &["title", "date", "time", "remind"])?;
             let title = required(args, "title", 200)?;
-            let date = date(args, "date")?;
+            let mut date = date(args, "date")?;
             let time = text(args, "time", 5)?;
             if let Some(t) = &time {
                 NaiveTime::parse_from_str(t, "%H:%M").map_err(|_| format!("time {t:?} is not HH:MM"))?;
-                if date.is_none() {
-                    return Err("a time needs a date".into());
-                }
+                // a time alone is today, as people say it ("akşam 10'da spora gideceğim"); the model
+                // often leaves the date out then, and refusing lost the task in the real window
+                date = date.or_else(|| Some(today.to_string()));
             }
             // a task at a set time is a reminder unless the model says otherwise ("randevum var")
             let remind = match &args["remind"] {
@@ -384,12 +384,22 @@ mod tests {
     }
 
     #[test]
+    fn a_time_without_a_date_is_today() {
+        // "akşam 10'da spora gideceğim": the model gave 22:00 and no date, and the task was lost
+        let (_t, vault, pla, cache) = env_parts();
+        let env = ToolEnv { vault: &vault, pla: &pla, cache: &cache, now: now(), validation: ValidationSettings::default() };
+        let rec = run(&env, "add_task", &json!({ "title": "Spor", "time": "22:00" })).unwrap();
+        assert_eq!(rec.result["date"], now().date_naive().to_string());
+        assert_eq!(rec.result["time"], "22:00");
+        assert_eq!(rec.result["remind"], true);
+    }
+
+    #[test]
     fn bad_arguments_are_refused_before_anything_is_written() {
         // FR-QA-005/016
         let (_t, vault, pla, cache) = env_parts();
         let env = ToolEnv { vault: &vault, pla: &pla, cache: &cache, now: now(), validation: ValidationSettings::default() };
         assert!(run(&env, "add_task", &json!({ "title": "x", "date": "yarın" })).unwrap_err().contains("not a date"));
-        assert!(run(&env, "add_task", &json!({ "title": "x", "time": "10:00" })).unwrap_err().contains("needs a date"));
         assert!(run(&env, "add_task", &json!({ "title": "x", "remind": true })).unwrap_err().contains("reminder"));
         assert!(run(&env, "add_task", &json!({ "title": "x", "owner": "y" })).unwrap_err().contains("unknown argument"));
         assert!(run(&env, "complete_task", &json!({ "task_id": "yok" })).unwrap_err().contains("query_tasks"));
