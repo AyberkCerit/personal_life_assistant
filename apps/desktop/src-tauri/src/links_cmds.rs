@@ -5,16 +5,9 @@ use pla_core::index::{self, Backlink, QuickHit, SearchHit, TagCount};
 use serde::Serialize;
 use tauri::State;
 
-use crate::commands::AppState;
-use crate::indexer::IndexCommand;
+use crate::commands::{with_cache, with_session, AppState};
 use crate::errors::ue;
-
-fn with_cache<T>(state: &State<AppState>, f: impl FnOnce(&rusqlite::Connection) -> rusqlite::Result<T>) -> Result<T, String> {
-    let guard = state.session.lock().expect("session lock");
-    let session = guard.as_ref().ok_or(crate::commands::NO_VAULT)?;
-    let cache = session.cache.lock().expect("cache lock");
-    f(&cache).map_err(ue)
-}
+use crate::indexer::IndexCommand;
 
 #[tauri::command(async)]
 pub fn search_notes(state: State<AppState>, query: String, folder: Option<String>, tag: Option<String>) -> Result<Vec<SearchHit>, String> {
@@ -62,30 +55,30 @@ pub struct OpenedLink {
 /// FR-EDT-008/009: the note a wikilink points to; a missing one is created in the inbox and opened.
 #[tauri::command]
 pub fn open_link(state: State<AppState>, target: String) -> Result<OpenedLink, String> {
-    let guard = state.session.lock().expect("session lock");
-    let session = guard.as_ref().ok_or(crate::commands::NO_VAULT)?;
-    if let Some(path) = index::resolve_link(&session.cache.lock().expect("cache lock"), &target).map_err(ue)? {
-        return Ok(OpenedLink { path, created: false });
-    }
-    // Not indexed yet (first open, a long sync, a note made a moment ago): the disk decides (I1).
-    if let Some(path) = index::find_on_disk(&session.vault.root, &target) {
+    with_session(&state, |session| {
+        if let Some(path) = index::resolve_link(&session.cache.lock().expect("cache lock"), &target).map_err(ue)? {
+            return Ok(OpenedLink { path, created: false });
+        }
+        // Not indexed yet (first open, a long sync, a note made a moment ago): the disk decides (I1).
+        if let Some(path) = index::find_on_disk(&session.vault.root, &target) {
+            session.indexer.send(IndexCommand::Touch(path.clone()));
+            return Ok(OpenedLink { path, created: false });
+        }
+        let title = new_note_title(&target);
+        if !is_note_target(&title) {
+            return Err(format!("not_a_note|{target}|"));
+        }
+        let inbox = &session.vault.config.folders.inbox;
+        // Clicked again before the index caught up: the note made a moment ago, not a second one.
+        let existing = format!("{inbox}/{title}.md");
+        if files::resolve(&session.vault, &existing).is_ok_and(|p| p.is_file()) {
+            return Ok(OpenedLink { path: existing, created: false });
+        }
+        let path = files::create_note(&session.vault, inbox, &title).map_err(ue)?;
+        state.self_writes.record_text(&path, "");
         session.indexer.send(IndexCommand::Touch(path.clone()));
-        return Ok(OpenedLink { path, created: false });
-    }
-    let title = new_note_title(&target);
-    if !is_note_target(&title) {
-        return Err(format!("not_a_note|{target}|"));
-    }
-    let inbox = &session.vault.config.folders.inbox;
-    // Clicked again before the index caught up: the note made a moment ago, not a second one.
-    let existing = format!("{inbox}/{title}.md");
-    if files::resolve(&session.vault, &existing).is_ok_and(|p| p.is_file()) {
-        return Ok(OpenedLink { path: existing, created: false });
-    }
-    let path = files::create_note(&session.vault, inbox, &title).map_err(ue)?;
-    state.self_writes.record_text(&path, "");
-    session.indexer.send(IndexCommand::Touch(path.clone()));
-    Ok(OpenedLink { path, created: true })
+        Ok(OpenedLink { path, created: true })
+    })
 }
 
 #[cfg(test)]

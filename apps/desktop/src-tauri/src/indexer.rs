@@ -105,7 +105,7 @@ pub fn index_events(root: &Path, paths: &[PathBuf]) -> (Vec<String>, bool) {
         if rel.is_empty() || rel.split('/').any(|p| p.starts_with('.')) {
             continue;
         }
-        if rel.to_ascii_lowercase().ends_with(".md") {
+        if pla_core::vault::is_note_name(&rel) {
             if !notes.contains(&rel) {
                 notes.push(rel);
             }

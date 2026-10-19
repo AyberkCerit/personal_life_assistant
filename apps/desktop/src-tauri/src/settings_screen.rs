@@ -149,10 +149,10 @@ pub struct BackupStatus {
 
 #[tauri::command]
 pub fn backup_status(state: State<AppState>) -> Result<BackupStatus, String> {
-    let guard = state.session.lock().expect("session lock");
-    let session = guard.as_ref().ok_or(crate::commands::NO_VAULT)?;
-    let job = pla_core::jobs::status(&session.db.lock().expect("db lock"), pla_core::jobs::DAILY).map_err(ue)?;
-    Ok(BackupStatus { job, backups: pla_core::jobs::backups(&session.vault.root) })
+    crate::commands::with_session(&state, |session| {
+        let job = pla_core::jobs::status(&session.db.lock().expect("db lock"), pla_core::jobs::DAILY).map_err(ue)?;
+        Ok(BackupStatus { job, backups: pla_core::jobs::backups(&session.vault.root) })
+    })
 }
 
 /// NFR-SEC-008: tasks and metrics as two CSV files in the folder the user picked; returns their paths.
@@ -163,13 +163,9 @@ pub fn export_data(state: State<AppState>, dir: String, lang: String) -> Result<
         return Err(format!("missing|{}|", dir.display()));
     }
     let style = region_style();
-    let (tasks, metrics) = {
-        let guard = state.session.lock().expect("session lock");
-        let session = guard.as_ref().ok_or(crate::commands::NO_VAULT)?;
-        let db = session.db.lock().expect("db lock");
-        let tasks = pla_core::export::tasks_csv(&db, &lang, style).map_err(ue)?;
-        (tasks, pla_core::export::metrics_csv(&db, &lang, style).map_err(ue)?)
-    };
+    let (tasks, metrics) = crate::commands::with_db(&state, ue, |db| {
+        Ok::<_, rusqlite::Error>((pla_core::export::tasks_csv(db, &lang, style)?, pla_core::export::metrics_csv(db, &lang, style)?))
+    })?;
     let (tasks_name, metrics_name) = export_names(&lang, &chrono::Local::now().format("%Y-%m-%d").to_string());
     let mut written = Vec::new();
     for (name, text) in [(tasks_name, tasks), (metrics_name, metrics)] {

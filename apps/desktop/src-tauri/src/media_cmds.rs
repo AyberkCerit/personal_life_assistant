@@ -12,8 +12,8 @@ use tauri::ipc::{InvokeBody, Request, Response};
 use tauri::{AppHandle, Emitter, State};
 
 use crate::commands::AppState;
-use crate::fileops_cmds::code;
 use crate::errors::ue;
+use crate::fileops_cmds::code;
 
 fn media_code(e: MediaError) -> String {
     match e {
@@ -32,8 +32,7 @@ pub fn note_meta(text: String) -> FrontMatter {
 
 /// The open vault, copied out so no file work happens under the session lock (final review I2).
 fn vault_of(state: &State<AppState>) -> Result<Vault, String> {
-    let guard = state.session.lock().expect("session lock");
-    Ok(guard.as_ref().ok_or(crate::commands::NO_VAULT)?.vault.clone())
+    crate::commands::with_session(state, |s| Ok(s.vault.clone()))
 }
 
 /// The vault's images, walked at most every few seconds: a note with many embeds asks at once.

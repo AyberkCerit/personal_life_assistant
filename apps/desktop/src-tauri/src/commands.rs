@@ -21,12 +21,12 @@ use crate::worker::{AddedItem, WorkerStatus};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State};
 
+use crate::errors::ue;
 use crate::notify::{show_info, strings, AppNotifier};
 use crate::scheduler::{Pending, SchedCommand, Scheduler, SchedulerHandle};
 use crate::system::WindowsProbe;
 use crate::watcher::{watch, SelfWrites, WatchHandle};
 use crate::worker::{Command, Worker, WorkerHandle};
-use crate::errors::ue;
 
 /// One open vault. Fields drop in order: the scheduler stops first, then the watcher, then the
 /// worker (which ends the model).
@@ -269,10 +269,32 @@ fn start_session(app: &AppHandle, root: &Path, settings: &AppSettings, own: Arc<
     })
 }
 
-fn with_vault<T>(state: &State<AppState>, f: impl FnOnce(&Vault) -> Result<T, FileError>) -> Result<T, String> {
+/// The open session, or the `no_vault` error every command gives without one.
+pub(crate) fn with_session<T>(state: &AppState, f: impl FnOnce(&Session) -> Result<T, String>) -> Result<T, String> {
     let guard = state.session.lock().expect("session lock");
-    let session = guard.as_ref().ok_or(NO_VAULT)?;
-    f(&session.vault).map_err(ue)
+    f(guard.as_ref().ok_or(NO_VAULT)?)
+}
+
+/// The window's pla.db connection; `code` says the command's own error the way the page reads it.
+pub(crate) fn with_db<T, E>(state: &AppState, code: impl FnOnce(E) -> String, f: impl FnOnce(&mut Connection) -> Result<T, E>) -> Result<T, String> {
+    with_session(state, |session| f(&mut session.db.lock().expect("db lock")).map_err(code))
+}
+
+/// The window's cache.db connection (search, backlinks, tags, summaries).
+pub(crate) fn with_cache<T>(state: &AppState, f: impl FnOnce(&Connection) -> rusqlite::Result<T>) -> Result<T, String> {
+    with_session(state, |session| f(&session.cache.lock().expect("cache lock")).map_err(ue))
+}
+
+/// Runs a write in one immediate transaction (the write lock taken up front, `write_tx`) and commits it.
+pub(crate) fn in_write_tx<T, E: From<rusqlite::Error>>(db: &mut Connection, f: impl FnOnce(&Connection) -> Result<T, E>) -> Result<T, E> {
+    let tx = pla_core::pipeline::write_tx(db)?;
+    let out = f(&tx)?;
+    tx.commit()?;
+    Ok(out)
+}
+
+fn with_vault<T>(state: &AppState, f: impl FnOnce(&Vault) -> Result<T, FileError>) -> Result<T, String> {
+    with_session(state, |session| f(&session.vault).map_err(ue))
 }
 
 #[tauri::command]
@@ -614,11 +636,11 @@ pub fn create_note(state: State<AppState>, folder: String, title: String) -> Res
 
 #[tauri::command]
 pub fn queue_note(state: State<AppState>, path: String) -> Result<(), String> {
-    let guard = state.session.lock().expect("session lock");
-    let session = guard.as_ref().ok_or(NO_VAULT)?;
-    files::resolve(&session.vault, &path).map_err(ue)?;
-    session.worker.send(Command::Enqueue(path));
-    Ok(())
+    with_session(&state, |session| {
+        files::resolve(&session.vault, &path).map_err(ue)?;
+        session.worker.send(Command::Enqueue(path));
+        Ok(())
+    })
 }
 
 /// Every command's "no vault is open" error, in the `<code>|<detail>|<reason>` form the UI reads.
@@ -626,30 +648,26 @@ pub const NO_VAULT: &str = "no_vault||";
 
 #[tauri::command]
 pub fn vault_info(state: State<AppState>) -> Result<VaultInfo, String> {
-    let guard = state.session.lock().expect("session lock");
-    guard.as_ref().map(|s| vault_info_of(&s.vault)).ok_or_else(|| NO_VAULT.to_owned())
+    with_session(&state, |s| Ok(vault_info_of(&s.vault)))
 }
 
 #[tauri::command]
 pub fn worker_status(state: State<AppState>) -> Result<WorkerStatus, String> {
-    let guard = state.session.lock().expect("session lock");
-    let session = guard.as_ref().ok_or(NO_VAULT)?;
-    let status = session.status.lock().expect("status lock").clone();
-    Ok(status)
+    with_session(&state, |s| Ok(s.status.lock().expect("status lock").clone()))
 }
 
 #[tauri::command]
 pub fn backup_now(state: State<AppState>) -> Result<(), String> {
-    let guard = state.session.lock().expect("session lock");
-    guard.as_ref().ok_or(NO_VAULT)?.scheduler.send(SchedCommand::BackupNow);
-    Ok(())
+    with_session(&state, |s| {
+        s.scheduler.send(SchedCommand::BackupNow);
+        Ok(())
+    })
 }
 
 /// FR-BKP-005: the vault's backups, newest first (`pla-<YYYY-MM-DD>.db`).
 #[tauri::command]
 pub fn backup_list(state: State<AppState>) -> Result<Vec<String>, String> {
-    let guard = state.session.lock().expect("session lock");
-    Ok(pla_core::jobs::backups(&guard.as_ref().ok_or(NO_VAULT)?.vault.root))
+    with_session(&state, |s| Ok(pla_core::jobs::backups(&s.vault.root)))
 }
 
 /// FR-BKP-004/005/006/008, FR-LOG-007: puts backup `name` in place of this vault's pla.db. The
