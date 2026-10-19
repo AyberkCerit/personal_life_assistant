@@ -233,6 +233,18 @@ pub fn walk_vault(root: &Path) -> impl Iterator<Item = WalkEntry> {
     })
 }
 
+/// Whether a vault path (`/` or `\` separators) lies in a hidden place: a part named with a dot
+/// (`.obsidian`, `.pla`, `.tmp…`). Windows' hidden mark needs the disk; `walk_vault` checks that.
+pub fn is_hidden_rel(rel: &str) -> bool {
+    rel.split(['/', '\\']).any(|part| part.starts_with('.'))
+}
+
+/// `path` as a vault path with `/` separators, or `None` outside `root` or for `root` itself.
+pub fn rel_of(root: &Path, path: &Path) -> Option<String> {
+    let rel = path.strip_prefix(root).ok()?.components().map(|c| c.as_os_str().to_string_lossy()).collect::<Vec<_>>().join("/");
+    (!rel.is_empty()).then_some(rel)
+}
+
 /// Whether `name` is a Markdown note's file name.
 pub fn is_note_name(name: &str) -> bool {
     Path::new(name).extension().is_some_and(|e| e.eq_ignore_ascii_case("md"))
@@ -406,6 +418,16 @@ fn is_network_path(path: &Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn hidden_places_and_vault_paths() {
+        assert!(is_hidden_rel(".obsidian/app.json") && is_hidden_rel("notes/.tmp1") && is_hidden_rel(r"notes\.pla\x.md"));
+        assert!(!is_hidden_rel("notes/v1.2/a.md") && !is_hidden_rel("inbox/Plan.md"));
+        let root = Path::new("C:/kasa");
+        assert_eq!(rel_of(root, &root.join("notes").join("a.md")).as_deref(), Some("notes/a.md"));
+        assert_eq!(rel_of(root, root), None);
+        assert_eq!(rel_of(root, Path::new("D:/başka/a.md")), None);
+    }
 
     fn copy_config(from: &Path, to: &Path) {
         std::fs::create_dir_all(to.join(".pla")).unwrap();

@@ -270,8 +270,7 @@ pub fn embed_pending(conn: &Connection, embedder: &mut dyn Embedder, until: Inst
             let Ok(d) = NaiveDate::parse_from_str(date, "%Y-%m-%d") else { continue };
             tx.execute("DELETE FROM summary_vec WHERE day = ?1", [day_number(d)])?;
             if v.len() == memory::DIMENSIONS {
-                let blob: Vec<u8> = v.iter().flat_map(|x| x.to_le_bytes()).collect();
-                tx.execute("INSERT INTO summary_vec (day, embedding) VALUES (?1, ?2)", params![day_number(d), blob])?;
+                tx.execute("INSERT INTO summary_vec (day, embedding) VALUES (?1, ?2)", params![day_number(d), memory::as_blob(&v)])?;
             }
             tx.execute("UPDATE daily_summary SET embedded_model = ?2 WHERE date = ?1", params![date, model])?;
             done += 1;
@@ -285,10 +284,6 @@ pub fn embed_pending(conn: &Connection, embedder: &mut dyn Embedder, until: Inst
 /// there is one), joined like the chunk search.
 pub fn find_days(conn: &Connection, question: &str, query: crate::qa::context::Memory<'_>, limit: usize) -> rusqlite::Result<Vec<NaiveDate>> {
     let mut scores: Vec<(NaiveDate, f64)> = Vec::new();
-    let mut add = |d: NaiveDate, rank: usize| match scores.iter_mut().find(|(x, _)| *x == d) {
-        Some((_, s)) => *s += 1.0 / (60.0 + rank as f64),
-        None => scores.push((d, 1.0 / (60.0 + rank as f64))),
-    };
     if let Some(q) = crate::index::or_query(question) {
         let dates: Vec<String> = conn
             .prepare("SELECT date FROM summary_fts WHERE summary_fts MATCH ?1 ORDER BY rank LIMIT 10")?
@@ -296,12 +291,12 @@ pub fn find_days(conn: &Connection, question: &str, query: crate::qa::context::M
             .collect::<Result<_, _>>()?;
         for (i, d) in dates.iter().enumerate() {
             if let Ok(d) = NaiveDate::parse_from_str(d, "%Y-%m-%d") {
-                add(d, i + 1);
+                memory::rrf_add(&mut scores, d, i + 1);
             }
         }
     }
     if let Some((vector, model)) = query {
-        let blob: Vec<u8> = vector.iter().flat_map(|x| x.to_le_bytes()).collect();
+        let blob = memory::as_blob(vector);
         let days: Vec<i64> = conn
             .prepare("SELECT day FROM summary_vec WHERE embedding MATCH ?1 AND k = 10 ORDER BY distance")?
             .query_map([blob], |r| r.get(0))?
@@ -313,7 +308,7 @@ pub fn find_days(conn: &Connection, question: &str, query: crate::qa::context::M
                 .optional()?
                 .flatten();
             if same_model.as_deref() == Some(model) {
-                add(d, i + 1);
+                memory::rrf_add(&mut scores, d, i + 1);
             }
         }
     }

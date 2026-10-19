@@ -132,23 +132,27 @@ pub fn free_port() -> std::io::Result<u16> {
 }
 
 /// Plain HTTP to 127.0.0.1 only: environment proxies are ignored (NFR-SEC-001).
+fn local_agent(timeout: Duration) -> ureq::Agent {
+    ureq::Agent::config_builder().proxy(None).timeout_global(Some(timeout)).build().into()
+}
+
 fn http_agent() -> ureq::Agent {
-    ureq::Agent::config_builder().proxy(None).timeout_global(Some(Duration::from_secs(120))).build().into()
+    local_agent(Duration::from_secs(120))
 }
 
 /// A question can take minutes on a slow CPU (an 8k-token prompt, then the answer); Stop ends it.
 fn chat_agent() -> ureq::Agent {
-    ureq::Agent::config_builder().proxy(None).timeout_global(Some(Duration::from_secs(600))).build().into()
+    local_agent(Duration::from_secs(600))
 }
 
 /// Eight chunks take a few seconds on a CPU; more means the server is stuck (FR-MEM-003).
 fn embed_agent() -> ureq::Agent {
-    ureq::Agent::config_builder().proxy(None).timeout_global(Some(Duration::from_secs(30))).build().into()
+    local_agent(Duration::from_secs(30))
 }
 
 /// One health probe must not outlive the startup limit (FR-MDL-014).
 fn health_agent() -> ureq::Agent {
-    ureq::Agent::config_builder().proxy(None).timeout_global(Some(Duration::from_secs(1))).build().into()
+    local_agent(Duration::from_secs(1))
 }
 
 const STDERR_TAIL_LINES: usize = 20;

@@ -129,7 +129,7 @@ pub fn write_note(vault: &Vault, title: &str, body: &str) -> Result<String, Stri
 /// Whether a task title fits the words the model searched with. Turkish endings vary ("faturayı
 /// ödedim" for the task "Fatura öde"), so a word matches by its first four letters.
 fn title_matches(title: &str, text: &str) -> bool {
-    let words = |s: &str| crate::index::key(s).split(|c: char| !c.is_alphanumeric()).filter(|w| !w.is_empty()).map(str::to_owned).collect::<Vec<_>>();
+    let words = crate::index::key_words;
     let title_words = words(title);
     if crate::index::key(title).contains(&crate::index::key(text)) {
         return true;

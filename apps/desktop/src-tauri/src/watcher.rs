@@ -53,9 +53,8 @@ pub struct Changes {
 pub fn classify(vault: &Vault, paths: &[PathBuf], own: &SelfWrites) -> Changes {
     let mut out = Changes::default();
     for path in paths {
-        let Ok(rel_path) = path.strip_prefix(&vault.root) else { continue };
-        let rel = rel_path.components().map(|c| c.as_os_str().to_string_lossy()).collect::<Vec<_>>().join("/");
-        if rel.is_empty() || rel_path.components().any(|c| c.as_os_str().to_string_lossy().starts_with('.')) {
+        let Some(rel) = pla_core::vault::rel_of(&vault.root, path) else { continue };
+        if pla_core::vault::is_hidden_rel(&rel) {
             continue;
         }
         out.tree_changed = true;

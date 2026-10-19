@@ -24,8 +24,7 @@ pub fn bank() -> Vec<Example> {
 
 /// Word stems: lower case, Turkish letters folded, the first five letters (Turkish suffixes vary).
 fn stems(text: &str) -> Vec<String> {
-    let mut out: Vec<String> =
-        crate::index::key(text).split(|c: char| !c.is_alphanumeric()).filter(|w| !w.is_empty()).map(|w| w.chars().take(5).collect()).collect();
+    let mut out: Vec<String> = crate::index::key_words(text).iter().map(|w| w.chars().take(5).collect()).collect();
     out.sort();
     out.dedup();
     out

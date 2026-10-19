@@ -3,7 +3,6 @@
 
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
 
 use pla_core::llm::{ModelHost, ServerConfig};
 use pla_core::memory::{self, Embedder};
@@ -17,9 +16,6 @@ use crate::errors::{ue, UserError};
 /// The embedding server both the indexer (in the background) and the worker (for a question) use.
 pub type Embeds = Arc<Mutex<Option<Box<dyn Embedder + Send>>>>;
 
-/// FR-MDL-013: the embedding server stops after this long without requests, like the chat model.
-const IDLE_AFTER: Duration = Duration::from_secs(60);
-
 /// The downloaded embedding model, or `PLA_EMBED_MODEL` (development).
 pub fn model_file() -> Option<PathBuf> {
     let env = std::env::var_os("PLA_EMBED_MODEL").map(PathBuf::from).filter(|p| p.is_file());
@@ -29,8 +25,8 @@ pub fn model_file() -> Option<PathBuf> {
 /// The embedding server for `model`, when llama-server is there to run it.
 pub fn host(app: &AppHandle, model: PathBuf) -> Option<Box<dyn Embedder + Send>> {
     let settings = pla_core::settings::load_settings(&crate::commands::app_root().ok()?).ok()?.settings;
-    let bin = crate::model_paths::first_existing([settings.llama_server.clone(), crate::model_paths::process_env("PLA_LLAMA_SERVER"), bundled_server(app)])?;
-    Some(Box::new(ModelHost::new(ServerConfig::embedding(bin, model), IDLE_AFTER)))
+    let bin = crate::model_paths::server_bin(&settings, &crate::model_paths::process_env, bundled_server(app))?;
+    Some(Box::new(ModelHost::new(ServerConfig::embedding(bin, model), crate::worker::MODEL_IDLE_AFTER)))
 }
 
 #[derive(Serialize)]
@@ -73,18 +69,7 @@ pub fn start_download(app: &AppHandle) -> Result<(), String> {
     app.state::<AppState>()
         .memory_downloads
         .start(
-            move |cancel, report| {
-                let req = dl::Request {
-                    entry,
-                    dir: &dir,
-                    policy: &models::policy::HuggingFace,
-                    free_space: &dl::free_space,
-                    cancel,
-                    progress_every: Duration::from_secs(1),
-                    stall_after: Duration::from_secs(60),
-                };
-                dl::download(&req, report)
-            },
+            move |cancel, report| crate::model_download::download(entry, &dir, &models::policy::HuggingFace, cancel, report),
             move |s| {
                 let _ = events.emit("memory-download", s);
             },

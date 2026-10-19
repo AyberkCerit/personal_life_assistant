@@ -13,8 +13,12 @@ pub fn first_existing(candidates: impl IntoIterator<Item = Option<PathBuf>>) -> 
 /// Server: settings, `PLA_LLAMA_SERVER`, then the bundled copy. Model: settings, then `PLA_MODEL`.
 pub fn server_config(settings: &AppSettings, env: &dyn Fn(&str) -> Option<PathBuf>, bundled_server: Option<PathBuf>) -> Option<ServerConfig> {
     let model = first_existing([settings.model_path.clone(), env("PLA_MODEL")])?;
-    let bin = first_existing([settings.llama_server.clone(), env("PLA_LLAMA_SERVER"), bundled_server])?;
-    Some(ServerConfig::new(bin, model))
+    Some(ServerConfig::new(server_bin(settings, env, bundled_server)?, model))
+}
+
+/// The llama-server both models run on: settings, `PLA_LLAMA_SERVER`, then the bundled copy.
+pub fn server_bin(settings: &AppSettings, env: &dyn Fn(&str) -> Option<PathBuf>, bundled_server: Option<PathBuf>) -> Option<PathBuf> {
+    first_existing([settings.llama_server.clone(), env("PLA_LLAMA_SERVER"), bundled_server])
 }
 
 /// The real environment, for `server_config`.
