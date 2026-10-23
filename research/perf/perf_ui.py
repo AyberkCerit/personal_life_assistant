@@ -14,9 +14,11 @@ from playwright.sync_api import sync_playwright
 REF = os.path.abspath(sys.argv[1])
 RUNS = int(sys.argv[2]) if len(sys.argv) > 2 else 20
 # PLA_EXE: the release build (target/release, its page inside) is what users run; debug loads Vite
-EXE = os.environ.get("PLA_EXE", r"C:\dev\PLA\target\debug\pla-desktop.exe")
-MODEL = r"C:\dev\PLA\research\f1-model-eval\models\gemma-4-E2B-it-Q3_K_M.gguf"
 HERE = os.path.dirname(os.path.abspath(__file__))
+ROOT = os.path.dirname(os.path.dirname(HERE))
+EXE = os.environ.get("PLA_EXE", os.path.join(ROOT, "target", "debug", "pla-desktop.exe"))
+# PLA_MODEL: the model is not in git, a worktree points at the main checkout's copy
+MODEL = os.environ.get("PLA_MODEL") or os.path.join(ROOT, "research", "f1-model-eval", "models", "gemma-4-E2B-it-Q3_K_M.gguf")
 ENV = dict(os.environ, APPDATA=REF, LOCALAPPDATA=os.path.join(REF, "Local"), PLA_MODEL=MODEL, WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS="--remote-debugging-port=9333")
 os.makedirs(ENV["LOCALAPPDATA"], exist_ok=True)
 
