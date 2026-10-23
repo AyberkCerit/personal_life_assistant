@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, State};
 
 use crate::commands::{app_root, AppState};
-use crate::errors::ue;
+use crate::errors::{own_code, ue};
 
 /// The region's list separator and decimal mark, as Windows reports them, made safe for CSV.
 pub fn csv_style(list: &str, decimal: &str) -> CsvStyle {
@@ -149,10 +149,10 @@ pub struct BackupStatus {
 
 #[tauri::command]
 pub fn backup_status(state: State<AppState>) -> Result<BackupStatus, String> {
-    let guard = state.session.lock().expect("session lock");
-    let session = guard.as_ref().ok_or(crate::commands::NO_VAULT)?;
-    let job = pla_core::jobs::status(&session.db.lock().expect("db lock"), pla_core::jobs::DAILY).map_err(ue)?;
-    Ok(BackupStatus { job, backups: pla_core::jobs::backups(&session.vault.root) })
+    crate::commands::with_session(&state, |session| {
+        let job = pla_core::jobs::status(&session.db.lock().expect("db lock"), pla_core::jobs::DAILY).map_err(ue)?;
+        Ok(BackupStatus { job, backups: pla_core::jobs::backups(&session.vault.root) })
+    })
 }
 
 /// NFR-SEC-008: tasks and metrics as two CSV files in the folder the user picked; returns their paths.
@@ -160,22 +160,18 @@ pub fn backup_status(state: State<AppState>) -> Result<BackupStatus, String> {
 pub fn export_data(state: State<AppState>, dir: String, lang: String) -> Result<Vec<String>, String> {
     let dir = PathBuf::from(dir);
     if !dir.is_absolute() || !dir.is_dir() {
-        return Err(format!("missing|{}|", dir.display()));
+        return Err(own_code("missing", dir.display(), ""));
     }
     let style = region_style();
-    let (tasks, metrics) = {
-        let guard = state.session.lock().expect("session lock");
-        let session = guard.as_ref().ok_or(crate::commands::NO_VAULT)?;
-        let db = session.db.lock().expect("db lock");
-        let tasks = pla_core::export::tasks_csv(&db, &lang, style).map_err(ue)?;
-        (tasks, pla_core::export::metrics_csv(&db, &lang, style).map_err(ue)?)
-    };
+    let (tasks, metrics) = crate::commands::with_db(&state, ue, |db| {
+        Ok::<_, rusqlite::Error>((pla_core::export::tasks_csv(db, &lang, style)?, pla_core::export::metrics_csv(db, &lang, style)?))
+    })?;
     let (tasks_name, metrics_name) = export_names(&lang, &chrono::Local::now().format("%Y-%m-%d").to_string());
     let mut written = Vec::new();
     for (name, text) in [(tasks_name, tasks), (metrics_name, metrics)] {
         let path = dir.join(name);
         pla_core::fs_atomic::write_atomic(&path, text.as_bytes())
-            .map_err(|e| format!("not_writable|{}|{}", dir.display(), crate::wizard::write_failure(&e)))?;
+            .map_err(|e| own_code("not_writable", dir.display(), crate::wizard::write_failure(&e)))?;
         written.push(path.to_string_lossy().into_owned());
     }
     Ok(written)
@@ -196,9 +192,9 @@ pub fn open_place(state: State<AppState>, kind: PlaceKind) -> Result<(), String>
         local_root: std::env::var_os("LOCALAPPDATA").map(|p| PathBuf::from(p).join("PLA")),
         model: settings.model_path,
     };
-    let target = place(kind, &places).ok_or("not_found||")?;
+    let target = place(kind, &places).ok_or_else(|| own_code("not_found", "", ""))?;
     if kind != PlaceKind::NotificationSettings && !Path::new(&target).exists() {
-        return Err(format!("not_found|{}|", Path::new(&target).display()));
+        return Err(own_code("not_found", Path::new(&target).display(), ""));
     }
     let mut explorer = std::process::Command::new("explorer.exe");
     #[cfg(windows)]

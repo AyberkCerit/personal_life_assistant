@@ -141,6 +141,15 @@ const dict = {
     "review.accept": "Görev olarak ekle",
     "review.reject": "Yoksay",
     "review.metricHint": "Metrikler şimdilik yalnız yoksayılabilir.",
+    "review.reason.no_date": "Tarihi olmayan bir hatırlatıcı",
+    "review.reason.too_long": "Paragraf model için çok uzun",
+    "review.reason.model": "Model bu paragrafı işleyemedi",
+    "review.reason.out_of_range": "Olağandışı bir ölçüm değeri",
+    "review.reason.bad_date": "Tarih ya da saat okunamadı",
+    "review.reason.bad_repeat": "Tekrar günleri okunamadı",
+    "review.reason.no_title": "Başlığı olmayan bir görev",
+    "review.reason.incomplete": "Eksik bir ölçüm",
+    "review.reason.unreadable": "Modelin cevabı okunamadı",
     "toast.added": "AI ekledi",
     "toast.undo": "Geri al",
     "tasks.remind": "Hatırlat",
@@ -411,6 +420,16 @@ const dict = {
     "settings.ai.removed": "Model kaldırıldı.",
     "settings.ai.pause": "Arka plan YZ'yi duraklat",
     "settings.ai.pause.hint": "Notlar kuyrukta bekler; devam edince işlenir.",
+    "settings.ai.persona": "Asistan",
+    "settings.ai.name": "Asistanın adı",
+    "settings.ai.name.hint": "Boş bırakırsan adı PLA olur. Uygulamanın adı değişmez.",
+    "settings.ai.address": "Sana nasıl hitap etsin",
+    "settings.ai.address.hint": "Örneğin adın ya da “Hocam”. Boş bırakırsan özel bir hitap kullanmaz.",
+    "settings.ai.address.placeholder": "Örn. Ayşe",
+    "settings.ai.formality": "Sen mi, siz mi",
+    "settings.ai.formality.hint": "Türkçe yanıtlarda geçerlidir.",
+    "settings.ai.formality.informal": "Sen (samimi)",
+    "settings.ai.formality.formal": "Siz (resmi)",
     "settings.report.title": "Haftalık rapor",
     "settings.report.hint": "Haftanın özeti, görevler ve ölçümler reports/weekly klasörüne bir not olarak yazılır; hazır olunca bildirim gelir. Pazar seçiliyse rapor o haftanın, başka bir gün seçiliyse geçen haftanındır. Rapor varsa üzerine yazılmaz; silersen yeniden yazılır.",
     "settings.report.enabled": "Haftalık raporu yaz",
@@ -646,6 +665,15 @@ const dict = {
     "review.accept": "Add as task",
     "review.reject": "Dismiss",
     "review.metricHint": "Metrics can only be dismissed for now.",
+    "review.reason.no_date": "A reminder without a date",
+    "review.reason.too_long": "The paragraph is too long for the model",
+    "review.reason.model": "The model could not handle this paragraph",
+    "review.reason.out_of_range": "An unusual measurement",
+    "review.reason.bad_date": "The date or time could not be read",
+    "review.reason.bad_repeat": "The repeat days could not be read",
+    "review.reason.no_title": "A task without a title",
+    "review.reason.incomplete": "An incomplete measurement",
+    "review.reason.unreadable": "The model's answer could not be read",
     "toast.added": "AI added",
     "toast.undo": "Undo",
     "tasks.remind": "Remind",
@@ -916,6 +944,16 @@ const dict = {
     "settings.ai.removed": "Model removed.",
     "settings.ai.pause": "Pause background AI",
     "settings.ai.pause.hint": "Notes wait in the queue and are processed when you resume.",
+    "settings.ai.persona": "Assistant",
+    "settings.ai.name": "Assistant's name",
+    "settings.ai.name.hint": "Left empty, it is called PLA. The app's own name stays the same.",
+    "settings.ai.address": "What it calls you",
+    "settings.ai.address.hint": "Your name, for example. Left empty, it uses no particular form of address.",
+    "settings.ai.address.placeholder": "e.g. Sam",
+    "settings.ai.formality": "Sen or siz",
+    "settings.ai.formality.hint": "How it speaks to you in Turkish answers.",
+    "settings.ai.formality.informal": "Sen (informal)",
+    "settings.ai.formality.formal": "Siz (formal)",
     "settings.report.title": "Weekly report",
     "settings.report.hint": "The week in brief, tasks and measurements are written as a note to the reports/weekly folder; a notification comes when it is ready. On Sunday the report is that week's; on any other day it is the week before's. An existing report is never overwritten; delete it to have it written again.",
     "settings.report.enabled": "Write the weekly report",
@@ -1066,20 +1104,31 @@ export function failure(e: unknown, area?: string): Failure {
   return errorText(String(e), area);
 }
 
+/** A command's `code|detail|reason`, split once for every reader; the reason may hold `|` itself. */
+export function splitError(raw: string): { code: string; detail: string; reason: string } {
+  const [code, detail = "", ...rest] = raw.split("|");
+  return { code, detail, reason: rest.join("|") };
+}
+
 /** A command's `code|detail|reason` as the user reads it (M6 translations): the area's own message
  *  (`<area>.error.<code>`), else the general one (`error.<code>`), else "something unexpected". The
  *  reason, or the whole text when it is not a code, is only for "Copy details". */
 export function errorText(raw: string, area?: string): Failure {
-  const [code, detail = "", ...rest] = raw.split("|");
+  const { code, detail, reason } = splitError(raw);
   const has = (key: string) => (dict[lang] as Record<string, string>)[key] !== undefined || (dict.en as Record<string, string>)[key] !== undefined;
   const key = [area && `${area}.error.${code}`, `error.${code}`].find((k): k is string => !!k && /^[a-z_.]+$/.test(k) && has(k));
   // a plain sentence (or an unknown code) is not ours to say: shown as unexpected, copied whole
   if (!key) return { text: t("error.unexpected"), details: raw, raw, area };
-  const text = (lookup(key) ?? "").replace(/\{(\w+)\}/g, (_, k: string) => (k === "detail" || k === "path" || k === "name" ? detail : ""));
-  return { text: text.replace(/\s*\(\)/g, ""), details: rest.join("|"), raw, area };
+  const text = fill(lookup(key) ?? "", { detail, path: detail, name: detail });
+  return { text: text.replace(/\s*\(\)/g, ""), details: reason, raw, area };
+}
+
+/** `text` with its `{name}` placeholders filled; a missing value leaves nothing. */
+export function fill(text: string, values: Record<string, string | number>): string {
+  return text.replace(/\{(\w+)\}/g, (_, k: string) => String(values[k] ?? ""));
 }
 
 /** `t` with `{name}` placeholders filled. */
 export function tf(key: Key, values: Record<string, string | number>): string {
-  return t(key).replace(/\{(\w+)\}/g, (_, k: string) => String(values[k] ?? ""));
+  return fill(t(key), values);
 }

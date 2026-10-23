@@ -100,12 +100,11 @@ pub fn index_events(root: &Path, paths: &[PathBuf]) -> (Vec<String>, bool) {
     let mut notes = Vec::new();
     let mut rescan = false;
     for path in paths {
-        let Ok(rel_path) = path.strip_prefix(root) else { continue };
-        let rel = rel_path.components().map(|c| c.as_os_str().to_string_lossy()).collect::<Vec<_>>().join("/");
-        if rel.is_empty() || rel.split('/').any(|p| p.starts_with('.')) {
+        let Some(rel) = pla_core::vault::rel_of(root, path) else { continue };
+        if pla_core::vault::is_hidden_rel(&rel) {
             continue;
         }
-        if rel.to_ascii_lowercase().ends_with(".md") {
+        if pla_core::vault::is_note_name(&rel) {
             if !notes.contains(&rel) {
                 notes.push(rel);
             }

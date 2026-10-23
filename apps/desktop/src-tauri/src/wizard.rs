@@ -30,10 +30,10 @@ impl From<PrepareError> for String {
 impl std::fmt::Display for PrepareError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Network(p) => write!(f, "network|{}", p.display()),
-            Self::NotFolder(p) => write!(f, "not_folder|{}", p.display()),
-            Self::Relative(p) => write!(f, "relative|{}", p.display()),
-            Self::AppData(p) => write!(f, "app_data|{}", p.display()),
+            Self::Network(p) => write!(f, "network|{}|", p.display()),
+            Self::NotFolder(p) => write!(f, "not_folder|{}|", p.display()),
+            Self::Relative(p) => write!(f, "relative|{}|", p.display()),
+            Self::AppData(p) => write!(f, "app_data|{}|", p.display()),
             Self::NotWritable { path, reason } => write!(f, "not_writable|{}|{reason}", path.display()),
         }
     }
@@ -176,7 +176,8 @@ mod tests {
         let unc = std::path::Path::new(r"\\sunucu\paylasim\Kasa");
         assert_eq!(prepare_folder(unc), Err(PrepareError::Network(unc.to_path_buf())));
         // the UI's setupError() reads this `<code>|<path>|<reason>` shape
-        assert_eq!(PrepareError::Network(unc.to_path_buf()).to_string(), r"network|\\sunucu\paylasim\Kasa");
+        // code|detail|reason, like every command (code review 2026-10-19)
+        assert_eq!(PrepareError::Network(unc.to_path_buf()).to_string(), r"network|\\sunucu\paylasim\Kasa|");
         let denied = PrepareError::NotWritable { path: "C:/Kasa".into(), reason: "erişim engellendi".into() };
         assert_eq!(denied.to_string(), "not_writable|C:/Kasa|erişim engellendi");
         let tmp = tempfile::tempdir().unwrap();
@@ -193,7 +194,7 @@ mod tests {
         for p in ["Notlar", r"C:Notlar", ""] {
             assert_eq!(prepare_folder(std::path::Path::new(p)), Err(PrepareError::Relative(p.into())), "{p:?}");
         }
-        assert_eq!(PrepareError::Relative("Notlar".into()).to_string(), "relative|Notlar");
+        assert_eq!(PrepareError::Relative("Notlar".into()).to_string(), "relative|Notlar|");
         let unc = std::path::Path::new("//sunucu/paylasim");
         assert_eq!(prepare_folder(unc), Err(PrepareError::Network(unc.to_path_buf())));
         assert_eq!(std::env::current_dir().unwrap(), before);

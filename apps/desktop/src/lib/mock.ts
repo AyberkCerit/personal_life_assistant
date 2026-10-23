@@ -72,6 +72,7 @@ let setupDone = false;
 let mockLang: "tr" | "en" | null = null;
 let mockTheme: "dark" | "light" = "dark";
 let mockAutostart = false;
+const mockPersona: { name: string; address: string; formality: "informal" | "formal" } = { name: "", address: "", formality: "informal" };
 let lastBackup: string | null = null;
 let mockWeekly = { enabled: true, weekday: 6, time: "20:00" };
 
@@ -157,7 +158,7 @@ function mockMetrics(cmd: string, args: Record<string, unknown>): unknown {
     case "metric_edit": {
       const input = args.input as { kind: string; date: string; value: number | null; unit: string | null; exercise: string | null; sets: number | null; reps: number | null; confirmed: boolean };
       const value = input.kind === "water" && input.unit === "glass" ? (input.value ?? 0) * 250 : input.value;
-      if (input.kind !== "workout" && value === null) throw "missing_value";
+      if (input.kind !== "workout" && value === null) throw "missing_value||";
       if (input.kind === "weight" && value !== null && value > 400 && !input.confirmed) throw `out_of_range|value|${value}`;
       const fields = { kind: input.kind, date: input.date, value, exercise: input.exercise, sets: input.sets, reps: input.reps };
       if (cmd === "metric_edit") {
@@ -405,11 +406,14 @@ export async function mockBackend<T>(cmd: string, args: Record<string, unknown>)
     case "open_today":
       return mockTree(cmd, args) as T;
     case "settings_get":
-      return { language: mockLang, theme: mockTheme, autostart: mockAutostart, paused: false, vault_path: vault } as T;
+      return { language: mockLang, theme: mockTheme, autostart: mockAutostart, paused: false, vault_path: vault, persona: { ...mockPersona } } as T;
     case "settings_set":
       if (args.key === "language") mockLang = args.value as "tr" | "en" | null;
       else if (args.key === "theme") mockTheme = args.value as "dark" | "light";
-      return { language: mockLang, theme: mockTheme, autostart: mockAutostart, paused: false, vault_path: vault } as T;
+      else if (args.key === "assistant_name") mockPersona.name = String(args.value).trim().slice(0, 40);
+      else if (args.key === "user_address") mockPersona.address = String(args.value).trim().slice(0, 40);
+      else if (args.key === "formality") mockPersona.formality = args.value as "informal" | "formal";
+      return { language: mockLang, theme: mockTheme, autostart: mockAutostart, paused: false, vault_path: vault, persona: { ...mockPersona } } as T;
     case "set_autostart":
       mockAutostart = Boolean(args.enabled);
       emit("autostart-changed", mockAutostart);
@@ -576,7 +580,7 @@ export async function mockBackend<T>(cmd: string, args: Record<string, unknown>)
       return undefined as T;
     case "model_use_local": {
       const path = String(args.path);
-      if (!path.toLowerCase().endsWith(".gguf")) throw new Error("not_gguf");
+      if (!path.toLowerCase().endsWith(".gguf")) throw new Error("not_gguf||");
       installed = { name: path.split(/[\\/]/).pop() ?? path, size: 2_536_786_016, path, local: true };
       emit("model-changed", installed);
       return installed as T;

@@ -8,14 +8,14 @@ use rusqlite::Connection;
 use tauri::{AppHandle, Emitter, State};
 
 use crate::commands::AppState;
-use crate::errors::ue;
+use crate::errors::{own_code, ue};
 
 /// The periods the detail view offers (FR-MET-009); anything else is refused.
 pub fn period(days: i64) -> Result<i64, String> {
     if matches!(days, 7 | 30 | 90) {
         Ok(days)
     } else {
-        Err(format!("invalid_period|{days}|"))
+        Err(own_code("invalid_period", days, ""))
     }
 }
 
@@ -24,10 +24,7 @@ fn today() -> NaiveDate {
 }
 
 fn with_db<T>(state: &State<AppState>, f: impl FnOnce(&Connection) -> Result<T, MetricError>) -> Result<T, String> {
-    let guard = state.session.lock().expect("session lock");
-    let session = guard.as_ref().ok_or(crate::commands::NO_VAULT)?;
-    let db = session.db.lock().expect("db lock");
-    f(&db).map_err(metric_code)
+    crate::commands::with_db(state, metric_code, |db| f(db))
 }
 
 /// The measurements screen reads these codes itself (`metrics.error.<code>`, metrics.ts); a
@@ -35,7 +32,9 @@ fn with_db<T>(state: &State<AppState>, f: impl FnOnce(&Connection) -> Result<T, 
 fn metric_code(e: MetricError) -> String {
     match e {
         MetricError::Db(e) => ue(e),
-        other => other.to_string(),
+        MetricError::OutOfRange(field, value) => own_code("out_of_range", field, value),
+        // the rest name themselves (`not_found`, `invalid_date`, …): code only
+        other => own_code(&other.to_string(), "", ""),
     }
 }
 

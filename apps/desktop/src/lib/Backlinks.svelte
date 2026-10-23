@@ -4,6 +4,7 @@
   import Link2 from "@lucide/svelte/icons/link-2";
   import { api, type Backlink } from "./api";
   import { t, tf } from "./i18n";
+  import { noteName } from "./links";
   import EmptyState from "./ui/EmptyState.svelte";
   import Icon from "./ui/Icon.svelte";
 
@@ -29,7 +30,7 @@
     return () => void un.then((f) => f());
   });
 
-  const title = $derived(path ? (path.split("/").pop() ?? path).replace(/\.md$/i, "") : "");
+  const title = $derived(path ? noteName(path) : "");
   const groups = $derived(
     links.reduce<{ source: string; title: string; lines: Backlink[] }[]>((acc, l) => {
       const last = acc[acc.length - 1];

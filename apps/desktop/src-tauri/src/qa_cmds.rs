@@ -6,17 +6,30 @@ use std::sync::{Arc, Mutex};
 
 use chrono::Local;
 use pla_core::qa::{self, Turn};
+use pla_core::settings::{Formality, Persona};
 use tauri::{AppHandle, Emitter, State};
 
-use crate::commands::AppState;
+use crate::commands::{with_db, with_session, AppState};
+use crate::errors::{own_code, ue, unexpected};
 use crate::worker::{AskJob, QaEvent};
-use crate::errors::{unexpected, ue};
 
 /// The question being answered: its turn and its Stop switch. One at a time.
 static CURRENT: Mutex<Option<(String, Arc<AtomicBool>)>> = Mutex::new(None);
 static NEXT: AtomicU64 = AtomicU64::new(0);
 
 const MAX_QUESTION: usize = 2000;
+
+/// The assistant's name and how it addresses the user, as the settings keep them.
+static PERSONA: Mutex<Persona> = Mutex::new(Persona { name: String::new(), address: String::new(), formality: Formality::Informal });
+
+/// Called at startup and whenever Settings > AI changes the persona.
+pub fn set_persona(persona: Persona) {
+    *PERSONA.lock().expect("persona lock") = persona;
+}
+
+pub fn persona() -> Persona {
+    PERSONA.lock().expect("persona lock").clone()
+}
 
 /// Ends a turn that never got its last event (the worker was gone, or the job was dropped): the
 /// panel hears `Failed` and the next question is not refused as `busy` forever (final review I1).
@@ -48,13 +61,13 @@ fn finished(turn_id: &str) {
 pub fn qa_ask(app: AppHandle, state: State<AppState>, question: String, new_topic: bool) -> Result<String, String> {
     let question = question.trim().to_owned();
     if question.is_empty() || question.chars().count() > MAX_QUESTION {
-        return Err("bad_question||".into());
+        return Err(own_code("bad_question", "", ""));
     }
     let guard = state.session.lock().expect("session lock");
     let session = guard.as_ref().ok_or(crate::commands::NO_VAULT)?;
     let mut current = CURRENT.lock().expect("qa lock");
     if current.is_some() {
-        return Err("busy||".into());
+        return Err(own_code("busy", "", ""));
     }
     let turn_id = format!("{}-{}", Local::now().format("%Y%m%d%H%M%S%3f"), NEXT.fetch_add(1, Ordering::SeqCst));
     let cancel = Arc::new(AtomicBool::new(false));
@@ -106,10 +119,7 @@ pub fn qa_stop() {
 /// The panel's history, oldest first, and whether a question is still being answered.
 #[tauri::command]
 pub fn qa_history(state: State<AppState>) -> Result<Vec<Turn>, String> {
-    let guard = state.session.lock().expect("session lock");
-    let session = guard.as_ref().ok_or(crate::commands::NO_VAULT)?;
-    let db = session.db.lock().expect("db lock");
-    qa::history(&db, 100).map_err(ue)
+    with_db(&state, ue, |db| qa::history(db, 100))
 }
 
 /// M6 performance: the assistant panel opened; the model reads ahead what every question shares.
@@ -124,21 +134,18 @@ pub fn qa_warm(state: State<AppState>) {
 #[tauri::command]
 pub fn qa_clear(state: State<AppState>) -> Result<(), String> {
     if CURRENT.lock().expect("qa lock").is_some() {
-        return Err("busy||".into());
+        return Err(own_code("busy", "", ""));
     }
-    let guard = state.session.lock().expect("session lock");
-    let session = guard.as_ref().ok_or(crate::commands::NO_VAULT)?;
-    let db = session.db.lock().expect("db lock");
-    qa::clear_history(&db).map(|_| ()).map_err(ue)
+    with_db(&state, ue, |db| qa::clear_history(db).map(drop))
 }
 
 /// The owner's decision a: the user pressed Save on a suggested note. Returns the note's path.
 #[tauri::command]
 pub fn qa_save_suggestion(app: AppHandle, state: State<AppState>, turn_id: String, index: usize) -> Result<String, String> {
-    let guard = state.session.lock().expect("session lock");
-    let session = guard.as_ref().ok_or(crate::commands::NO_VAULT)?;
-    let db = session.db.lock().expect("db lock");
-    let rel = qa::save_suggestion(&db, &session.vault, &turn_id, index).map_err(unexpected)?.ok_or("missing||")?;
+    let rel = with_session(&state, |session| {
+        let db = session.db.lock().expect("db lock");
+        qa::save_suggestion(&db, &session.vault, &turn_id, index).map_err(unexpected)?.ok_or_else(|| own_code("missing", "", ""))
+    })?;
     let _ = app.emit("tree-changed", ());
     Ok(rel)
 }
@@ -146,19 +153,20 @@ pub fn qa_save_suggestion(app: AppHandle, state: State<AppState>, turn_id: Strin
 /// FR-QA-008: takes back tool call `index` of turn `turn_id`. A note goes to the Recycle Bin.
 #[tauri::command]
 pub fn qa_undo(app: AppHandle, state: State<AppState>, turn_id: String, index: usize) -> Result<(), String> {
-    let guard = state.session.lock().expect("session lock");
-    let session = guard.as_ref().ok_or(crate::commands::NO_VAULT)?;
-    let db = session.db.lock().expect("db lock");
-    let undo = qa::take_undo(&db, &turn_id, index).map_err(ue)?.ok_or("missing||")?;
-    let done = if undo.kind == "note" {
-        crate::fileops_cmds::deletable(&session.vault, &undo.id).and_then(|abs| crate::fileops_cmds::to_recycle_bin(&abs))
-    } else {
-        qa::undo(&db, &undo, Local::now().fixed_offset()).map_err(unexpected)
-    };
-    if let Err(e) = done {
-        let _ = qa::restore_undo(&db, &turn_id, index, undo);
-        return Err(e);
-    }
-    let _ = app.emit(if undo.kind == "note" { "tree-changed" } else { "tasks-changed" }, ());
+    let kind = with_session(&state, |session| {
+        let db = session.db.lock().expect("db lock");
+        let undo = qa::take_undo(&db, &turn_id, index).map_err(ue)?.ok_or_else(|| own_code("missing", "", ""))?;
+        let done = if undo.kind == "note" {
+            crate::fileops_cmds::deletable(&session.vault, &undo.id).and_then(|abs| crate::fileops_cmds::to_recycle_bin(&abs))
+        } else {
+            qa::undo(&db, &undo, Local::now().fixed_offset()).map_err(unexpected)
+        };
+        if let Err(e) = done {
+            let _ = qa::restore_undo(&db, &turn_id, index, undo);
+            return Err(e);
+        }
+        Ok(undo.kind)
+    })?;
+    let _ = app.emit(if kind == "note" { "tree-changed" } else { "tasks-changed" }, ());
     Ok(())
 }

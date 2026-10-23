@@ -7,6 +7,7 @@
   import Square from "@lucide/svelte/icons/square";
   import Trash from "@lucide/svelte/icons/trash-2";
   import { api } from "./api";
+  import { noteName } from "./links";
   import { failure, say, t, tf, type Key } from "./i18n";
   import { answerParts, apply, qaError, shown, started, toolLine, warmDue, type QaEvent, type ShownTurn } from "./qa";
   import Button from "./ui/Button.svelte";
@@ -18,6 +19,7 @@
   let {
     modelMissing,
     paused = false,
+    assistantName = "",
     onOpenNote,
     onOpenLink,
     onShowModel,
@@ -25,6 +27,8 @@
     modelMissing: boolean;
     /** Background AI paused: no read-ahead (and none counted, so it comes once resumed). */
     paused?: boolean;
+    /** The name the user gave the assistant ("" = the default title). */
+    assistantName?: string;
     onOpenNote: (path: string) => void;
     onOpenLink: (target: string) => void;
     onShowModel: () => void;
@@ -145,7 +149,7 @@
     }
   }
 
-  const name = (path: string) => path.split("/").pop()!.replace(/\.md$/i, "");
+  const name = noteName;
   // the reason comes as a code too (M6 final review): said, never the model server's English
   const turnFailure = (turn: ShownTurn) => (turn.error ? tf(qaError(turn.error.code), { detail: say(failure(turn.error.detail)) }) : "");
 
@@ -161,7 +165,7 @@
 </script>
 
 <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-<div class="assistant" role="region" aria-label={t("qa.title")} onkeydown={panelKey}>
+<div class="assistant" role="region" aria-label={assistantName || t("qa.title")} onkeydown={panelKey}>
     <header>
       <Button variant="quiet" onclick={startTopic} disabled={newTopic} title={t("qa.newTopicHint")}>{t("qa.newTopic")}</Button>
       <IconButton icon={Trash} label={t("qa.clear")} onclick={() => (confirmClear = true)} disabled={turns.length === 0 || live !== null} />

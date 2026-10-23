@@ -177,13 +177,11 @@ pub fn week_summaries(cache: &Connection, week: Week) -> rusqlite::Result<Vec<(N
         .collect()
 }
 
-const DAY_EN: [&str; 7] = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
-
 /// The request for the week's highlights, from the daily summaries.
 pub fn highlights_request(week: Week, summaries: &[(NaiveDate, String)], lang: Lang) -> Value {
     let mut text = format!("Week {} ({} to {})\n\n", week.label(), week.monday(), week.sunday());
     for (date, summary) in summaries {
-        text.push_str(&format!("{date} {}:\n{}\n\n", DAY_EN[date.weekday().num_days_from_monday() as usize], summary.trim()));
+        text.push_str(&format!("{date} {}:\n{}\n\n", crate::lang::weekday_name(*date, Lang::En), summary.trim()));
     }
     let language = lang.name();
     json!({

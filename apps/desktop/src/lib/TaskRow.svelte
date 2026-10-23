@@ -11,6 +11,7 @@
   import Icon from "./ui/Icon.svelte";
   import IconButton from "./ui/IconButton.svelte";
   import { BASE, motion } from "./ui/motion";
+  import { escapeCancels, focusOnMount, onEscape } from "./ui/actions";
   import { t } from "./i18n";
 
   let {
@@ -25,7 +26,8 @@
     today: string;
     /** Resolves to whether the change was saved. */
     onDone: (done: boolean) => Promise<boolean>;
-    onSave: (input: TaskInput) => Promise<void>;
+    /** Resolves to whether the change was saved; a refused one keeps the form and what was typed. */
+    onSave: (input: TaskInput) => Promise<boolean>;
     onDelete: () => void;
     onOpenSource: () => void;
   } = $props();
@@ -34,11 +36,6 @@
   let confirming = $state(false);
   let titleButton: HTMLButtonElement | undefined = $state();
   let deleteButton: HTMLButtonElement | undefined = $state();
-
-  /** Puts keyboard focus on an element as soon as it appears (IR-UI-003). */
-  function focusOnMount(node: HTMLElement) {
-    node.focus();
-  }
 
   async function backTo(target: () => HTMLElement | undefined) {
     await tick();
@@ -55,19 +52,6 @@
     void backTo(() => deleteButton);
   }
 
-  function onEscape(e: KeyboardEvent, cancel: () => void) {
-    if (e.key === "Escape") {
-      e.preventDefault();
-      cancel();
-    }
-  }
-
-  /** Escape cancels the form it is attached to. */
-  function escapeCancels(node: HTMLElement, cancel: () => void) {
-    const handler = (e: KeyboardEvent) => onEscape(e, cancel);
-    node.addEventListener("keydown", handler);
-    return { destroy: () => node.removeEventListener("keydown", handler) };
-  }
   let form = $state<TaskInput & { remind: boolean }>({ title: "", date: "", time: "", details: "", remind: false });
   let confirmButton: HTMLButtonElement | undefined = $state();
 
@@ -94,7 +78,7 @@
 
   async function save(e: SubmitEvent) {
     e.preventDefault();
-    await onSave(form);
+    if (!(await onSave(form))) return; // the panel says why; the user corrects it here
     editing = false;
     void backTo(() => titleButton);
   }

@@ -3,34 +3,30 @@
 
 use chrono::Local;
 use pla_core::pipeline::items::{reject_item, ItemRef};
-use pla_core::pipeline::write_tx;
 use pla_core::reminders;
 use pla_core::tasks::{self, ReviewView, TaskInput, TaskList, TaskView};
 use rusqlite::Connection;
 use tauri::{AppHandle, Emitter, State};
 
-use crate::commands::{AppState, NO_VAULT};
+use crate::commands::{in_write_tx, AppState};
+use crate::errors::{own_code, ue};
 use crate::scheduler::PendingLists;
-use crate::errors::ue;
 
 /// A task error as a code the UI turns into a sentence in its language (architecture review A2).
 pub fn task_code(e: tasks::TaskError) -> String {
     use tasks::TaskError;
     match e {
-        TaskError::BadTitle => "bad_title||".into(),
-        TaskError::BadDate(d) => format!("bad_date|{d}|"),
-        TaskError::BadTime(t) => format!("bad_time|{t}|"),
-        TaskError::NotFound => "not_found||".into(),
-        TaskError::NotAnAction => "not_an_action||".into(),
+        TaskError::BadTitle => own_code("bad_title", "", ""),
+        TaskError::BadDate(d) => own_code("bad_date", d, ""),
+        TaskError::BadTime(t) => own_code("bad_time", t, ""),
+        TaskError::NotFound => own_code("not_found", "", ""),
+        TaskError::NotAnAction => own_code("not_an_action", "", ""),
         TaskError::Db(e) => ue(e),
     }
 }
 
 fn with_db<T>(state: &State<AppState>, f: impl FnOnce(&mut Connection) -> Result<T, tasks::TaskError>) -> Result<T, String> {
-    let guard = state.session.lock().expect("session lock");
-    let session = guard.as_ref().ok_or(NO_VAULT)?;
-    let mut db = session.db.lock().expect("db lock");
-    f(&mut db).map_err(task_code)
+    crate::commands::with_db(state, task_code, f)
 }
 
 pub(crate) fn now() -> chrono::DateTime<chrono::FixedOffset> {
@@ -59,12 +55,7 @@ pub fn set_task_done(state: State<AppState>, id: String, done: bool) -> Result<(
 
 #[tauri::command]
 pub fn delete_task(state: State<AppState>, id: String) -> Result<(), String> {
-    with_db(&state, |db| {
-        let tx = write_tx(db)?;
-        tasks::delete_task(&tx, &id, now())?;
-        tx.commit()?;
-        Ok(())
-    })
+    with_db(&state, |db| in_write_tx(db, |tx| tasks::delete_task(tx, &id, now())))
 }
 
 /// Undo of an automatic addition (FR-EXT-015): removed and remembered as rejected (FR-EXT-018).
@@ -79,10 +70,7 @@ fn undo(db: &mut Connection, kind: &str, id: &str) -> Result<(), tasks::TaskErro
         "routine" => ItemRef::Routine(id.to_owned()),
         _ => ItemRef::Task(id.to_owned()),
     };
-    let tx = write_tx(db)?;
-    reject_item(&tx, &item, now())?;
-    tx.commit()?;
-    Ok(())
+    in_write_tx(db, |tx| reject_item(tx, &item, now()).map(drop).map_err(tasks::TaskError::from))
 }
 
 #[tauri::command]
@@ -92,12 +80,7 @@ pub fn list_review(state: State<AppState>) -> Result<Vec<ReviewView>, String> {
 
 #[tauri::command]
 pub fn accept_review(state: State<AppState>, id: String, input: TaskInput) -> Result<String, String> {
-    with_db(&state, |db| {
-        let tx = write_tx(db)?;
-        let task_id = tasks::accept_review(&tx, &id, &input, now())?;
-        tx.commit()?;
-        Ok(task_id)
-    })
+    with_db(&state, |db| in_write_tx(db, |tx| tasks::accept_review(tx, &id, &input, now())))
 }
 
 #[tauri::command]
@@ -140,6 +123,7 @@ pub fn dismiss_missed(state: State<AppState>) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::commands::NO_VAULT;
 
     #[test]
     fn task_errors_are_codes_the_ui_translates() {

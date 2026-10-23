@@ -8,7 +8,7 @@
   import { onMount } from "svelte";
   import ArchiveRestore from "@lucide/svelte/icons/archive-restore";
   import { lang, t, tf } from "../i18n";
-  import { backupDay, describeError } from "../settings";
+  import { attempt, backupDay, describeError, longDay } from "../settings";
   import Button from "../ui/Button.svelte";
   import Row from "./Row.svelte";
 
@@ -42,8 +42,8 @@
     if (inTauri) void api.backupList().then((b) => (backups = b)).catch(() => {});
   });
   const dayOf = (name: string) => {
-    const [y, m, d] = (backupDay(name) ?? "").split("-").map(Number);
-    return y ? new Intl.DateTimeFormat(lang, { day: "numeric", month: "long", year: "numeric" }).format(new Date(y, m - 1, d)) : name;
+    const day = backupDay(name);
+    return day ? longDay(day, lang) : name;
   };
   async function restore() {
     if (!chosen) return;
@@ -62,11 +62,7 @@
 
   async function act(action: () => Promise<void>) {
     error = null;
-    try {
-      await action();
-    } catch (e) {
-      error = describeError(e);
-    }
+    error = await attempt(action);
   }
 </script>
 

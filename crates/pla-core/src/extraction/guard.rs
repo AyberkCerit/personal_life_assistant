@@ -50,20 +50,9 @@ fn has_rep_range(text: &str) -> bool {
     false
 }
 
+/// Turkish letters folded too: people type "deneyecegim" as often as "deneyeceğim".
 fn words(text: &str) -> Vec<String> {
-    // Turkish letters folded too: people type "deneyecegim" as often as "deneyeceğim"
-    let plain: String = crate::index::key(text)
-        .chars()
-        .map(|c| match c {
-            'ç' => 'c',
-            'ğ' => 'g',
-            'ş' => 's',
-            'ö' => 'o',
-            'ü' => 'u',
-            c => c,
-        })
-        .collect();
-    plain.split(|c: char| !c.is_alphanumeric()).filter(|w| !w.is_empty()).map(str::to_owned).collect()
+    crate::index::loose_words(text)
 }
 
 /// A plan or program, word for word: not "plank", "planlama", "programming" or "Bulgarian split

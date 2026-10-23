@@ -1,5 +1,5 @@
 // Task grouping and labels for the task panel (FR-TSK-001, -007, -008). No framework code.
-import type { Key } from "./i18n";
+import { splitError, type Key } from "./i18n";
 
 export interface Task {
   task_id: string;
@@ -40,7 +40,8 @@ export function todayIso(d: Date = new Date()): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
 
-function addDays(iso: string, days: number): string {
+/** `iso` (YYYY-MM-DD) moved by `days`, in the local calendar. */
+export function addDays(iso: string, days: number): string {
   const [y, m, d] = iso.split("-").map(Number);
   return todayIso(new Date(y, m - 1, d + days));
 }
@@ -104,9 +105,29 @@ const ERROR_CODES = ["bad_title", "bad_date", "bad_time", "not_found", "not_an_a
 
 /** Reads the task commands' `<code>|<detail>|<reason>` errors (architecture review A2). */
 export function taskError(err: string): { key: Key; detail: string } {
-  const [code, detail = "", ...rest] = err.split("|");
+  const { code, detail, reason } = splitError(err);
   if (ERROR_CODES.includes(code)) return { key: `tasks.error.${code}` as Key, detail };
-  return { key: "tasks.error.other", detail: code === "io" ? rest.join("|") : err };
+  return { key: "tasks.error.other", detail: code === "io" ? reason : err };
+}
+
+/**
+ * The Review box's reason in the interface language (FR-I18N). pla-core stores the reason as its own
+ * English text, old rows included; these are its wordings (pinned by a test in validate.rs), and
+ * anything else is an answer the model left unreadable.
+ */
+const REVIEW_REASONS: [RegExp, Key][] = [
+  [/^reminder without a date$/, "review.reason.no_date"],
+  [/^block too long for the model$/, "review.reason.too_long"],
+  [/^(llama-server |unexpected response from llama-server)/, "review.reason.model"],
+  [/is outside its plausible range$/, "review.reason.out_of_range"],
+  [/^(invalid time|invalid calendar date|day offset out of range|more than one of day_offset)/, "review.reason.bad_date"],
+  [/^repeat /, "review.reason.bad_repeat"],
+  [/^task or reminder without a title$/, "review.reason.no_title"],
+  [/^(task or reminder carrying a metric|metric without a kind|metric without a value|workout without sets)/, "review.reason.incomplete"],
+];
+
+export function reviewReason(reason: string): Key {
+  return REVIEW_REASONS.find(([pattern]) => pattern.test(reason))?.[1] ?? "review.reason.unreadable";
 }
 
 export function isReminder(task: Task): boolean {

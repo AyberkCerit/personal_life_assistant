@@ -13,6 +13,7 @@
   import EmptyState from "./ui/EmptyState.svelte";
   import Icon from "./ui/Icon.svelte";
   import IconButton from "./ui/IconButton.svelte";
+  import { escapeCancels, focusOnMount, onEscape } from "./ui/actions";
 
   let {
     routines,
@@ -37,11 +38,6 @@
 
   function emptyDays(): DayForm {
     return Object.fromEntries(WEEK.map((d) => [d, { on: false, time: "" }])) as DayForm;
-  }
-
-  /** Puts keyboard focus on an element as soon as it appears. */
-  function focusOnMount(node: HTMLElement) {
-    node.focus();
   }
 
   async function focusAfter(selector: string) {
@@ -77,19 +73,6 @@
     void focusAfter(`[data-delete="${id}"]`);
   }
 
-  function onEscape(e: KeyboardEvent, cancel: () => void) {
-    if (e.key === "Escape") {
-      e.preventDefault();
-      cancel();
-    }
-  }
-
-  /** Escape cancels the form it is attached to. */
-  function escapeCancels(node: HTMLElement, cancel: () => void) {
-    const handler = (e: KeyboardEvent) => onEscape(e, cancel);
-    node.addEventListener("keydown", handler);
-    return { destroy: () => node.removeEventListener("keydown", handler) };
-  }
 
   async function save(e: SubmitEvent) {
     e.preventDefault();
