@@ -1,6 +1,7 @@
 // The assistant panel (FR-QA-001…016): turns as the panel shows them, the events that build the
 // live one, answer text with its [[links]], and what each tool did in the user's words.
 import { lookup, t, type Key } from "./i18n";
+import { wikilinks } from "./links";
 
 export interface Undo { kind: string; id: string }
 export interface ToolRecord {
@@ -62,13 +63,13 @@ export function apply(turn: ShownTurn, e: QaEvent): ShownTurn {
 /** Answer text cut into plain text and `[[link]]`s (the link's shown text is its alias, if any). */
 export function answerParts(text: string): { text: string; link: string | null }[] {
   const parts: { text: string; link: string | null }[] = [];
-  const re = /\[\[([^\]\n]+)\]\]/g;
   let at = 0;
-  for (let m = re.exec(text); m; m = re.exec(text)) {
-    if (m.index > at) parts.push({ text: text.slice(at, m.index), link: null });
-    const [target, alias] = m[1].split("|");
+  for (const { start, end, inner } of wikilinks(text)) {
+    if (inner === "") continue; // `[[]]` stays plain text
+    if (start > at) parts.push({ text: text.slice(at, start), link: null });
+    const [target, alias] = inner.split("|");
     parts.push({ text: (alias ?? target).trim(), link: target.split("#")[0].trim() });
-    at = m.index + m[0].length;
+    at = end;
   }
   if (at < text.length) parts.push({ text: text.slice(at), link: null });
   return parts;

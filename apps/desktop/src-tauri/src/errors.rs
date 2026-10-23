@@ -83,6 +83,12 @@ pub fn naming(err: &str, what: &str) -> String {
     }
 }
 
+/// A code one screen reads itself (`settings.error.<code>`, `tasks.error.<code>`, `wizard.error.<code>`…),
+/// not one of `CODES`, in the same `code|detail|reason` form, so the page reads every error one way.
+pub fn own_code(code: &str, detail: impl Display, reason: impl Display) -> String {
+    format!("{code}|{detail}|{reason}")
+}
+
 /// For `map_err` on a failure already turned into text (pla-core's assistant undo, for one): a plain
 /// message, the text to copy.
 pub fn unexpected(e: impl Display) -> String {
@@ -205,6 +211,15 @@ impl From<tauri_plugin_autostart::Error> for UserError {
 mod tests {
     use super::*;
     use std::io::{Error, ErrorKind};
+
+    #[test]
+    fn screen_codes_have_the_same_three_parts() {
+        // code review 2026-10-19: one form for every command error, the page splits it at `|`
+        assert_eq!(own_code("busy", "", ""), "busy||");
+        assert_eq!(own_code("exists", "notes/a.md", ""), "exists|notes/a.md|");
+        assert_eq!(own_code("not_removed", "C:/m.gguf", "access_denied"), "not_removed|C:/m.gguf|access_denied");
+        assert_eq!(String::from(UserError::new("io", "").because("disk")), "io||disk");
+    }
 
     #[test]
     fn errors_travel_as_codes_with_their_reason() {

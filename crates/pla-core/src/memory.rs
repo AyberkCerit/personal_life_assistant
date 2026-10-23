@@ -198,7 +198,8 @@ pub fn total(conn: &Connection) -> rusqlite::Result<usize> {
     conn.query_row("SELECT count(*) FROM chunk", [], |r| r.get::<_, i64>(0)).map(|n| n as usize)
 }
 
-fn as_blob(v: &[f32]) -> Vec<u8> {
+/// A vector as sqlite-vec stores it: little-endian `f32`s.
+pub(crate) fn as_blob(v: &[f32]) -> Vec<u8> {
     v.iter().flat_map(|x| x.to_le_bytes()).collect()
 }
 
@@ -295,22 +296,27 @@ pub struct ChunkHit {
 const RRF_K: f64 = 60.0;
 const CANDIDATES: usize = 20;
 
+/// Reciprocal rank fusion: `key`, found at 1-based `rank` by one search, gains `1 / (RRF_K + rank)`.
+pub(crate) fn rrf_add<K: PartialEq>(scores: &mut Vec<(K, f64)>, key: K, rank: usize) {
+    let gain = 1.0 / (RRF_K + rank as f64);
+    match scores.iter_mut().find(|(k, _)| *k == key) {
+        Some((_, s)) => *s += gain,
+        None => scores.push((key, gain)),
+    }
+}
+
 /// FR-MEM-005/011: chunks for `question`, keyword (FTS5) and vector (`query`, embedded with
 /// `model`) rankings joined by reciprocal rank fusion. Chunks under `reports` count half: a
 /// generated report never outranks the notes it came from. Without a vector, keywords alone.
 pub fn hybrid(conn: &Connection, question: &str, query: Option<(&[f32], &str)>, reports: &str, limit: usize) -> rusqlite::Result<Vec<ChunkHit>> {
     let mut scores: Vec<(i64, f64)> = Vec::new();
-    let mut add = |id: i64, rank: usize| match scores.iter_mut().find(|(i, _)| *i == id) {
-        Some((_, s)) => *s += 1.0 / (RRF_K + rank as f64),
-        None => scores.push((id, 1.0 / (RRF_K + rank as f64))),
-    };
     if let Some(q) = crate::index::or_query(question) {
         let ids: Vec<i64> = conn
             .prepare("SELECT rowid FROM chunk_fts WHERE chunk_fts MATCH ?1 ORDER BY bm25(chunk_fts, 8.0, 1.0) LIMIT ?2")?
             .query_map(params![q, CANDIDATES as i64], |r| r.get(0))?
             .collect::<Result<_, _>>()?;
         for (rank, id) in ids.into_iter().enumerate() {
-            add(id, rank + 1);
+            rrf_add(&mut scores, id, rank + 1);
         }
     }
     if let Some((vector, model)) = query {
@@ -323,7 +329,7 @@ pub fn hybrid(conn: &Connection, question: &str, query: Option<(&[f32], &str)>, 
             .query_map(params![as_blob(vector), CANDIDATES as i64, model], |r| r.get(0))?
             .collect::<Result<_, _>>()?;
         for (rank, id) in ids.into_iter().enumerate() {
-            add(id, rank + 1);
+            rrf_add(&mut scores, id, rank + 1);
         }
     }
     let mut hits: Vec<ChunkHit> = Vec::new();

@@ -1,13 +1,12 @@
 //! The extraction prompt and schema measured in F1 (prompt v4), embedded verbatim.
 //! Regenerate the assets with `research/f1-model-eval/export_rust_assets.py`.
 
-use chrono::{Datelike, NaiveDate};
+use chrono::NaiveDate;
 use serde::Deserialize;
 use serde_json::{json, Value};
 
 const SCHEMA_JSON: &str = include_str!("../../assets/extraction_schema_v4.json");
 const PROMPT_JSON: &str = include_str!("../../assets/extraction_prompt_v4.json");
-const DAY_NAMES: [&str; 7] = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
 
 #[derive(Deserialize)]
 struct PromptAsset {
@@ -28,7 +27,7 @@ pub fn schema() -> Value {
 
 /// FR-EXT-010: the model sees the reference date and its weekday next to the note.
 pub fn user_message(reference: NaiveDate, text: &str) -> String {
-    let day = DAY_NAMES[reference.weekday().num_days_from_monday() as usize];
+    let day = crate::lang::weekday_name(reference, crate::lang::Lang::En);
     format!("Reference date: {} ({day})\nNote: {text}", reference.format("%Y-%m-%d"))
 }
 

@@ -186,13 +186,16 @@ impl Scheduler {
 
         if maintenance_due(&self.conn, now.date_naive()).unwrap_or(false) && self.probe.idle_seconds() >= IDLE_FOR_MAINTENANCE_SECS && self.probe.on_ac_power()
         {
-            self.run_maintenance(now);
-            self.notifier.maintenance();
+            // a held backup is no maintenance: nothing ran, and the window opens once it is answered
+            if self.run_maintenance(now) {
+                self.notifier.maintenance();
+            }
         }
         self.weekly_report(now);
     }
 
-    fn run_maintenance(&mut self, now: DateTime<FixedOffset>) {
+    /// The backup, then pruning. `false` when the backup is held (a restore offer waits): nothing ran.
+    fn run_maintenance(&mut self, now: DateTime<FixedOffset>) -> bool {
         match backup(&self.conn, &self.vault_root, now.date_naive()) {
             Ok(_) => {
                 let _ = record_success(&self.conn, DAILY, now);
@@ -202,7 +205,7 @@ impl Scheduler {
                 }
             }
             // a backup waits to be restored: nothing is copied, nothing failed; tried again later
-            Err(pla_core::jobs::JobError::Held) => return,
+            Err(pla_core::jobs::JobError::Held) => return false,
             Err(e) => {
                 // stored as a code: the settings screen says it in PLA's language (M6 translations)
                 let reason = crate::errors::ue(e);
@@ -213,6 +216,7 @@ impl Scheduler {
             }
         }
         self.notifier.backup_changed(); // nightly runs too (settings final review M9)
+        true
     }
 
     pub fn handle(&mut self, command: SchedCommand) {
@@ -645,6 +649,35 @@ mod tests {
         let backup = rusqlite::Connection::open(r.vault.join(".pla/backup/pla-2026-12-10.db")).unwrap();
         let kept: i64 = backup.query_row("SELECT count(*) FROM block", [], |x| x.get(0)).unwrap();
         assert_eq!(kept, 1, "the backup is taken first");
+    }
+
+    /// Counts the maintenance windows announced.
+    #[derive(Clone, Default)]
+    struct Windows(Arc<Mutex<usize>>);
+    impl Notifier for Windows {
+        fn reminder(&self, _: &DueReminder) {}
+        fn missed(&self, _: &[DueReminder]) {}
+        fn problem(&self, _: &str) {}
+        fn tasks_changed(&self) {}
+        fn maintenance(&self) {
+            *self.0.lock().unwrap() += 1;
+        }
+    }
+
+    #[test]
+    fn no_maintenance_window_while_a_backup_waits_to_be_restored() {
+        // code review 2026-10-19: a held backup left maintenance due, so every tick announced it
+        let mut r = rig("2026-10-06T22:00:00+03:00");
+        let windows = Windows::default();
+        r.sched.notifier = Box::new(windows.clone());
+        std::fs::write(r._tmp.path().join(".data").join("pla.restore-offer"), r#"{"backup":null,"damaged":false}"#).unwrap();
+        *r.probe.lock().unwrap() = (600, true);
+        r.walk("2026-10-06T22:03:00+03:00");
+        assert_eq!(*windows.0.lock().unwrap(), 0, "nothing was backed up, nothing is summarised");
+        assert!(!r.vault.join(".pla/backup/pla-2026-10-06.db").exists());
+        std::fs::remove_file(r._tmp.path().join(".data").join("pla.restore-offer")).unwrap();
+        r.walk("2026-10-06T22:04:00+03:00");
+        assert_eq!(*windows.0.lock().unwrap(), 1, "answered: the night's maintenance runs once");
     }
 
     #[test]

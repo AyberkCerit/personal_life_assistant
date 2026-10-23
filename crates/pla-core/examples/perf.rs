@@ -134,7 +134,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let first_token = |host: &mut ModelHost, q: &str| -> (f64, bool) {
             let started = Instant::now();
             let mut first: Option<f64> = None;
-            let answered = pla_core::qa::engine::answer(host, &env, &pla_core::qa::engine::Question { text: q, turns: &[], memory: None, recall: None, ui_lang: "tr" }, &AtomicBool::new(false), &mut |p| {
+            let answered = pla_core::qa::engine::answer(host, &env, &pla_core::qa::engine::Question { text: q, turns: &[], memory: None, recall: None, ui_lang: "tr", persona: &Default::default() }, &AtomicBool::new(false), &mut |p| {
                 if matches!(p, pla_core::qa::engine::Progress::Token(_)) && first.is_none() {
                     first = Some(started.elapsed().as_secs_f64() * 1000.0);
                 }
@@ -145,7 +145,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let (mut ahead, mut plain, mut with_tool) = (Vec::new(), Vec::new(), Vec::new());
         for i in 0..10 {
             host.stop(); // the panel opens with no model loaded: the read-ahead starts it
-            let (ms, warmed) = time(|| pla_core::qa::engine::warm(&mut host, &dbs.cache, now, &pla_core::recall::Recall::default(), "memory", &AtomicBool::new(false)));
+            let (ms, warmed) = time(|| pla_core::qa::engine::warm(&mut host, &dbs.cache, &Default::default(), now, &pla_core::recall::Recall::default(), "memory", &AtomicBool::new(false)));
             warmed?;
             ahead.push(ms);
             let (ms, tool) = first_token(&mut host, questions[i % questions.len()]);

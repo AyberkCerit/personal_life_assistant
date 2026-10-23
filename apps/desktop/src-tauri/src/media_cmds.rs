@@ -12,13 +12,13 @@ use tauri::ipc::{InvokeBody, Request, Response};
 use tauri::{AppHandle, Emitter, State};
 
 use crate::commands::AppState;
+use crate::errors::{own_code, ue};
 use crate::fileops_cmds::code;
-use crate::errors::ue;
 
 fn media_code(e: MediaError) -> String {
     match e {
-        MediaError::NotImage => "not_image||".into(),
-        MediaError::TooBig => "too_big|20|".into(),
+        MediaError::NotImage => own_code("not_image", "", ""),
+        MediaError::TooBig => own_code("too_big", 20, ""),
         MediaError::File(e) => code(e),
         MediaError::Io(e) => ue(e),
     }
@@ -32,8 +32,7 @@ pub fn note_meta(text: String) -> FrontMatter {
 
 /// The open vault, copied out so no file work happens under the session lock (final review I2).
 fn vault_of(state: &State<AppState>) -> Result<Vault, String> {
-    let guard = state.session.lock().expect("session lock");
-    Ok(guard.as_ref().ok_or(crate::commands::NO_VAULT)?.vault.clone())
+    crate::commands::with_session(state, |s| Ok(s.vault.clone()))
 }
 
 /// The vault's images, walked at most every few seconds: a note with many embeds asks at once.
@@ -56,7 +55,7 @@ fn images_cached(vault: &Vault) -> Vec<String> {
 #[tauri::command(async)]
 pub fn image_bytes(state: State<'_, AppState>, target: String) -> Result<Response, String> {
     let vault = vault_of(&state)?;
-    let rel = media::resolve_image_among(&vault, &target, || images_cached(&vault)).ok_or_else(|| format!("missing|{target}|"))?;
+    let rel = media::resolve_image_among(&vault, &target, || images_cached(&vault)).ok_or_else(|| own_code("missing", &target, ""))?;
     let bytes = media::read_image(&vault, &rel).map_err(media_code)?;
     Ok(Response::new(bytes))
 }
@@ -72,7 +71,7 @@ pub struct SavedImage {
 /// in the `x-name` header (URI-encoded), a pasted image has none.
 #[tauri::command(async)]
 pub fn save_image(app: AppHandle, state: State<'_, AppState>, request: Request<'_>) -> Result<SavedImage, String> {
-    let InvokeBody::Raw(bytes) = request.body() else { return Err("not_image||".into()) };
+    let InvokeBody::Raw(bytes) = request.body() else { return Err(own_code("not_image", "", "")) };
     let name = request.headers().get("x-name").and_then(|v| v.to_str().ok()).map(percent_decode).filter(|n| !n.trim().is_empty());
     let vault = vault_of(&state)?;
     let path = media::save_attachment(&vault, bytes, name.as_deref(), Local::now().fixed_offset()).map_err(media_code)?;

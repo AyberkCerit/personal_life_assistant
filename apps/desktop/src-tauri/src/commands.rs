@@ -5,7 +5,6 @@
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
 
 use chrono::Local;
 use pla_core::db::connect;
@@ -13,7 +12,7 @@ use pla_core::db::open_databases;
 use pla_core::files::{self, FileError, NoteFile, TreeEntry};
 use pla_core::llm::ModelHost;
 use pla_core::pipeline::Extractor;
-use pla_core::settings::{load_settings, save_settings, AppSettings, Theme};
+use pla_core::settings::{load_settings, save_settings, AppSettings, Formality, Persona, Theme};
 use pla_core::vault::{default_app_root, open_vault as open_vault_dir, resolve_data_dir, Vault};
 use rusqlite::Connection;
 
@@ -21,12 +20,12 @@ use crate::worker::{AddedItem, WorkerStatus};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State};
 
+use crate::errors::{own_code, ue};
 use crate::notify::{show_info, strings, AppNotifier};
 use crate::scheduler::{Pending, SchedCommand, Scheduler, SchedulerHandle};
 use crate::system::WindowsProbe;
 use crate::watcher::{watch, SelfWrites, WatchHandle};
 use crate::worker::{Command, Worker, WorkerHandle};
-use crate::errors::ue;
 
 /// One open vault. Fields drop in order: the scheduler stops first, then the watcher, then the
 /// worker (which ends the model).
@@ -160,7 +159,7 @@ pub fn bundled_server(app: &AppHandle) -> Option<PathBuf> {
 /// The model host for these settings, or none while no model is installed (FR-SET-010).
 fn extractor(app: &AppHandle, settings: &AppSettings) -> Option<Box<dyn Extractor + Send>> {
     let cfg = crate::model_paths::server_config(settings, &crate::model_paths::process_env, bundled_server(app))?;
-    Some(Box::new(ModelHost::new(cfg, Duration::from_secs(60))))
+    Some(Box::new(ModelHost::new(cfg, crate::worker::MODEL_IDLE_AFTER)))
 }
 
 fn start_session(app: &AppHandle, root: &Path, settings: &AppSettings, own: Arc<SelfWrites>, paused: bool) -> Result<Session, String> {
@@ -269,10 +268,32 @@ fn start_session(app: &AppHandle, root: &Path, settings: &AppSettings, own: Arc<
     })
 }
 
-fn with_vault<T>(state: &State<AppState>, f: impl FnOnce(&Vault) -> Result<T, FileError>) -> Result<T, String> {
+/// The open session, or the `no_vault` error every command gives without one.
+pub(crate) fn with_session<T>(state: &AppState, f: impl FnOnce(&Session) -> Result<T, String>) -> Result<T, String> {
     let guard = state.session.lock().expect("session lock");
-    let session = guard.as_ref().ok_or(NO_VAULT)?;
-    f(&session.vault).map_err(ue)
+    f(guard.as_ref().ok_or(NO_VAULT)?)
+}
+
+/// The window's pla.db connection; `code` says the command's own error the way the page reads it.
+pub(crate) fn with_db<T, E>(state: &AppState, code: impl FnOnce(E) -> String, f: impl FnOnce(&mut Connection) -> Result<T, E>) -> Result<T, String> {
+    with_session(state, |session| f(&mut session.db.lock().expect("db lock")).map_err(code))
+}
+
+/// The window's cache.db connection (search, backlinks, tags, summaries).
+pub(crate) fn with_cache<T>(state: &AppState, f: impl FnOnce(&Connection) -> rusqlite::Result<T>) -> Result<T, String> {
+    with_session(state, |session| f(&session.cache.lock().expect("cache lock")).map_err(ue))
+}
+
+/// Runs a write in one immediate transaction (the write lock taken up front, `write_tx`) and commits it.
+pub(crate) fn in_write_tx<T, E: From<rusqlite::Error>>(db: &mut Connection, f: impl FnOnce(&Connection) -> Result<T, E>) -> Result<T, E> {
+    let tx = pla_core::pipeline::write_tx(db)?;
+    let out = f(&tx)?;
+    tx.commit()?;
+    Ok(out)
+}
+
+fn with_vault<T>(state: &AppState, f: impl FnOnce(&Vault) -> Result<T, FileError>) -> Result<T, String> {
+    with_session(state, |session| f(&session.vault).map_err(ue))
 }
 
 #[tauri::command]
@@ -339,7 +360,7 @@ pub fn open_vault(app: AppHandle, state: State<AppState>, path: String) -> Resul
 fn open_vault_locked(app: &AppHandle, state: &State<AppState>, path: &Path) -> Result<VaultInfo, String> {
     // NFR-SEC-010: the uninstaller may delete PLA's own folders, so a vault never lives there
     if pla_core::vault::inside_app_data(path, &pla_core::vault::app_data_roots()) {
-        return Err(format!("app_data|{}", path.display()));
+        return Err(own_code("app_data", path.display(), ""));
     }
     let root = app_root()?;
     let settings = load_settings(&root).map_err(ue)?.settings;
@@ -365,7 +386,7 @@ fn open_vault_locked(app: &AppHandle, state: &State<AppState>, path: &Path) -> R
                 *state.session.lock().expect("session lock") = Some(back);
                 error
             }
-            Err(_) => format!("vault_lost|{}|{error}", old.display()),
+            Err(_) => own_code("vault_lost", old.display(), &error),
         }
     };
     let session = match start_session(app, path, &settings, Arc::clone(&state.self_writes), paused) {
@@ -465,7 +486,7 @@ pub fn weekly_report_settings(state: State<AppState>) -> Result<WeeklyReportView
 #[tauri::command]
 pub fn set_weekly_report(state: State<AppState>, schedule: pla_core::report::WeeklySchedule) -> Result<(), String> {
     if schedule.weekday > 6 || chrono::NaiveTime::parse_from_str(&schedule.time, "%H:%M").is_err() {
-        return Err(format!("invalid_setting|weekly_report|{} {}", schedule.weekday, schedule.time));
+        return Err(own_code("invalid_setting", "weekly_report", format!("{} {}", schedule.weekday, schedule.time)));
     }
     update_settings(&app_root()?, &state.settings_lock, |s| s.weekly_report = schedule.clone())?;
     if let Some(session) = state.session.lock().expect("session lock").as_ref() {
@@ -482,6 +503,7 @@ pub struct SettingsView {
     autostart: bool,
     paused: bool,
     vault_path: Option<String>,
+    persona: pla_core::settings::Persona,
 }
 
 /// One plain setting from the settings screen; anything else is refused and changes nothing.
@@ -492,7 +514,11 @@ pub fn apply_setting(s: &mut AppSettings, key: &str, value: &serde_json::Value) 
         ("language", Value::String(l)) if l == "tr" || l == "en" => s.language = Some(l.clone()),
         ("theme", Value::String(t)) if t == "dark" => s.theme = Theme::Dark,
         ("theme", Value::String(t)) if t == "light" => s.theme = Theme::Light,
-        _ => return Err(format!("invalid_setting|{key}|{value}")),
+        ("assistant_name", Value::String(n)) => s.persona.name = Persona::clean(n),
+        ("user_address", Value::String(a)) => s.persona.address = Persona::clean(a),
+        ("formality", Value::String(f)) if f == "informal" => s.persona.formality = Formality::Informal,
+        ("formality", Value::String(f)) if f == "formal" => s.persona.formality = Formality::Formal,
+        _ => return Err(own_code("invalid_setting", key, value)),
     }
     Ok(())
 }
@@ -505,6 +531,7 @@ fn settings_view(app: &AppHandle, state: &State<AppState>, settings: &AppSetting
         autostart: app.autolaunch().is_enabled().unwrap_or(false),
         paused: state.paused.load(Ordering::SeqCst),
         vault_path: settings.vault_path.as_ref().map(|p| p.to_string_lossy().into_owned()),
+        persona: settings.persona.clone(),
     }
 }
 
@@ -533,6 +560,7 @@ pub fn settings_set(app: AppHandle, state: State<AppState>, key: String, value: 
         crate::notify::set_ui_language(settings.language.as_deref());
         crate::tray::refresh(&app);
     }
+    crate::qa_cmds::set_persona(settings.persona.clone());
     Ok(settings_view(&app, &state, &settings))
 }
 
@@ -607,11 +635,11 @@ pub fn create_note(state: State<AppState>, folder: String, title: String) -> Res
 
 #[tauri::command]
 pub fn queue_note(state: State<AppState>, path: String) -> Result<(), String> {
-    let guard = state.session.lock().expect("session lock");
-    let session = guard.as_ref().ok_or(NO_VAULT)?;
-    files::resolve(&session.vault, &path).map_err(ue)?;
-    session.worker.send(Command::Enqueue(path));
-    Ok(())
+    with_session(&state, |session| {
+        files::resolve(&session.vault, &path).map_err(ue)?;
+        session.worker.send(Command::Enqueue(path));
+        Ok(())
+    })
 }
 
 /// Every command's "no vault is open" error, in the `<code>|<detail>|<reason>` form the UI reads.
@@ -619,30 +647,26 @@ pub const NO_VAULT: &str = "no_vault||";
 
 #[tauri::command]
 pub fn vault_info(state: State<AppState>) -> Result<VaultInfo, String> {
-    let guard = state.session.lock().expect("session lock");
-    guard.as_ref().map(|s| vault_info_of(&s.vault)).ok_or_else(|| NO_VAULT.to_owned())
+    with_session(&state, |s| Ok(vault_info_of(&s.vault)))
 }
 
 #[tauri::command]
 pub fn worker_status(state: State<AppState>) -> Result<WorkerStatus, String> {
-    let guard = state.session.lock().expect("session lock");
-    let session = guard.as_ref().ok_or(NO_VAULT)?;
-    let status = session.status.lock().expect("status lock").clone();
-    Ok(status)
+    with_session(&state, |s| Ok(s.status.lock().expect("status lock").clone()))
 }
 
 #[tauri::command]
 pub fn backup_now(state: State<AppState>) -> Result<(), String> {
-    let guard = state.session.lock().expect("session lock");
-    guard.as_ref().ok_or(NO_VAULT)?.scheduler.send(SchedCommand::BackupNow);
-    Ok(())
+    with_session(&state, |s| {
+        s.scheduler.send(SchedCommand::BackupNow);
+        Ok(())
+    })
 }
 
 /// FR-BKP-005: the vault's backups, newest first (`pla-<YYYY-MM-DD>.db`).
 #[tauri::command]
 pub fn backup_list(state: State<AppState>) -> Result<Vec<String>, String> {
-    let guard = state.session.lock().expect("session lock");
-    Ok(pla_core::jobs::backups(&guard.as_ref().ok_or(NO_VAULT)?.vault.root))
+    with_session(&state, |s| Ok(pla_core::jobs::backups(&s.vault.root)))
 }
 
 /// FR-BKP-004/005/006/008, FR-LOG-007: puts backup `name` in place of this vault's pla.db. The
@@ -749,10 +773,24 @@ mod tests {
             ("theme", serde_json::json!("blue")),
             ("vault_path", serde_json::json!("C:/x")),
             ("theme", serde_json::json!(1)),
+            ("formality", serde_json::json!("siz")),
+            ("assistant_name", serde_json::Value::Null),
         ] {
             assert!(apply_setting(&mut s, key, &value).is_err(), "{key} = {value}");
         }
         assert_eq!(s, before, "a refused value changes nothing");
+    }
+
+    #[test]
+    fn the_assistant_gets_a_name_and_a_form_of_address() {
+        let mut s = AppSettings::default();
+        apply_setting(&mut s, "assistant_name", &serde_json::json!("  Atlas
+")).unwrap();
+        apply_setting(&mut s, "user_address", &serde_json::json!("Ayberk Bey")).unwrap();
+        apply_setting(&mut s, "formality", &serde_json::json!("formal")).unwrap();
+        assert_eq!(s.persona, Persona { name: "Atlas".into(), address: "Ayberk Bey".into(), formality: Formality::Formal });
+        apply_setting(&mut s, "assistant_name", &serde_json::json!(" ")).unwrap();
+        assert_eq!(s.persona.name(), "PLA", "empty = PLA again");
     }
 
     #[test]

@@ -1,14 +1,14 @@
 // Folder tree helpers (FR-EDT-004): error codes, paths after a move, where an item can go.
 import type { TreeEntry } from "./api";
-import type { Key } from "./i18n";
+import { splitError, type Key } from "./i18n";
 
 const CODES = ["bad_name", "exists", "missing", "bad_path", "read_only", "conflict", "io", "no_vault", "reserved"];
 
 /** Reads `<code>|<detail>|<reason>` from the tree commands. */
 export function treeError(err: string): { key: Key; detail: string; reason: string } {
-  const [code, detail = "", ...rest] = err.split("|");
+  const { code, detail, reason } = splitError(err);
   if (!CODES.includes(code)) return { key: "tree.error.io", detail: "", reason: err };
-  return { key: `tree.error.${code}` as Key, detail, reason: rest.join("|") };
+  return { key: `tree.error.${code}` as Key, detail, reason };
 }
 
 export function parentOf(path: string): string {

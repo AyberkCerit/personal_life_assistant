@@ -8,9 +8,8 @@ use serde_json::{Map, Value};
 
 use crate::extraction::{validate, MetricKind, RawExtraction, RawItem, Unit, ValidItem, ValidationSettings, Weekday};
 use crate::routines::{insert_routine, roll_one, RoutineDay};
-use crate::util::new_id;
+use crate::util::{new_id, MAX_TITLE_CHARS};
 
-const MAX_TITLE_CHARS: usize = 200;
 const DEFAULT_REMINDER_TIME: (u32, u32) = (9, 0);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -269,9 +268,8 @@ pub fn reject_item(conn: &Connection, item: &ItemRef, now: DateTime<FixedOffset>
     let found: Option<(Option<String>, Option<String>)> =
         conn.query_row(&format!("SELECT block_id, item_signature FROM {table} WHERE {key} = ?1"), [id], |r| Ok((r.get(0)?, r.get(1)?))).optional()?;
     let Some((block_id, signature)) = found else { return Ok(false) };
-    // One step: a savepoint works alone and inside a caller's transaction (architecture review M9).
-    conn.execute_batch("SAVEPOINT reject_item")?;
-    let done = (|| {
+    // One step, alone or inside a caller's transaction (architecture review M9).
+    crate::db::atomically(conn, "reject_item", || {
         if let (Some(block_id), Some(signature)) = (&block_id, &signature) {
             conn.execute(
                 "INSERT OR IGNORE INTO rejection (rejection_id, block_id, item_signature, rejected_at) VALUES (?1, ?2, ?3, ?4)",
@@ -286,14 +284,7 @@ pub fn reject_item(conn: &Connection, item: &ItemRef, now: DateTime<FixedOffset>
             conn.execute("UPDATE task SET routine_id = NULL WHERE routine_id = ?1", [id])?;
         }
         conn.execute(&format!("DELETE FROM {table} WHERE {key} = ?1"), [id])
-    })();
-    match done {
-        Ok(_) => conn.execute_batch("RELEASE reject_item")?,
-        Err(e) => {
-            conn.execute_batch("ROLLBACK TO reject_item; RELEASE reject_item")?;
-            return Err(e);
-        }
-    }
+    })?;
     Ok(true)
 }
 

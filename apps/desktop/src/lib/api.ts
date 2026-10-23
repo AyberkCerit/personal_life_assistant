@@ -65,7 +65,10 @@ export type DownloadState =
   | { state: "done"; path: string };
 export interface ModelStatus { installed: InstalledModel | null; recommended: CatalogEntry; download: DownloadState | null; models_dir: string | null }
 export interface WizardDefaults { suggested_vault: string | null }
-export interface SettingsView { language: "tr" | "en" | null; theme: "dark" | "light"; autostart: boolean; paused: boolean; vault_path: string | null }
+/** The assistant's name ("" = PLA), what it calls the user ("" = nothing particular), sen or siz. */
+export interface Persona { name: string; address: string; formality: "informal" | "formal" }
+export type PersonaKey = "assistant_name" | "user_address" | "formality";
+export interface SettingsView { language: "tr" | "en" | null; theme: "dark" | "light"; autostart: boolean; paused: boolean; vault_path: string | null; persona: Persona }
 export interface BackupStatus { job: JobStatus; backups: string[] }
 /** FR-SCH-016: 0 = Monday … 6 = Sunday; time "HH:MM". */
 export interface WeeklySchedule { enabled: boolean; weekday: number; time: string }
@@ -209,7 +212,7 @@ export const api = {
   onOpenQuickMetric: (cb: () => void) => on<unknown>("open-quick-metric", () => cb()),
   settingsGet: () => call<SettingsView>("settings_get"),
   /** Applies at once; errors are `invalid_setting|<key>|<value>`. */
-  settingsSet: (key: "language" | "theme", value: string | null) => call<SettingsView>("settings_set", { key, value }),
+  settingsSet: (key: "language" | "theme" | PersonaKey, value: string | null) => call<SettingsView>("settings_set", { key, value }),
   setAutostart: (enabled: boolean) => call<void>("set_autostart", { enabled }),
   sendTestNotification: () => call<void>("send_test_notification"),
   notificationStatus: () => call<boolean>("notification_status"),

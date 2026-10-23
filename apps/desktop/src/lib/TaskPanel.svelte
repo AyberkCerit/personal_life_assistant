@@ -3,7 +3,7 @@
   import ErrorBanner from "./ui/ErrorBanner.svelte";
   import { api, type ReviewItem, type Routine, type Task, type TaskInput } from "./api";
   import { onMount } from "svelte";
-  import { filterByOrigin, groupTasks, msUntilNextDay, taskError, todayIso, type OriginFilter, type TaskList } from "./tasks";
+  import { filterByOrigin, groupTasks, msUntilNextDay, reviewReason, taskError, todayIso, type OriginFilter, type TaskList } from "./tasks";
   import RoutineList from "./RoutineList.svelte";
   import { routineError } from "./routines";
   import TaskRow from "./TaskRow.svelte";
@@ -183,7 +183,7 @@
             {task}
             {today}
             onDone={(done) => run(() => api.setTaskDone(task.task_id, done))}
-            onSave={async (input) => void (await run(() => api.editTask(task.task_id, input)))}
+            onSave={(input) => run(() => api.editTask(task.task_id, input))}
             onDelete={() => void run(() => api.deleteTask(task.task_id))}
             onOpenSource={() => task.note_path && onOpenSource(task.note_path, task.block_text)}
           />
@@ -200,7 +200,7 @@
     <ul class="cards">
       {#each review as item (item.review_id)}
         <li class="card">
-          <p class="reason"><Icon icon={Sparkles} size="sm" />{item.reason}</p>
+          <p class="reason" title={item.reason}><Icon icon={Sparkles} size="sm" />{t(reviewReason(item.reason))}</p>
           {#if item.block_text}<blockquote>{item.block_text}</blockquote>{/if}
           {#if item.is_action}
             <form

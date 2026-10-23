@@ -1,39 +1,27 @@
 //! Tauri commands for the weekly routines (Rutinler); the rules live in `pla_core::routines`.
 
 use chrono::Local;
-use pla_core::pipeline::write_tx;
 use pla_core::routines::{self, RoutineError, RoutineInput, RoutineView};
 use rusqlite::Connection;
 use tauri::{AppHandle, Emitter, State};
 
-use crate::commands::{AppState, NO_VAULT};
-use crate::errors::ue;
+use crate::commands::{in_write_tx, AppState};
+use crate::errors::{own_code, ue};
 use crate::task_cmds::now;
 
 /// A routine error as a code the UI turns into a sentence in its language (like `task_code`).
 pub fn routine_code(e: RoutineError) -> String {
     match e {
-        RoutineError::BadTitle => "bad_title||".into(),
-        RoutineError::NoDays => "no_days||".into(),
-        RoutineError::BadTime(t) => format!("bad_time|{t}|"),
-        RoutineError::NotFound => "not_found||".into(),
+        RoutineError::BadTitle => own_code("bad_title", "", ""),
+        RoutineError::NoDays => own_code("no_days", "", ""),
+        RoutineError::BadTime(t) => own_code("bad_time", t, ""),
+        RoutineError::NotFound => own_code("not_found", "", ""),
         RoutineError::Db(e) => ue(e),
     }
 }
 
 fn with_db<T>(state: &State<AppState>, f: impl FnOnce(&mut Connection) -> Result<T, RoutineError>) -> Result<T, String> {
-    let guard = state.session.lock().expect("session lock");
-    let session = guard.as_ref().ok_or(NO_VAULT)?;
-    let mut db = session.db.lock().expect("db lock");
-    f(&mut db).map_err(routine_code)
-}
-
-/// Runs a write in one immediate transaction (the write lock is taken up front, like `task_cmds`) and commits it.
-fn in_write_tx<T>(db: &mut Connection, f: impl FnOnce(&Connection) -> Result<T, RoutineError>) -> Result<T, RoutineError> {
-    let tx = write_tx(db)?;
-    let out = f(&tx)?;
-    tx.commit()?;
-    Ok(out)
+    crate::commands::with_db(state, routine_code, f)
 }
 
 #[tauri::command]

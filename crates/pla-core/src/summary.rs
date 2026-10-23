@@ -11,6 +11,7 @@ use serde::Serialize;
 use serde_json::{json, Value};
 
 use crate::index::NoteText;
+use crate::lang::{weekday_name, Lang};
 use crate::llm::LlmError;
 use crate::memory::{self, Embedder};
 use crate::notes::daily_note_date;
@@ -169,13 +170,10 @@ pub fn plan(conn: &Connection, folders: &Folders, today: NaiveDate) -> rusqlite:
     Ok(stale)
 }
 
-const DAYS: [&str; 7] = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
-const DAYS_TR: [&str; 7] = ["Pazartesi", "Salı", "Çarşamba", "Perşembe", "Cuma", "Cumartesi", "Pazar"];
-
 /// The request that summarises one day.
-pub fn request(day: &DaySources, lang: crate::lang::Lang) -> Value {
+pub fn request(day: &DaySources, lang: Lang) -> Value {
     let share = INPUT_TOKENS / day.notes.len().max(1);
-    let mut text = format!("Day: {} ({})\n\n", day.date, DAYS[day.date.weekday().num_days_from_monday() as usize]);
+    let mut text = format!("Day: {} ({})\n\n", day.date, weekday_name(day.date, Lang::En));
     for n in &day.notes {
         let mut body: String = n.body.trim().to_owned();
         while tokens(&body) > share && !body.is_empty() {
@@ -197,7 +195,7 @@ pub fn request(day: &DaySources, lang: crate::lang::Lang) -> Value {
 }
 
 /// FR-MEM-006: the model's summary of `day`.
-pub fn summarize(model: &mut dyn ChatModel, day: &DaySources, lang: crate::lang::Lang, cancel: &AtomicBool) -> Result<String, LlmError> {
+pub fn summarize(model: &mut dyn ChatModel, day: &DaySources, lang: Lang, cancel: &AtomicBool) -> Result<String, LlmError> {
     Ok(model.complete(&request(day, lang), cancel)?.trim().to_owned())
 }
 
@@ -225,8 +223,7 @@ pub fn save(conn: &Connection, day: &DaySources, text: &str, now: DateTime<Fixed
         params![key, text, serde_json::to_string(&paths).unwrap_or_default(), now.to_rfc3339(), day.signature],
     )?;
     // the weekday's names are searchable too ("salı", "Tuesday")
-    let n = day.date.weekday().num_days_from_monday() as usize;
-    let names = format!("{} {}", DAYS[n], DAYS_TR[n]);
+    let names = format!("{} {}", weekday_name(day.date, Lang::En), weekday_name(day.date, Lang::Tr));
     tx.execute("INSERT INTO summary_fts (date, text) VALUES (?1, ?2)", params![key, format!("{key} {names}\n{text}")])?;
     tx.commit()
 }
@@ -273,8 +270,7 @@ pub fn embed_pending(conn: &Connection, embedder: &mut dyn Embedder, until: Inst
             let Ok(d) = NaiveDate::parse_from_str(date, "%Y-%m-%d") else { continue };
             tx.execute("DELETE FROM summary_vec WHERE day = ?1", [day_number(d)])?;
             if v.len() == memory::DIMENSIONS {
-                let blob: Vec<u8> = v.iter().flat_map(|x| x.to_le_bytes()).collect();
-                tx.execute("INSERT INTO summary_vec (day, embedding) VALUES (?1, ?2)", params![day_number(d), blob])?;
+                tx.execute("INSERT INTO summary_vec (day, embedding) VALUES (?1, ?2)", params![day_number(d), memory::as_blob(&v)])?;
             }
             tx.execute("UPDATE daily_summary SET embedded_model = ?2 WHERE date = ?1", params![date, model])?;
             done += 1;
@@ -288,10 +284,6 @@ pub fn embed_pending(conn: &Connection, embedder: &mut dyn Embedder, until: Inst
 /// there is one), joined like the chunk search.
 pub fn find_days(conn: &Connection, question: &str, query: crate::qa::context::Memory<'_>, limit: usize) -> rusqlite::Result<Vec<NaiveDate>> {
     let mut scores: Vec<(NaiveDate, f64)> = Vec::new();
-    let mut add = |d: NaiveDate, rank: usize| match scores.iter_mut().find(|(x, _)| *x == d) {
-        Some((_, s)) => *s += 1.0 / (60.0 + rank as f64),
-        None => scores.push((d, 1.0 / (60.0 + rank as f64))),
-    };
     if let Some(q) = crate::index::or_query(question) {
         let dates: Vec<String> = conn
             .prepare("SELECT date FROM summary_fts WHERE summary_fts MATCH ?1 ORDER BY rank LIMIT 10")?
@@ -299,12 +291,12 @@ pub fn find_days(conn: &Connection, question: &str, query: crate::qa::context::M
             .collect::<Result<_, _>>()?;
         for (i, d) in dates.iter().enumerate() {
             if let Ok(d) = NaiveDate::parse_from_str(d, "%Y-%m-%d") {
-                add(d, i + 1);
+                memory::rrf_add(&mut scores, d, i + 1);
             }
         }
     }
     if let Some((vector, model)) = query {
-        let blob: Vec<u8> = vector.iter().flat_map(|x| x.to_le_bytes()).collect();
+        let blob = memory::as_blob(vector);
         let days: Vec<i64> = conn
             .prepare("SELECT day FROM summary_vec WHERE embedding MATCH ?1 AND k = 10 ORDER BY distance")?
             .query_map([blob], |r| r.get(0))?
@@ -316,7 +308,7 @@ pub fn find_days(conn: &Connection, question: &str, query: crate::qa::context::M
                 .optional()?
                 .flatten();
             if same_model.as_deref() == Some(model) {
-                add(d, i + 1);
+                memory::rrf_add(&mut scores, d, i + 1);
             }
         }
     }
@@ -369,7 +361,7 @@ mod tests {
     fn a_summary_is_written_in_the_interface_language() {
         // FR-I18N-006, owner decision (M6 translations): not in the notes' language
         let day = DaySources { date: d("2026-10-06"), notes: Vec::new(), signature: String::new() };
-        for (lang, name) in [(crate::lang::Lang::Tr, "in Turkish"), (crate::lang::Lang::En, "in English")] {
+        for (lang, name) in [(Lang::Tr, "in Turkish"), (Lang::En, "in English")] {
             let body = request(&day, lang);
             let system = body["messages"][0]["content"].as_str().unwrap();
             assert!(system.contains(name), "{system}");
@@ -451,7 +443,7 @@ Karar.", noon(d("2026-10-06")), 1).unwrap();
         let mut model = Says("- Bir şey [[N1]]");
         for day in &first {
             let src = sources(&conn, &f, *day).unwrap();
-            save(&conn, &src, &summarize(&mut model, &src, crate::lang::Lang::Tr, &AtomicBool::new(false)).unwrap(), now()).unwrap();
+            save(&conn, &src, &summarize(&mut model, &src, Lang::Tr, &AtomicBool::new(false)).unwrap(), now()).unwrap();
         }
         let second = plan(&conn, &f, today).unwrap();
         assert_eq!(second.len(), 20);

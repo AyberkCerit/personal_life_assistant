@@ -42,8 +42,23 @@ pub fn key(s: &str) -> String {
     fold(s).replace('ı', "i")
 }
 
+/// The words of `text` as `key` reads them, punctuation dropped (the assistant's and the guard's
+/// word matching; search keeps `_` in a word, see `fts_query`).
+pub(crate) fn key_words(text: &str) -> Vec<String> {
+    split_words(&key(text))
+}
+
+/// Like `key_words`, with Turkish diacritics dropped too ("deneyecegim" is "deneyeceğim").
+pub(crate) fn loose_words(text: &str) -> Vec<String> {
+    split_words(&loose(text))
+}
+
+fn split_words(folded: &str) -> Vec<String> {
+    folded.split(|c: char| !c.is_alphanumeric()).filter(|w| !w.is_empty()).map(str::to_owned).collect()
+}
+
 /// `key` without the Turkish diacritics FTS5 also drops (ç ğ ş ö ü), for finding the matching line.
-fn loose(s: &str) -> String {
+pub(crate) fn loose(s: &str) -> String {
     key(s)
         .chars()
         .map(|c| match c {
@@ -123,18 +138,14 @@ const CONTEXT: usize = 100;
 
 fn links_in(line: &str, number: usize, original: &str, out: &mut Vec<Link>) {
     let original: Vec<char> = original.trim_end().chars().collect();
-    let mut rest = line;
-    let mut offset = 0;
-    while let Some(open) = rest.find("[[") {
-        let Some(close) = rest[open + 2..].find("]]") else { break };
-        let inner = rest[open + 2..open + 2 + close].replace("\\|", "|"); // a pipe escaped in a table
-        let start = offset + open;
-        let embed = line[..start].ends_with('!');
+    for link in crate::markdown::wikilinks(line) {
+        let inner = link.inner.replace("\\|", "|"); // a pipe escaped in a table
+        let embed = line[..link.start].ends_with('!');
         let target = normalize_name(inner.split('|').next().unwrap_or_default());
         if !embed && !target.is_empty() {
             // `line` and `original` have the same characters (code spans are blanked one for one)
-            let at = line[..start].chars().count();
-            let end = at + rest[open..open + 2 + close + 2].chars().count();
+            let at = line[..link.start].chars().count();
+            let end = at + line[link.start..link.end].chars().count();
             let from = at.saturating_sub(CONTEXT);
             let to = (end + CONTEXT).min(original.len());
             let mut text: String = original[from..to].iter().collect();
@@ -146,9 +157,6 @@ fn links_in(line: &str, number: usize, original: &str, out: &mut Vec<Link>) {
             }
             out.push(Link { target, line: number, line_text: text });
         }
-        let used = open + 2 + close + 2;
-        offset += used;
-        rest = &rest[used..];
     }
 }
 
@@ -231,10 +239,6 @@ pub struct SyncReport {
     pub removed: usize,
     /// Not UTF-8 or not readable: left out of the index.
     pub unreadable: usize,
-}
-
-fn is_hidden(rel: &str) -> bool {
-    rel.split('/').any(|part| part.starts_with('.'))
 }
 
 /// Every `.md` file of the vault outside hidden folders, as `/`-separated relative paths. Links and
@@ -337,7 +341,7 @@ pub fn sync_vault_until(conn: &Connection, root: &Path, stop: &AtomicBool) -> ru
 
 /// A watcher event for one path: re-index, or remove when it is gone. Returns whether the index changed.
 pub fn touch(conn: &Connection, root: &Path, rel: &str) -> rusqlite::Result<bool> {
-    if is_hidden(rel) || !rel.to_ascii_lowercase().ends_with(".md") {
+    if crate::vault::is_hidden_rel(rel) || !crate::vault::is_note_name(rel) {
         return Ok(false);
     }
     Ok(matches!(refresh(conn, root, rel, known_stamp(conn, rel)?)?, Refresh::Indexed | Refresh::Removed))

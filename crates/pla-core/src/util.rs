@@ -19,6 +19,9 @@ pub fn tokens(s: &str) -> usize {
     (s.chars().count() - digits).div_ceil(3) + digits
 }
 
+/// The longest title a task or routine keeps (longer input is refused, longer model output cut).
+pub const MAX_TITLE_CHARS: usize = 200;
+
 /// A new record id: a random UUID as 32 hex digits.
 pub fn new_id() -> String {
     uuid::Uuid::new_v4().simple().to_string()

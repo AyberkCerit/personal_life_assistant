@@ -4,34 +4,9 @@
 use chrono::{DateTime, FixedOffset, NaiveDate};
 use rusqlite::Connection;
 
-use crate::files::{resolve, FileError, FORBIDDEN, FORBIDDEN_EXTRA};
+pub use crate::files::check_name;
+use crate::files::{resolve, FileError};
 use crate::vault::{Folders, Vault};
-
-/// FR-VLT-005: a note or folder name: not empty, no forbidden character, not hidden.
-pub fn check_name(name: &str) -> Result<(), FileError> {
-    let name = name.trim();
-    if name.is_empty() {
-        return Err(FileError::BadName(' '));
-    }
-    if name.starts_with('.') {
-        return Err(FileError::BadName('.'));
-    }
-    if let Some(c) = name.chars().find(|c| FORBIDDEN.contains(c) || FORBIDDEN_EXTRA.contains(c)) {
-        return Err(FileError::BadName(c));
-    }
-    // Windows drops a trailing dot and keeps device names for itself: the records would point at
-    // a path that is not on disk (final review I5).
-    if name.ends_with('.') {
-        return Err(FileError::BadName('.'));
-    }
-    let device = name.split('.').next().unwrap_or_default().trim().to_uppercase();
-    let reserved = ["CON", "PRN", "AUX", "NUL"].contains(&device.as_str())
-        || ((device.starts_with("COM") || device.starts_with("LPT")) && device.len() == 4 && device.as_bytes()[3].is_ascii_digit());
-    if reserved {
-        return Err(FileError::Reserved(device));
-    }
-    Ok(())
-}
 
 /// Whether two vault paths name the same file on Windows (only the letter case differs).
 pub fn same_ignoring_case(a: &str, b: &str) -> bool {
@@ -64,7 +39,7 @@ fn rename_on_disk(vault: &Vault, from: &str, to: &str) -> Result<(std::path::Pat
 /// Moves (or renames) the note `from` to `to`, both vault-relative `.md` paths. The target must not
 /// exist. Blocks (and through them tasks and metrics) and the extraction queue follow (FR-VLT-018).
 pub fn move_note(vault: &Vault, conn: &Connection, from: &str, to: &str) -> Result<(), FileError> {
-    if !to.to_lowercase().ends_with(".md") {
+    if !crate::vault::is_note_name(to) {
         return Err(FileError::BadPath(to.to_owned()));
     }
     let name = to.rsplit('/').next().unwrap_or_default();
@@ -125,32 +100,28 @@ pub fn rewrite_links(text: &str, old_rel: &str, new_rel: &str, by_name: bool) ->
             out.push_str(line);
             continue;
         }
-        let mut rest = line;
-        while let Some(open) = rest.find("[[") {
-            let in_code = in_inline_code(line, rest, open);
-            let Some(close) = rest[open + 2..].find("]]") else { break };
-            let inner = &rest[open + 2..open + 2 + close];
-            out.push_str(&rest[..open + 2]);
-            let replaced = if in_code { None } else { relink(inner, &old_path, by_name.then_some(old_title.as_str()), &new_path, &new_title) };
-            match replaced {
-                Some(r) => {
-                    changed = true;
-                    out.push_str(&r);
-                }
-                None => out.push_str(inner),
+        let mut copied = 0;
+        for link in crate::markdown::wikilinks(line) {
+            let replaced = if in_inline_code(line, link.start) {
+                None
+            } else {
+                relink(link.inner, &old_path, by_name.then_some(old_title.as_str()), &new_path, &new_title)
+            };
+            if let Some(r) = replaced {
+                changed = true;
+                out.push_str(&line[copied..link.start + 2]);
+                out.push_str(&r);
+                copied = link.end - 2;
             }
-            out.push_str("]]");
-            rest = &rest[open + 2 + close + 2..];
         }
-        out.push_str(rest);
+        out.push_str(&line[copied..]);
     }
     changed.then_some(out)
 }
 
-/// Whether position `open` of `rest` (a tail of `line`) sits inside an inline code span of `line`.
-fn in_inline_code(line: &str, rest: &str, open: usize) -> bool {
-    let before = line.len() - rest.len() + open;
-    line[..before].matches('`').count() % 2 == 1
+/// Whether byte position `at` of `line` sits inside an inline code span.
+fn in_inline_code(line: &str, at: usize) -> bool {
+    line[..at].matches('`').count() % 2 == 1
 }
 
 /// One link's inside (`target#heading|alias`) pointed at the new note, or `None` when it is not

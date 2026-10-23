@@ -27,7 +27,7 @@ const TICK: Duration = Duration::from_secs(1);
 /// Decision 5: an outside change is extracted after this long without further changes to the note.
 const EXTERNAL_DELAY: Duration = Duration::from_secs(45);
 /// FR-MDL-013: the model process stops after this long without requests.
-const MODEL_IDLE_AFTER: Duration = Duration::from_secs(60);
+pub(crate) const MODEL_IDLE_AFTER: Duration = Duration::from_secs(60);
 
 #[derive(Debug)]
 pub enum Command {
@@ -742,7 +742,7 @@ impl Worker {
         // the same snapshot the next question of this conversation reads (a new topic loads again)
         let recall = &*self.recall.get_or_insert_with(|| pla_core::recall::load(&self.vault));
         // only a closing session stops it: a question that comes meanwhile wants it finished
-        let _ = engine::warm(model, &cache, (self.clock)(), recall, &self.vault.config.folders.memory, &self.stops.cancel);
+        let _ = engine::warm(model, &cache, &crate::qa_cmds::persona(), (self.clock)(), recall, &self.vault.config.folders.memory, &self.stops.cancel);
         let model = self.model_state();
         if model != self.status.model {
             self.status.model = model;
@@ -794,7 +794,7 @@ impl Worker {
         let result = engine::answer(
             model,
             &env,
-            &engine::Question { text: &question, turns: &turns, memory: memory_arg, ui_lang: crate::notify::ui_lang(), recall: self.recall.as_ref() },
+            &engine::Question { text: &question, turns: &turns, memory: memory_arg, recall: self.recall.as_ref(), ui_lang: crate::notify::ui_lang(), persona: &crate::qa_cmds::persona() },
             &cancel,
             &mut |p| {
                 let event = match p {

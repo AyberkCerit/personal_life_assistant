@@ -91,6 +91,22 @@ pub fn connect(path: &Path) -> Result<Connection, DbError> {
     Ok(conn)
 }
 
+/// Runs `f` as one step: a savepoint works alone and inside a caller's transaction (architecture
+/// review M9). `name` is a fixed identifier of the caller, never user text.
+pub(crate) fn atomically<T, E: From<rusqlite::Error>>(conn: &Connection, name: &str, f: impl FnOnce() -> Result<T, E>) -> Result<T, E> {
+    conn.execute_batch(&format!("SAVEPOINT {name}"))?;
+    match f() {
+        Ok(v) => {
+            conn.execute_batch(&format!("RELEASE {name}"))?;
+            Ok(v)
+        }
+        Err(e) => {
+            conn.execute_batch(&format!("ROLLBACK TO {name}; RELEASE {name}"))?;
+            Err(e)
+        }
+    }
+}
+
 /// Applies `migrations[current..]`, one transaction each. `backup_to` receives a consistent copy
 /// of the database before an existing one is upgraded (E-C3).
 pub fn migrate(conn: &mut Connection, migrations: &[&str], backup_to: Option<&Path>) -> Result<(), DbError> {

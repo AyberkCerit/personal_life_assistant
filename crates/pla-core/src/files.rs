@@ -78,7 +78,7 @@ pub fn read_note(vault: &Vault, rel: &str) -> Result<NoteFile, FileError> {
 
 pub fn save_note(vault: &Vault, rel: &str, text: &str, expected_hash: Option<&str>) -> Result<String, FileError> {
     let path = resolve(vault, rel)?;
-    if !Path::new(rel).extension().is_some_and(|e| e.eq_ignore_ascii_case("md")) {
+    if !is_note_name(rel) {
         return Err(FileError::BadPath(rel.to_owned()));
     }
     match std::fs::read(&path) {
@@ -104,14 +104,35 @@ pub fn save_note(vault: &Vault, rel: &str, text: &str, expected_hash: Option<&st
     Ok(content_hash(text.as_bytes()))
 }
 
-pub fn create_note(vault: &Vault, folder: &str, title: &str) -> Result<String, FileError> {
-    let title = title.trim();
-    if title.is_empty() {
+/// FR-VLT-005: a note or folder name: not empty, no forbidden character, not hidden.
+pub fn check_name(name: &str) -> Result<(), FileError> {
+    let name = name.trim();
+    if name.is_empty() {
         return Err(FileError::BadName(' '));
     }
-    if let Some(c) = title.chars().find(|c| FORBIDDEN.contains(c) || FORBIDDEN_EXTRA.contains(c)) {
+    if name.starts_with('.') {
+        return Err(FileError::BadName('.'));
+    }
+    if let Some(c) = name.chars().find(|c| FORBIDDEN.contains(c) || FORBIDDEN_EXTRA.contains(c)) {
         return Err(FileError::BadName(c));
     }
+    // Windows drops a trailing dot and keeps device names for itself: the records would point at
+    // a path that is not on disk (final review I5).
+    if name.ends_with('.') {
+        return Err(FileError::BadName('.'));
+    }
+    let device = name.split('.').next().unwrap_or_default().trim().to_uppercase();
+    let reserved = ["CON", "PRN", "AUX", "NUL"].contains(&device.as_str())
+        || ((device.starts_with("COM") || device.starts_with("LPT")) && device.len() == 4 && device.as_bytes()[3].is_ascii_digit());
+    if reserved {
+        return Err(FileError::Reserved(device));
+    }
+    Ok(())
+}
+
+pub fn create_note(vault: &Vault, folder: &str, title: &str) -> Result<String, FileError> {
+    let title = title.trim();
+    check_name(title)?;
     let rel = unique_rel(vault, folder, title)?;
     save_note(vault, &rel, "", None)?;
     Ok(rel)
@@ -205,6 +226,10 @@ mod tests {
         assert!(matches!(create_note(&v, "inbox", "ne?"), Err(FileError::BadName('?'))));
         assert!(matches!(create_note(&v, "inbox", "   "), Err(FileError::BadName(' '))));
         assert!(matches!(create_note(&v, ".obsidian", "x"), Err(FileError::BadPath(_))));
+        // code review 2026-10-19: the same rule as a rename (fileops), not a looser one
+        assert!(matches!(create_note(&v, "inbox", "CON"), Err(FileError::Reserved(_))));
+        assert!(matches!(create_note(&v, "inbox", "Plan."), Err(FileError::BadName('.'))));
+        assert!(matches!(create_note(&v, "inbox", ".gizli"), Err(FileError::BadName('.'))));
     }
 
     #[test]

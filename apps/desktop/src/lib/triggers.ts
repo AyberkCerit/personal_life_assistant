@@ -8,7 +8,7 @@ export interface Clock {
   clear(id: number): void;
 }
 
-const browserClock: Clock = {
+export const browserClock: Clock = {
   set: (fn, ms) => window.setTimeout(fn, ms),
   clear: (id) => window.clearTimeout(id),
 };

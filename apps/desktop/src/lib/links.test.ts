@@ -1,7 +1,22 @@
 import { describe, expect, it } from "vitest";
-import { completionQuery, linkAt, linkRest, snippetParts } from "./links";
+import { completionQuery, linkAt, linkRest, noteName, snippetParts, wikilinks } from "./links";
 
 describe("links helpers", () => {
+  it("names a note by its path or file name", () => {
+    expect(noteName("notes/Proje Planı.md")).toBe("Proje Planı");
+    expect(noteName("Günlük.MD")).toBe("Günlük");
+  });
+
+  it("lists the wikilinks of a text in order, one line each", () => {
+    const text = "a [[Not|takma]] b ![[resim.png]] [[açık";
+    expect(wikilinks(text)).toEqual([
+      { start: 2, end: 15, inner: "Not|takma" },
+      { start: 19, end: 32, inner: "resim.png" },
+    ]);
+    expect(wikilinks("[[bir\niki]]")).toEqual([]);
+    expect(wikilinks("[[]]").map((l) => l.inner)).toEqual([""]);
+  });
+
   it("finds the wikilink under the cursor", () => {
     const line = "Bugün [[Proje Planı|planı]] ve [[Günlük#Sabah]] okudum.";
     expect(linkAt(line, 10)).toBe("Proje Planı");
