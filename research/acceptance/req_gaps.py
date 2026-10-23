@@ -1,7 +1,7 @@
 """High-priority SRS requirements that no code, test or script mentions by ID (a rough gap list)."""
 import glob, os, re, sys
 
-os.chdir(r"C:\dev\PLA")
+os.chdir(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
 src = "".join(open(f, encoding="utf-8").read() for f in glob.glob("docs/srs/build/content/*.js"))
 row = re.compile(r'\["((?:FR|NFR)-[A-Z0-9]+-\d{3})", "[A-Z]", "((?:[^"\\]|\\.)*)", "([YOD])", "([^"]+)"')
 reqs = row.findall(src)

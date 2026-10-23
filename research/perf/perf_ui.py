@@ -1,6 +1,8 @@
 """The interface's performance measurements (SRS §5.1, M6 performance plan § 2) in the real window, on
 the reference data set made by `make_reference`: NFR-PERF-001, -002, -003, -006, -007 and the time to
 open the window from the tray. Run with the app built (target/debug/pla-desktop.exe) and no PLA open:
+the single-instance plugin would hand the measured starts to it and the memory counts go by process
+name, so the script stops if one runs; it closes only the PLA it started.
 
     python research/perf/perf_ui.py <reference out dir> [runs]
 
@@ -12,9 +14,11 @@ from playwright.sync_api import sync_playwright
 REF = os.path.abspath(sys.argv[1])
 RUNS = int(sys.argv[2]) if len(sys.argv) > 2 else 20
 # PLA_EXE: the release build (target/release, its page inside) is what users run; debug loads Vite
-EXE = os.environ.get("PLA_EXE", r"C:\dev\PLA\target\debug\pla-desktop.exe")
-MODEL = r"C:\dev\PLA\research\f1-model-eval\models\gemma-4-E2B-it-Q3_K_M.gguf"
 HERE = os.path.dirname(os.path.abspath(__file__))
+ROOT = os.path.dirname(os.path.dirname(HERE))
+EXE = os.environ.get("PLA_EXE", os.path.join(ROOT, "target", "debug", "pla-desktop.exe"))
+# PLA_MODEL: the model is not in git, a worktree points at the main checkout's copy
+MODEL = os.environ.get("PLA_MODEL") or os.path.join(ROOT, "research", "f1-model-eval", "models", "gemma-4-E2B-it-Q3_K_M.gguf")
 ENV = dict(os.environ, APPDATA=REF, LOCALAPPDATA=os.path.join(REF, "Local"), PLA_MODEL=MODEL, WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS="--remote-debugging-port=9333")
 os.makedirs(ENV["LOCALAPPDATA"], exist_ok=True)
 
@@ -24,14 +28,26 @@ def p95(values):
     return v[max(0, math.ceil(len(v) * 0.95) - 1)]
 
 
+started = None  # the PLA this script started; its tree holds the model and the webview
+
+
 def start():
-    return subprocess.Popen([EXE], env=ENV, creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP)
+    global started
+    started = subprocess.Popen([EXE], env=ENV, creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP)
+    return started
 
 
 def kill():
-    subprocess.run(["taskkill", "/IM", "pla-desktop.exe", "/F"], capture_output=True)
-    subprocess.run(["taskkill", "/IM", "llama-server.exe", "/F"], capture_output=True)
-    time.sleep(2)
+    global started
+    if started is not None and started.poll() is None:
+        subprocess.run(["taskkill", "/PID", str(started.pid), "/T", "/F"], capture_output=True)
+        time.sleep(2)
+    started = None
+
+
+def running(image):
+    out = subprocess.run(["tasklist", "/FI", f"IMAGENAME eq {image}", "/NH"], capture_output=True, text=True).stdout
+    return image.lower() in out.lower()
 
 
 PS_MEM = r"""$ids = @(Get-Process pla-desktop, llama-server -ErrorAction SilentlyContinue | % Id)
@@ -97,9 +113,11 @@ def open_note(page, rel, marker):
     )
 
 
+others = [i for i in ("pla-desktop.exe", "llama-server.exe") if running(i)]
+if others:
+    sys.exit(f"close {', '.join(others)} first: the measurements need the machine to themselves")
 rows = []
 print("started", flush=True)
-kill()
 with sync_playwright() as p:
     # warm-up: the first start indexes 10 000 notes; the measured starts find the index made
     start()
