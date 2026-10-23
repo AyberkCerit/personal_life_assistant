@@ -73,10 +73,10 @@ fn voice(p: &Persona) -> String {
     if !p.address.is_empty() {
         s.push_str(&format!(" When you address the user, call them \"{}\"; not in every sentence.", p.address));
     }
-    s.push_str(match p.formality {
-        Formality::Informal => " In Turkish, speak to the user as \"sen\" (informal).",
-        Formality::Formal => " In Turkish, speak to the user as \"siz\" (formal), never as \"sen\".",
-    });
+    // "sen" is how the model speaks anyway; saying so made it answer English questions in Turkish
+    if p.formality == Formality::Formal {
+        s.push_str(" In Turkish, speak to the user as \"siz\" (formal), never as \"sen\".");
+    }
     s
 }
 
@@ -991,9 +991,11 @@ mod tests {
 
     #[test]
     fn the_assistant_speaks_with_the_name_and_address_the_user_chose() {
+        // the default voice is the prompt's first line from before the persona: a "speak as sen"
+        // line there made the model answer English questions in Turkish (memory-p5: 11 cases)
         let plain = voice(&Persona::default());
-        assert!(plain.starts_with("You are PLA, a private assistant"));
-        assert!(plain.contains("\"sen\"") && !plain.contains("call them"));
+        assert_eq!(plain, "You are PLA, a private assistant that runs only on the user's own computer.");
+        assert!(!plain.contains("Turkish") && !plain.contains("call them"));
 
         let e = env();
         let tool_env = ToolEnv { vault: &e.vault, pla: &e.pla, cache: &e.cache, now: now(), validation: ValidationSettings::default() };
