@@ -2,6 +2,8 @@
 //! assistant and the extraction make, with llama-server's own prompt and generation timings.
 //!   cargo run --release -p pla-core --example qa_probe -- <reference out dir>
 //! PLA_LLAMA_SERVER and PLA_MODEL set; uses the reference's cache.db (index it first).
+//! `--memory` adds the memory fixture of `tests/retrieval/vault.json` (written to a temporary
+//! folder, never into the reference vault) to the read-ahead and the questions.
 
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
@@ -12,6 +14,9 @@ use chrono::{DateTime, FixedOffset, NaiveDate};
 use pla_core::llm::{LlmError, ServerConfig};
 use pla_core::qa::ChatModel;
 use serde_json::Value;
+
+#[path = "memory_fixture/mod.rs"]
+mod memory_fixture;
 
 const PORT: u16 = 18_533;
 
@@ -100,14 +105,28 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
+    // the memory files in a vault of their own: the reference vault stays as it was made
+    let tmp = tempfile::tempdir()?;
+    let recall = if std::env::args().any(|a| a == "--memory") {
+        let fixture: Value = serde_json::from_str(&std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/retrieval/vault.json"))?)?;
+        std::fs::create_dir_all(tmp.path().join("kasa"))?;
+        let mem_vault = pla_core::vault::open_vault(&tmp.path().join("kasa"))?;
+        memory_fixture::write_memory(&mem_vault.root.join(&mem_vault.config.folders.memory), &fixture["memory"])?;
+        let r = pla_core::recall::load(&mem_vault);
+        println!("-- memory: {} lines", r.about.len() + r.rules.len() + r.state.len() + r.people.len());
+        r
+    } else {
+        pla_core::recall::Recall::default()
+    };
+
     println!("-- read-ahead (the panel opens)");
-    pla_core::qa::engine::warm(&mut probe, &dbs.cache, &Default::default(), now, &pla_core::recall::Recall::default(), "memory", &AtomicBool::new(false))?;
+    pla_core::qa::engine::warm(&mut probe, &dbs.cache, &Default::default(), now, &recall, &vault.config.folders.memory, &AtomicBool::new(false))?;
 
     let env = pla_core::qa::tools::ToolEnv { vault: &vault, pla: &dbs.pla, cache: &dbs.cache, now, validation: Default::default() };
     for q in ["Bu hafta neler yaptım?", "Sınav ne zaman?"] {
         println!("-- question: {q}");
         let t = Instant::now();
-        let r = pla_core::qa::engine::answer(&mut probe, &env, &pla_core::qa::engine::Question { text: q, turns: &[], memory: None, recall: None, ui_lang: "tr", persona: &Default::default() }, &AtomicBool::new(false), &mut |_| {});
+        let r = pla_core::qa::engine::answer(&mut probe, &env, &pla_core::qa::engine::Question { text: q, turns: &[], memory: None, recall: Some(&recall), ui_lang: "tr", persona: &Default::default() }, &AtomicBool::new(false), &mut |_| {});
         let tools: Vec<String> = r.as_ref().map(|a| a.tools.iter().map(|c| c.tool.clone()).collect()).unwrap_or_default();
         println!("   total {:.1} s, tools {tools:?}", t.elapsed().as_secs_f64());
     }
