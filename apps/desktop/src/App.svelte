@@ -25,6 +25,7 @@
   import QuickMetric from "./lib/metrics/QuickMetric.svelte";
   import ChartLine from "@lucide/svelte/icons/chart-line";
   import Network from "@lucide/svelte/icons/network";
+  import Brain from "@lucide/svelte/icons/brain";
   import GraphView from "./lib/GraphView.svelte";
   import SearchIcon from "@lucide/svelte/icons/search";
   import Backlinks from "./lib/Backlinks.svelte";
@@ -380,6 +381,17 @@
     }
   }
 
+  async function openMemory() {
+    if (wizard || vaultPath === null || anyWindowOpen()) return;
+    try {
+      const rel = await api.openMemory();
+      await refresh();
+      await openNote(rel);
+    } catch (e) {
+      treeFailed(e);
+    }
+  }
+
   onMount(() => {
     document.documentElement.lang = lang;
     const started = (async () => {
@@ -518,6 +530,9 @@
         </button>
         <button class:on={center === "graph"} aria-current={center === "graph" ? "page" : undefined} onclick={() => showCenter("graph")}>
           <Network size={16} strokeWidth={1.75} aria-hidden="true" />{t("graph.title")}
+        </button>
+        <button title={t("recall.hint")} onclick={() => void openMemory()}>
+          <Brain size={16} strokeWidth={1.75} aria-hidden="true" />{t("recall.title")}
         </button>
         <button class:on={leftView === "search"} title={t("search.open")} onclick={() => (leftView === "search" ? (leftView = "tree") : openSearch())}>
           <SearchIcon size={16} strokeWidth={1.75} aria-hidden="true" />{t("search.title")}

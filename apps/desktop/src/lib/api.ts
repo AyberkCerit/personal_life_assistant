@@ -199,6 +199,8 @@ export const api = {
   noteGraph: () => call<NoteGraph>("note_graph"),
   /** Resolves a wikilink; a missing target is created in the inbox (FR-EDT-009). */
   openLink: (target: string) => call<{ path: string; created: boolean }>("open_link", { target }),
+  /** The memory's `Durum` file, created as an empty skeleton when missing. */
+  openMemory: () => call<string>("open_memory"),
   onIndexChanged: (cb: () => void) => on<unknown>("index-changed", () => cb()),
   metricsOverview: () => call<MetricCard[]>("metrics_overview"),
   metricsSummary: (kind: MetricKind, days: number) => call<Summary>("metrics_summary", { kind, days }),
