@@ -78,10 +78,46 @@ saat payının yanına, kendi diliminde alındı (karar L, düzeltme M); sonuç 
 
 Düzenek hafızayı yazıyor, yüklüyor ve cevap yalnız hafızayla çıkıyor.
 
-## Model koşuları (controller)
+## Model koşuları
 
-Doldurulacak:
+Gemma 4 E2B Q3_K_M. Hafıza vakalarında istem dört turda ayarlandı (`memory-p1`…`p4`, 2026-10-19; dosyalar
+orijinal worktree'de kaldı, commit edilmedi):
 
-- [ ] `nl_eval -- memory-p1 memory` ve `-- memory-p1-nomem memory --no-memory` (8 + 5 vaka; kapı: hafızasızda geçmeyen, hafızalıda geçen)
-- [ ] Eski 122 vakada gerileme: `nl_eval -- memory-p1-all` ve `-- memory-p1-all-nomem --no-memory`
+| Tur | Hafızasız | Hafızalı |
+| --- | --- | --- |
+| p1 | 0/13 | 8/13 |
+| p2 | 0/13 | 9/13 |
+| p3 | 0/13 | 10/13 |
+| p4 | 0/13 | 9/13 |
+
+### Kapı koşusu (`memory-p5-all`, `memory-p5-all-nomem`, 2026-10-23)
+
+Aynı kod (PR #10 dalı, main ile birleştirilmiş, `7bb5f98`), 152 vakanın tamamı:
+
+| | Hafızasız | Hafızalı |
+| --- | --- | --- |
+| Hafıza vakaları (13) | 0/13 | 9/13 |
+| Eski vakalar (138) | 122/138 | 121/138 |
+| Toplam | 123/152 (40 dk) | 131/152 (64 dk) |
+
+- Hafıza vakaları hafızasız hiç geçmiyor, hafızalı 9/13 geçiyor.
+- Eski vakalarda iki koşu arasındaki tek fark `lang-thanks` (hafızalıda İngilizce soruya Türkçe cevap).
+  Hafızalı koşuda yeni geçen eski vaka yok.
+- Kalan 4 hafıza hatası: iki çıkarım vakası (`memory-bitirme-govde`, `memory-h-kabuk`) çekincesiz
+  cevaplanıyor; iki saklı vaka (`memory-h-cenk-oyun`, `memory-h-telefon`) hafızada olduğu halde "notlarda
+  bulamadım" diyor.
+- Hafızalı koşu 1,6 kat uzun sürdü (hafıza bloğu her istemde ~500 token). Gerçek uygulamada istem
+  önbelleği bunu büyük ölçüde karşılamalı, `qa_probe` ile ölçülmedi.
+
+**Kapı: geçti.** Hafızanın kendisi eski vakalarda gerileme yapmıyor (fark 1 vaka, dil vakası).
+
+### Ayrı bulgu: main'deki dil gerilemesi
+
+10-19 koşusunda (`memory-p3-all`, PR #4 öncesi kod) geçen 11 İngilizce vaka bu koşuda **iki modda da**
+kalıyor: İngilizce soruya Türkçe ("Senin…", "Sen…") cevap (`metric-*-en`, `task-rent-en`, `note-save-en`,
+`query-*-en`, `heldout-scale-en`, `heldout-sleep-avg`, `lang-thanks`). Neden PR #4'ün (asistan adı/hitap)
+sistem istemine her zaman eklediği "In Turkish, speak to the user as sen" cümlesi: varsayılan (sen)
+ayarda bile eklendiği için küçük model bunu Türkçe cevap işareti olarak okuyor. Hafızayla ilgisi yok,
+main'de de aynı kod var.
+
 - [ ] `qa_probe -- <ref>` hafızalı ve hafızasız: ilk cevap süresi ve `cache_n`
