@@ -79,10 +79,9 @@ fn voice(p: &Persona) -> String {
     if !p.address.is_empty() {
         s.push_str(&format!(" When you address the user, call them \"{}\"; not in every sentence.", p.address));
     }
-    // "sen" is how the model speaks anyway; saying so made it answer English questions in Turkish
-    if p.formality == Formality::Formal {
-        s.push_str(" In Turkish, speak to the user as \"siz\" (formal), never as \"sen\".");
-    }
+    // sen/siz is said only in the last instruction, and only for a Turkish answer: "speak as sen"
+    // here made the model answer English questions in Turkish, "speak as siz" made it overlook
+    // the notes in English answers (persona-v2)
     s
 }
 
@@ -224,7 +223,8 @@ fn write_instruction(lang: &str, calls: &[ToolRecord], persona: &Persona) -> Str
     // the voice again where a small model reads last; "sen" is how it speaks anyway
     let mut voice = String::new();
     if !persona.address.is_empty() {
-        voice.push_str(&format!(" When you address me, call me \"{}\".", persona.address));
+        // "when you address me" let a one-line answer leave it out (persona-v1: 2 of 13)
+        voice.push_str(&format!(" In your answer, call me \"{}\" once.", persona.address));
     }
     if lang == "tr" && persona.formality == Formality::Formal {
         voice.push_str(" Speak to me as \"siz\", never as \"sen\".");
@@ -1079,7 +1079,9 @@ mod tests {
         for body in &model.bodies {
             let system = body["messages"][0]["content"].as_str().unwrap();
             assert!(system.starts_with("You are Atlas, a private assistant in the PLA app"), "{system}");
-            assert!(system.contains("call them \"Ayberk Bey\"") && system.contains("\"siz\" (formal)"));
+            assert!(system.contains("call them \"Ayberk Bey\""));
+            // sen/siz only in the last instruction: in the system prompt it reached English answers
+            assert!(!system.contains("\"siz\""), "{system}");
         }
         // the voice again in the very last instruction, where a small model reads last
         let last = model.bodies.last().unwrap()["messages"].as_array().unwrap().last().unwrap()["content"].as_str().unwrap().to_owned();

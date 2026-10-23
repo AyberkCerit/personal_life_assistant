@@ -1,0 +1,25 @@
+{"id":"persona-siz-selam","pass":true,"fails":[],"got":{"answer":"Selam Ayberk Bey. Size nasıl yardımcı olabilirim?","tools":[]}}
+{"id":"persona-siz-yarin","pass":true,"fails":[],"got":{"answer":"Yarın için planınızda \"Diş hekimi randevusu\" bulunmaktadır. Bu randevu 2026-10-10 tarihinde saat 10:00'da. Ayberk Bey.","tools":[{"tool":"query_tasks","args":{"list":"upcoming"},"ok":true,"error":null}]}}
+{"id":"persona-siz-bugun","pass":true,"fails":[],"got":{"answer":"Ayberk Bey, bugün sabah spor salonuna gittiniz ve öğleden sonra işletim sistemleri dersiniz vardı [[2026-10-09]].","tools":[]}}
+{"id":"persona-siz-proje","pass":true,"fails":[],"got":{"answer":"Ayberk Bey, PLA projesi için aldığınız kararlar şunlardır:\n\n*   Tauri ve Svelte kullanılacak.\n*   Model Gemma 4 E2B olacak.","tools":[]}}
+{"id":"persona-siz-bulamadi","pass":true,"fails":[],"got":{"answer":"Ayberk Bey, notlarınızda geçen ay okuduğunuz kitap hakkında bir bilgi bulamadım.","tools":[{"tool":"search_notes","args":{"query":"geçen ay hangi kitabı okudum?"},"ok":true,"error":null}]}}
+{"id":"persona-siz-yorgun","pass":true,"fails":[],"got":{"answer":"Ayberk Bey, bugün yorgun olduğunuz için dinlenmeniz iyi olabilir.","tools":[]}}
+{"id":"persona-siz-ekle","pass":true,"fails":[],"got":{"answer":"Ayberk Bey, yarın annemi aramayı ekledim.","tools":[{"tool":"add_task","args":{"title":"Annemi aramayı ekle","date":"2026-10-10"},"ok":true,"error":null}]}}
+{"id":"persona-siz-tesekkur","pass":true,"fails":[],"got":{"answer":"Kolay gelsin Ayberk Bey.","tools":[]}}
+{"id":"persona-siz-adsiz","pass":true,"fails":[],"got":{"answer":"Bugün sabah spor salonuna gittiniz ve öğleden sonra işletim sistemleri dersiniz vardı [[2026-10-09]].","tools":[]}}
+{"id":"persona-hitap-gunaydin","pass":true,"fails":[],"got":{"answer":"Günaydın Ayberk.","tools":[]}}
+{"id":"persona-hitap-yarin","pass":true,"fails":[],"got":{"answer":"Yarın (2026-10-10) saat 10:00'da diş hekimi randevun var, Ayberk.","tools":[{"tool":"query_tasks","args":{"list":"upcoming"},"ok":true,"error":null}]}}
+{"id":"persona-ad-adin","pass":true,"fails":[],"got":{"answer":"Ben Atlas.","tools":[]}}
+{"id":"persona-ad-kimsin","pass":true,"fails":[],"got":{"answer":"Ben Atlas.","tools":[]}}
+{"id":"persona-ad-siz","pass":true,"fails":[],"got":{"answer":"Ben Atlas.","tools":[]}}
+{"id":"persona-ad-en","pass":true,"fails":[],"got":{"answer":"My name is Atlas.","tools":[]}}
+{"id":"persona-en-hi","pass":true,"fails":[],"got":{"answer":"Hi Ayberk Bey.","tools":[]}}
+{"id":"persona-en-hello","pass":true,"fails":[],"got":{"answer":"Hello, Ayberk Bey. I am functioning as expected.","tools":[]}}
+{"id":"persona-en-thanks","pass":true,"fails":[],"got":{"answer":"Thank you, Ayberk Bey.","tools":[]}}
+{"id":"persona-en-tomorrow","pass":true,"fails":[],"got":{"answer":"Ayberk Bey, you have a \"Dentist appointment\" scheduled for 2026-10-10 at 10:00.","tools":[{"tool":"query_tasks","args":{"list":"upcoming"},"ok":true,"error":null}]}}
+{"id":"persona-en-today","pass":true,"fails":[],"got":{"answer":"Ayberk Bey, the notes from the last 48 hours indicate that you went to the gym in the morning and had a computer operating systems class in the afternoon [[2026-10-09]].","tools":[{"tool":"search_notes","args":{"query":"what did i do today"},"ok":true,"error":null}]}}
+{"id":"persona-en-today-address","pass":false,"fails":["answer has none of [String(\"gym\"), String(\"class\"), String(\"spor\")]"],"got":{"answer":"Ayberk Bey, I could not find any information about what you did today in the notes.","tools":[{"tool":"search_notes","args":{"query":"what did i do today"},"ok":true,"error":null}]}}
+{"id":"persona-en-today-formal","pass":true,"fails":[],"got":{"answer":"You went to the gym in the morning and had a computer operating systems class in the afternoon [[2026-10-09]].","tools":[{"tool":"search_notes","args":{"query":"what did i do today"},"ok":true,"error":null}]}}
+{"id":"persona-en-ui-en","pass":true,"fails":[],"got":{"answer":"Ayberk Bey, you decided to use Tauri and Svelte for PLA, and the model will be Gemma 4 E2B.","tools":[]}}
+{"id":"persona-en-name","pass":true,"fails":[],"got":{"answer":"I am Atlas, a private assistant in the PLA app that runs only on your computer.","tools":[]}}
+{"id":"persona-en-today-default","pass":true,"fails":[],"got":{"answer":"You went to the gym in the morning and had a computer systems class in the afternoon [[2026-10-09]].","tools":[{"tool":"search_notes","args":{"query":"what did i do today"},"ok":true,"error":null}]}}
