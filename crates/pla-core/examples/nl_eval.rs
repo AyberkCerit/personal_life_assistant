@@ -35,7 +35,9 @@ fn date_token(s: &str) -> String {
         "today" => Some(0),
         "tomorrow" => Some(1),
         "yesterday" => Some(-1),
-        _ => s.strip_prefix('+').or(s.strip_prefix('-').map(|_| s)).and_then(|n| n.parse::<i64>().ok()),
+        // "+3" and "-3" are days from today; a date stays as it is
+        _ if s.starts_with(['+', '-']) => s.parse::<i64>().ok(),
+        _ => None,
     };
     match offset {
         Some(d) => (today + chrono::Duration::days(d)).to_string(),

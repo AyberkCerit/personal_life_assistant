@@ -17,7 +17,7 @@ const meta = require("./content/meta");
 const parts = ["c1_giris", "c2_genel", "c3_ozellikler_a", "c3_ozellikler_b", "c3_ozellikler_c", "c4_arayuzler", "c5_nfr", "c6_ekler"]
   .map((n) => require("./content/" + n));
 
-// ---------------------------------------------------------------- inline markup: **kalın**, `kod`, _italik_
+// ---------------------------------------------------------------- inline markup: **kalın**, `kod`, ^^italik^^
 function runs(text, base = {}) {
   const out = [];
   const re = /(\*\*[^*]+\*\*|`[^`]+`|\^\^[^^]+\^\^)/g;
@@ -42,7 +42,7 @@ const borders = { top: border, bottom: border, left: border, right: border };
 
 function cell(content, width, { head = false, mono = false, size = 18, fill, align, bold = false } = {}) {
   const paras = String(content).split("\n").map((line) => new Paragraph({
-    children: runs(line, { size, font: mono ? MONO : FONT, bold: head || bold, color: head ? INK : INK }),
+    children: runs(line, { size, font: mono ? MONO : FONT, bold: head || bold, color: INK }),
     alignment: align || AlignmentType.LEFT, spacing: { after: 20, before: 20 },
   }));
   return new TableCell({
@@ -70,7 +70,13 @@ const EARS = { U: "Her zaman", E: "Olay", S: "Durum", W: "İstenmeyen", O: "Opsi
 const PRI = { Y: "Yüksek", O: "Orta", D: "Düşük" };
 
 let figNo = 0, tblNo = 0;
-function caption(text, kind) {
+
+/** The next table's numbered title ("Tablo 3 — …"), kept with the table below it. */
+function tableTitle(cap) {
+  tblNo++;
+  return new Paragraph({ children: runs(`Tablo ${tblNo} — ${cap}`, { size: 17, bold: true, color: MUTED }), spacing: { before: 120, after: 60 }, keepNext: true });
+}
+function caption(text) {
   return new Paragraph({
     children: [new TextRun({ text, size: 17, italics: true, color: MUTED })],
     alignment: AlignmentType.CENTER, spacing: { before: 60, after: 200 },
@@ -92,30 +98,26 @@ function render(block, W) {
       border: { left: { style: BorderStyle.SINGLE, size: 18, color: ACCENT, space: 6 } }, indent: { left: 120 },
     })); break;
     case "tbl": {
-      if (block.cap) tblNo++;
-      if (block.cap) out.push(new Paragraph({ children: runs(`Tablo ${tblNo} — ${block.cap}`, { size: 17, bold: true, color: MUTED }), spacing: { before: 120, after: 60 }, keepNext: true }));
+      if (block.cap) out.push(tableTitle(block.cap));
       out.push(table(block.head, block.rows, block.w, W, { mono: block.mono, size: block.size, boldCol: block.boldCol }));
       out.push(new Paragraph({ children: [], spacing: { after: 120 } }));
       break;
     }
     case "reqs": {
-      tblNo++;
-      out.push(new Paragraph({ children: [new TextRun({ text: `Tablo ${tblNo} — ${block.cap || "Gereksinimler"}`, size: 17, bold: true, color: MUTED })], spacing: { before: 120, after: 60 }, keepNext: true }));
+      out.push(tableTitle(block.cap || "Gereksinimler"));
       const rows = block.rows.map((r) => [r[0], EARS[r[1]] || r[1], r[2], PRI[r[3]] || r[3], r[4], r[5]]);
       out.push(table(["Kimlik", "EARS", "Gereksinim", "Öncelik", "Doğr.", "Kaynak"], rows, [15, 13, 47, 9, 6, 10], W, { mono: [0], size: 17 }));
       out.push(new Paragraph({ children: [], spacing: { after: 120 } }));
       break;
     }
     case "sr": {
-      tblNo++;
-      out.push(new Paragraph({ children: [new TextRun({ text: `Tablo ${tblNo} — ${block.cap || "Uyarıcı ve tepki dizileri"}`, size: 17, bold: true, color: MUTED })], spacing: { before: 120, after: 60 }, keepNext: true }));
+      out.push(tableTitle(block.cap || "Uyarıcı ve tepki dizileri"));
       out.push(table(["#", "Uyarıcı (kullanıcı eylemi / olay)", "Sistem tepkisi"], block.rows.map((r, i) => [String(i + 1), r[0], r[1]]), [5, 40, 55], W, { size: 18 }));
       out.push(new Paragraph({ children: [], spacing: { after: 120 } }));
       break;
     }
     case "ipo": {
-      tblNo++;
-      out.push(new Paragraph({ children: [new TextRun({ text: `Tablo ${tblNo} — ${block.cap || "Girdi, işleme ve çıktılar"}`, size: 17, bold: true, color: MUTED })], spacing: { before: 120, after: 60 }, keepNext: true }));
+      out.push(tableTitle(block.cap || "Girdi, işleme ve çıktılar"));
       out.push(table(["Girdiler", "Kurallar ve veri işleme adımları", "Çıktılar"], [[block.i.join("\n"), block.p.join("\n"), block.o.join("\n")]], [28, 44, 28], W, { size: 18 }));
       out.push(new Paragraph({ children: [], spacing: { after: 120 } }));
       break;
@@ -145,7 +147,6 @@ function render(block, W) {
     }
     case "pb": out.push(new Paragraph({ children: [new PageBreak()] })); break;
     case "sig": {
-      block.rows.forEach(() => {});
       out.push(table(["Rol", "Ad Soyad", "Tarih", "İmza"], block.rows.map((r) => [r[0], r[1], "", ""]), [30, 30, 18, 22], W, { size: 18 }));
       out.push(new Paragraph({ children: [], spacing: { after: 120 } }));
       break;

@@ -1,6 +1,6 @@
 // Metrics view helpers: formatting and chart layout only. Every statistic comes from the Rust core
 // (FR-MET-010); nothing here averages or merges records.
-import { splitError, type Key } from "./i18n";
+import { fill, langOf, splitError, tIn, type Key } from "./i18n";
 import { addDays } from "./tasks";
 
 export const KINDS = ["sleep", "weight", "steps", "water", "workout"] as const;
@@ -8,32 +8,33 @@ export type MetricKind = (typeof KINDS)[number];
 
 export interface DayValue { date: string; value: number; sets: number | null; conflict: boolean }
 
-const UNITS: Record<"tr" | "en", Record<Exclude<MetricKind, "workout">, string>> = {
-  tr: { sleep: "sa", weight: "kg", steps: "adım", water: "ml" },
-  en: { sleep: "h", weight: "kg", steps: "steps", water: "ml" },
-};
+/** Each kind's amount with its unit (i18n `fmt.*`). */
+const UNIT_KEY: Record<Exclude<MetricKind, "workout">, Key> = { sleep: "fmt.sleep", weight: "fmt.kg", steps: "fmt.steps", water: "fmt.ml" };
 
 function num(value: number, lang: string, digits: number): string {
   return new Intl.NumberFormat(lang, { maximumFractionDigits: digits }).format(value);
 }
 
+/** `n` (already written out) in the text of `one` when `value` is one, else of `many`. */
+function counted(lang: string, value: number, n: string, one: Key, many: Key): string {
+  return fill(tIn(langOf(lang), value === 1 ? one : many), { n });
+}
+
 /** A day's value in its kind's unit; a workout day is its sessions (and their sets). */
 export function formatValue(kind: MetricKind, value: number, lang: string, sets: number | null = null): string {
-  const l = lang.startsWith("tr") ? "tr" : "en";
   if (kind === "workout") {
-    const sessions = l === "tr" ? `${num(value, lang, 0)} oturum` : `${num(value, lang, 0)} session${value === 1 ? "" : "s"}`;
-    return sets === null ? sessions : `${sessions} · ${num(sets, lang, 0)} ${l === "tr" ? "set" : sets === 1 ? "set" : "sets"}`;
+    const sessions = counted(lang, value, num(value, lang, 0), "fmt.session", "fmt.sessions");
+    return sets === null ? sessions : `${sessions} · ${counted(lang, sets, num(sets, lang, 0), "fmt.set", "fmt.sets")}`;
   }
-  if (kind === "water" && value >= 1000) return `${num(value / 1000, lang, 2)} L`;
-  return `${num(value, lang, kind === "steps" || kind === "water" ? 0 : 1)} ${UNITS[l][kind]}`;
+  if (kind === "water" && value >= 1000) return fill(tIn(langOf(lang), "fmt.litre"), { n: num(value / 1000, lang, 2) });
+  return fill(tIn(langOf(lang), UNIT_KEY[kind]), { n: num(value, lang, kind === "steps" || kind === "water" ? 0 : 1) });
 }
 
 /** One field of an unusual entry, in its own unit (`out_of_range|<field>|<value>`). */
 export function formatField(kind: MetricKind, field: string, value: number, lang: string): string {
-  const tr = lang.startsWith("tr");
-  if (field === "reps") return `${num(value, lang, 0)} ${tr ? "tekrar" : value === 1 ? "rep" : "reps"}`;
-  if (field === "sets") return `${num(value, lang, 0)} ${tr ? "set" : value === 1 ? "set" : "sets"}`;
-  if (field === "kg") return `${num(value, lang, 1)} kg`;
+  if (field === "reps") return counted(lang, value, num(value, lang, 0), "fmt.rep", "fmt.reps");
+  if (field === "sets") return counted(lang, value, num(value, lang, 0), "fmt.set", "fmt.sets");
+  if (field === "kg") return fill(tIn(langOf(lang), "fmt.kg"), { n: num(value, lang, 1) });
   return formatValue(kind, value, lang);
 }
 
@@ -41,7 +42,7 @@ export function formatField(kind: MetricKind, field: string, value: number, lang
 export function formatDelta(kind: MetricKind, delta: number, lang: string): string {
   const sign = delta > 0 ? "+" : delta < 0 ? "-" : "";
   const size = Math.abs(delta);
-  if (kind === "workout") return `${sign}${num(size, lang, 1)} ${lang.startsWith("tr") ? "oturum" : "sessions"}`;
+  if (kind === "workout") return `${sign}${counted(lang, size, num(size, lang, 1), "fmt.session", "fmt.sessions")}`;
   return `${sign}${formatValue(kind, size, lang)}`;
 }
 

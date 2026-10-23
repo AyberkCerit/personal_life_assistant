@@ -58,11 +58,10 @@ fn sentence(rng: &mut Rng, base: usize, spread: usize) -> String {
     for _ in 0..words {
         s.push(if rng.below(5) == 0 { rng.pick(&WORDS_EN) } else { rng.pick(&WORDS_TR) });
     }
-    let mut out = s.join(" ");
-    if let Some(first) = out.get(..1) {
-        out = first.to_uppercase() + &out[1..];
-    }
-    out + "."
+    // the first letter, not the first byte: "çalışma" starts with two bytes
+    let text = s.join(" ");
+    let mut chars = text.chars();
+    chars.next().map_or(String::new(), |first| first.to_uppercase().chain(chars).collect()) + "."
 }
 
 /// One note's body: paragraphs, a list, a task or a measurement now and then, links and tags.

@@ -360,6 +360,20 @@ const dict = {
     "metrics.editTitle": "Ölçümü düzenle",
     "metrics.value": "Değer",
     "metrics.unit": "Birim",
+    "fmt.eta.soon": "<1 dk kaldı",
+    "fmt.eta.minutes": "~{n} dk kaldı",
+    "fmt.speed": "MB/sn",
+    "fmt.sleep": "{n} sa",
+    "fmt.steps": "{n} adım",
+    "fmt.ml": "{n} ml",
+    "fmt.litre": "{n} L",
+    "fmt.kg": "{n} kg",
+    "fmt.session": "{n} oturum",
+    "fmt.sessions": "{n} oturum",
+    "fmt.set": "{n} set",
+    "fmt.sets": "{n} set",
+    "fmt.rep": "{n} tekrar",
+    "fmt.reps": "{n} tekrar",
     "metrics.date": "Tarih",
     "metrics.exercise": "Egzersiz",
     "metrics.sets": "Set",
@@ -884,6 +898,20 @@ const dict = {
     "metrics.editTitle": "Edit measurement",
     "metrics.value": "Value",
     "metrics.unit": "Unit",
+    "fmt.eta.soon": "<1 min left",
+    "fmt.eta.minutes": "~{n} min left",
+    "fmt.speed": "MB/s",
+    "fmt.sleep": "{n} h",
+    "fmt.steps": "{n} steps",
+    "fmt.ml": "{n} ml",
+    "fmt.litre": "{n} L",
+    "fmt.kg": "{n} kg",
+    "fmt.session": "{n} session",
+    "fmt.sessions": "{n} sessions",
+    "fmt.set": "{n} set",
+    "fmt.sets": "{n} sets",
+    "fmt.rep": "{n} rep",
+    "fmt.reps": "{n} reps",
     "metrics.date": "Date",
     "metrics.exercise": "Exercise",
     "metrics.sets": "Sets",
@@ -1052,7 +1080,7 @@ const dict = {
 export type Key = keyof typeof dict.tr;
 export type Lang = "tr" | "en";
 /** The OS language (FR-SET-003 pre-selection). */
-export const osLang: Lang = navigator.language.toLowerCase().startsWith("tr") ? "tr" : "en";
+export const osLang: Lang = langOf(navigator.language.toLowerCase());
 /** The UI language; a live binding, so the app re-renders (keyed on it) after `setLang`. */
 export let lang: Lang = osLang;
 
@@ -1063,6 +1091,11 @@ export function setLang(next: Lang) {
 
 export function t(key: Key): string {
   return dict[lang][key];
+}
+
+/** The UI language a locale tag stands for (`tr-TR` is Turkish, anything else English). */
+export function langOf(locale: string): Lang {
+  return locale.startsWith("tr") ? "tr" : "en";
 }
 
 /** `t` in a given language (for text that is rendered for a language other than the live one). */

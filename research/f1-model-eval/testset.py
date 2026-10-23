@@ -3,10 +3,7 @@
 Dev setten farklı içerik, ifade ve referans tarihleri (Salı, Pazar, Cuma); gündelik/özensiz yazımlar.
 Çalıştırma: python testset.py -> data/test.jsonl
 """
-import json
-from pathlib import Path
-
-from dataset import A, M, SLEEP
+from dataset import A, M, SLEEP, write_set
 
 T, U, F = "2026-10-06", "2026-10-11", "2026-11-20"  # Salı, Pazar, Cuma
 
@@ -217,11 +214,4 @@ EN = [
 ]
 
 if __name__ == "__main__":
-    assert len(TR) == 100 and len(EN) == 100, (len(TR), len(EN))
-    out = Path(__file__).parent / "data" / "test.jsonl"
-    out.parent.mkdir(exist_ok=True)
-    with out.open("w", encoding="utf-8") as f:
-        for lang, rows in (("tr", TR), ("en", EN)):
-            for i, (ref, text, exp) in enumerate(rows, 1):
-                f.write(json.dumps({"id": f"{lang}-{i:03d}", "lang": lang, "ref": ref, "text": text, "expected": exp}, ensure_ascii=False) + "\n")
-    print("yazildi:", out, 200)
+    write_set("test", TR, EN)

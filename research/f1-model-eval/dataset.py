@@ -23,6 +23,18 @@ def M(kind, value, d=0, sets=None, reps=None):
     return {"t": "metric", "kind": kind, "value": value, "d": d, "sets": sets, "reps": reps}
 
 
+def write_set(name, tr, en):
+    """data/<name>.jsonl: 100 Turkish and 100 English notes with their expected items."""
+    assert len(tr) == 100 and len(en) == 100, (len(tr), len(en))
+    out = Path(__file__).parent / "data" / f"{name}.jsonl"
+    out.parent.mkdir(exist_ok=True)
+    with out.open("w", encoding="utf-8") as f:
+        for lang, rows in (("tr", tr), ("en", en)):
+            for i, (ref, text, exp) in enumerate(rows, 1):
+                f.write(json.dumps({"id": f"{lang}-{i:03d}", "lang": lang, "ref": ref, "text": text, "expected": exp}, ensure_ascii=False) + "\n")
+    print("yazildi:", out, len(tr) + len(en))
+
+
 TR = [
     # --- görev / hatırlatıcı
     (W, "Yarın sabah 8'de kalkıp omuz çalışacağım, shoulder press hedefi.", [A(1, "08:00", ["omuz"])]),
@@ -235,11 +247,4 @@ EN = [
 ]
 
 if __name__ == "__main__":
-    assert len(TR) == 100 and len(EN) == 100, (len(TR), len(EN))
-    out = Path(__file__).parent / "data" / "eval.jsonl"
-    out.parent.mkdir(exist_ok=True)
-    with out.open("w", encoding="utf-8") as f:
-        for lang, rows in (("tr", TR), ("en", EN)):
-            for i, (ref, text, exp) in enumerate(rows, 1):
-                f.write(json.dumps({"id": f"{lang}-{i:03d}", "lang": lang, "ref": ref, "text": text, "expected": exp}, ensure_ascii=False) + "\n")
-    print("yazildi:", out, 200)
+    write_set("eval", TR, EN)
