@@ -2,6 +2,9 @@
 
 use pla_core::files;
 use pla_core::index::{self, Backlink, Graph, QuickHit, SearchHit, TagCount};
+use pla_core::lang::Lang;
+use pla_core::recall::{self, Role};
+use pla_core::vault::Vault;
 use serde::Serialize;
 use tauri::State;
 
@@ -86,6 +89,37 @@ pub fn open_link(state: State<AppState>, target: String) -> Result<OpenedLink, S
     })
 }
 
+/// The memory's `Durum` file: an existing one in either language, else a new empty skeleton named in
+/// `lang`. Returns its path and, when it was just made, the text written.
+pub fn state_file(vault: &Vault, lang: Lang) -> Result<(String, Option<String>), files::FileError> {
+    let folder = &vault.config.folders.memory;
+    let existing = std::fs::read_dir(vault.root.join(folder)).into_iter().flatten().flatten().find_map(|e| {
+        let name = e.file_name().to_string_lossy().into_owned();
+        let is_state = name.to_lowercase().ends_with(".md") && Role::from_file_name(&name) == Some(Role::State);
+        (is_state && e.path().is_file()).then_some(name)
+    });
+    if let Some(name) = existing {
+        return Ok((format!("{folder}/{name}"), None));
+    }
+    let rel = format!("{folder}/{}", Role::State.file_name(lang));
+    let text = recall::render(Role::State, &[], lang);
+    files::save_note(vault, &rel, &text, None)?;
+    Ok((rel, Some(text)))
+}
+
+/// The sidebar's "Memory" shortcut: the `Durum` file to open in the editor, created when missing.
+#[tauri::command]
+pub fn open_memory(state: State<AppState>) -> Result<String, String> {
+    with_session(&state, |session| {
+        let (rel, created) = state_file(&session.vault, crate::notify::ui_language()).map_err(ue)?;
+        if let Some(text) = created {
+            state.self_writes.record_text(&rel, &text);
+            session.indexer.send(IndexCommand::Touch(rel.clone()));
+        }
+        Ok(rel)
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -106,5 +140,28 @@ mod tests {
         assert!(!is_note_target("rapor.pdf"));
         assert!(!is_note_target("resim.png"));
         assert!(!is_note_target(""), "[[#Başlık]] has no note name");
+    }
+
+    #[test]
+    fn open_memory_creates_the_state_file_once() {
+        let tmp = tempfile::tempdir().unwrap();
+        let vault = pla_core::vault::open_vault(tmp.path()).unwrap();
+        let (rel, created) = state_file(&vault, Lang::Tr).unwrap();
+        assert_eq!(rel, "memory/Durum.md");
+        let text = created.expect("a new file");
+        assert_eq!(std::fs::read_to_string(tmp.path().join(&rel)).unwrap(), text);
+        assert!(text.contains("# Durum"));
+        assert!(recall::parse(Role::State, &text).is_empty(), "an empty skeleton");
+        assert!(pla_core::notes::is_generated(&text));
+
+        std::fs::write(tmp.path().join(&rel), "- Kahveyi sütsüz içer.\n").unwrap();
+        assert_eq!(state_file(&vault, Lang::Tr).unwrap(), (rel.clone(), None), "the second click opens it");
+        assert_eq!(std::fs::read_to_string(tmp.path().join(&rel)).unwrap(), "- Kahveyi sütsüz içer.\n", "untouched");
+
+        // A vault set up in the other language keeps its own file name.
+        assert_eq!(state_file(&vault, Lang::En).unwrap(), (rel, None));
+        let other = tempfile::tempdir().unwrap();
+        let en = pla_core::vault::open_vault(other.path()).unwrap();
+        assert_eq!(state_file(&en, Lang::En).unwrap().0, "memory/Current.md");
     }
 }

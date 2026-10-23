@@ -10,7 +10,7 @@ import { todayIso } from "./tasks";
 import { noteName } from "./links";
 
 /** The vault's own folders and no restore offer, as the Rust commands answer them. */
-const FOLDERS = { daily: "daily", inbox: "inbox", notes: "notes", reports: "reports", attachments: "attachments", templates: "templates" };
+const FOLDERS = { daily: "daily", inbox: "inbox", notes: "notes", reports: "reports", attachments: "attachments", templates: "templates", memory: "memory" };
 const vaultInfo = (path: string | null) => ({ path, inbox: "inbox", folders: FOLDERS, restore_offer: null });
 
 export const mockListeners = new Map<string, Array<(payload: unknown) => void>>();
@@ -244,6 +244,19 @@ function mockLinks(cmd: string, args: Record<string, unknown>): unknown {
       emit("tree-changed", null);
       return { path, created: true };
     }
+    case "open_memory": {
+      const hit = ["memory/Durum.md", "memory/Current.md"].find((p) => files.has(p));
+      if (hit) return hit;
+      const [path, heading] = mockLang === "en" ? ["memory/Current.md", "Current"] : ["memory/Durum.md", "Durum"];
+      files.set(path, `---
+pla_generated: true
+---
+# ${heading}
+
+`);
+      emit("tree-changed", null);
+      return path;
+    }
   }
   return undefined;
 }
@@ -392,6 +405,7 @@ export async function mockBackend<T>(cmd: string, args: Record<string, unknown>)
     case "list_tags":
     case "note_graph":
     case "open_link":
+    case "open_memory":
       return mockLinks(cmd, args) as T;
     case "qa_ask":
     case "qa_stop":

@@ -9,4 +9,10 @@ describe("mock backend", () => {
     const err = await mockBackend("metric_log", { input }).catch((e) => String(e));
     expect(metricError(err as string)).toMatchObject({ key: "metrics.error.out_of_range", field: "value", value: 450 });
   });
+
+  it("opens the memory's state file, creating it once", async () => {
+    const path = await mockBackend<string>("open_memory", {});
+    expect(path).toBe("memory/Durum.md");
+    expect(await mockBackend<string>("open_memory", {})).toBe(path);
+  });
 });

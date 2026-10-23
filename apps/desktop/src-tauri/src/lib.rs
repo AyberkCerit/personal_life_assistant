@@ -135,6 +135,7 @@ pub fn run() {
             links_cmds::list_tags,
             links_cmds::note_graph,
             links_cmds::open_link,
+            links_cmds::open_memory,
             metrics_cmds::metrics_overview,
             metrics_cmds::metrics_summary,
             metrics_cmds::metric_records,
