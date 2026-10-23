@@ -121,3 +121,57 @@ ayarda bile eklendiği için küçük model bunu Türkçe cevap işareti olarak 
 main'de de aynı kod var.
 
 - [ ] `qa_probe -- <ref>` hafızalı ve hafızasız: ilk cevap süresi ve `cache_n`
+
+## Sohbetten hafızaya yazma (Aşama 2, Task 8)
+
+Soru: sohbet adımı (`recall::extract::request` → model → `parse` → `guard`) yalnız kullanıcının kalıcı
+olarak söylediğini mi yazıyor?
+
+```bash
+cargo run --release -p pla-core --example nl_eval -- <etiket> memory          # 42 vaka
+cargo run --release -p pla-core --example nl_eval -- <etiket> chat-mem-d      # yalnız geliştirme
+```
+
+`assistant.jsonl`'deki Task 5 vakaları da `memory-` ile başladığı için bu vakaların kimliği `chat-mem-`,
+dosya adı `memory` ile seçilir (plandaki `memory-` öneki ikisini birden koşardı).
+
+### Dondurulan vakalar (commit `test(recall): freeze the memory extraction cases`)
+
+`tests/nl/memory.jsonl`, istem ayarlanmadan önce: 30 geliştirme, 12 saklı. Kendisi (alışkanlık, sağlık,
+iş, kural, proje durumu), 10 kişi vakası (ikisi aynı mesajda iki kişi, biri akrabalık eki "Annemin",
+ikisi İngilizce), yazılmaması gereken 14 vaka (olumsuz, varsayım, soru, dilek, koşul, plan, yalnız
+bugüne ait, asistanın önerisine "tamam"), konu güncelleme, iki "unut", reddedilen satırın yanında yeni
+bilgi, "bunu hatırla" ile önceki mesaj. Saklı vakalar geliştirme vakalarına ve istemdeki örneklere
+Jaccard 0,5 denetiminden geçer (düzenek her koşuda başta denetler).
+
+- **Yanlış yazım:** guard'dan geçip beklenen hiçbir kayda uymayan her `Add` ya da `Forget`.
+- **Doğru yazım:** beklenen kayıtlardan bulunanlar.
+
+### Ayar turları (yalnız geliştirme kümesi, 2026-10-24)
+
+| Tur | Vaka | Doğru yazım | Yanlış yazım | Değişiklik |
+| --- | --- | --- | --- | --- |
+| v1 | 17/30 | 8/21 | 2 | Task 7 istemi, örneksiz. Model her kaydı `people` dosyasına, kişiyi "User" diye yazdı; konu genel ("facts-and-preferences"). |
+| v2 | 16/30 | 11/21 | 12 | 7 örnek (few-shot), alan sırası `evidence, file, person, topic, text`, `max_tokens` 600 (v1'de iki cevap kesildi). Artık fazla yazıyor. |
+| v3 | 22/30 | 14/21 | 4 | Guard: bugüne/haftaya ait ve gelecek zamanlı cümle, unutma isteği, `person` doluysa Kişiler. Akrabalık sözcüğü ekli eşleşir. Kullanıcı turunda "Write text in …". |
+| v4 | 24/30 | 15/21 | 1 | Zaman kontrolü yan cümle düzeyinde; "akşam" `-sam` koşul eki sayılmıyordu (d28'i v2'den beri düşüren yanlış pozitif). Alıntı kök eşleşmesiyle de kabul (bütün mesaj okunur). Dil uyuşmazlığı, "yapalım"/"let", unut isteğinde önceki mesaj. |
+| v5 | 28/30 | 19/21 | 0 | Yanlış dildeki satır yerine kullanıcının kendi sözü; model kişiyi boş bırakınca akrabalık sözcüğünden ad ("Annemin" → "Annem"); rutin örneği. |
+
+### Son koşu (`memory-v5`, saklı küme ilk ve tek kez)
+
+| Küme | Vaka | Doğru yazım | Yanlış yazım |
+| --- | --- | --- | --- |
+| Geliştirme | 28/30 | 19/21 (%90) | 0 |
+| Saklı | 11/12 | 8/9 (%89) | **0** |
+
+**Kapı: geçti** (saklıda yanlış yazım 0, geliştirmede doğru yazım ≥ %80).
+
+Kalanlar, üçü de yazmama yönünde:
+- `chat-mem-d27`: "Bunu unut" (önceki mesaj) konuyu unutmuyor; model `forget` yerine iki kayıt yazıyor, guard ikisini de atıyor.
+- `chat-mem-d28`: model iki bilgiyi tek kayıtta birleştirip bütün cümleyi kanıt veriyor; "Bugün" geçtiği için atılıyor.
+- `chat-mem-h03` ("Kod örneklerini Rust ile yaz lütfen."): model boş döndü.
+
+Notlar:
+- İngilizce mesajlara model örneklere rağmen Türkçe metin yazıyor; guard o zaman kullanıcının sözünü olduğu gibi yazar ("I work night shifts at the hospital.").
+- Reddedilene Jaccard ≥ 0,5 olan öneri, kullanıcı aynı şeyi açıkça yeniden söylese de atılıyor (Task 7 testi). Spec "kullanıcı yeniden söylerse yazılır" diyor; bu vakalarda o durum yok, karar açık.
+- Asistanın sohbet ve çıkarım istemleri değişmedi; eski 138 nl-eval vakası bu kodu kullanmaz, yeniden koşulmadı.

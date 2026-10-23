@@ -419,14 +419,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    // the same rule for the chat → memory cases: a held-out message is not close to a dev one
+    // the same rule for the chat → memory cases: a held-out message is not close to a dev case or
+    // to an example in the prompt, and no case is an example
     let memory_cases: Vec<Value> =
         std::fs::read_to_string(format!("{CASES}/memory.jsonl"))?.lines().filter(|l| l.starts_with('{')).map(serde_json::from_str).collect::<Result<_, _>>()?;
-    let dev_msgs: Vec<&str> = memory_cases.iter().filter(|c| c["cat"] == "dev").filter_map(|c| c["msg"].as_str()).collect();
-    for case in memory_cases.iter().filter(|c| c["cat"] == "heldout") {
+    let examples = pla_core::recall::extract::example_messages();
+    let near: Vec<&str> = memory_cases.iter().filter(|c| c["cat"] == "dev").filter_map(|c| c["msg"].as_str()).chain(examples.iter().copied()).collect();
+    for case in &memory_cases {
         let msg = case["msg"].as_str().unwrap_or_default();
-        if let Some((score, near)) = dev_msgs.iter().map(|d| (closeness(msg, d), d)).max_by(|a, b| a.0.total_cmp(&b.0)).filter(|(s, _)| *s >= HELD_OUT_MAX) {
-            return Err(format!("held-out case {} is {score:.2} close to the dev case {near:?}", case["id"]).into());
+        if examples.iter().any(|e| e.to_lowercase() == msg.to_lowercase()) {
+            return Err(format!("case {} is an example in recall::extract", case["id"]).into());
+        }
+        if case["cat"] != "heldout" {
+            continue;
+        }
+        if let Some((score, close)) = near.iter().map(|d| (closeness(msg, d), d)).max_by(|a, b| a.0.total_cmp(&b.0)).filter(|(s, _)| *s >= HELD_OUT_MAX) {
+            return Err(format!("held-out case {} is {score:.2} close to {close:?}", case["id"]).into());
         }
     }
 
