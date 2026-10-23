@@ -24,7 +24,7 @@ fn unit_names() -> Vec<&'static str> {
 pub fn descriptions() -> &'static str {
     "- search_notes {query}: find the user's notes by words.\n\
      - query_tasks {list: today|upcoming|completed|all, text?}: tasks with their task_id, date, time and status.\n\
-     - query_metrics {kind: sleep|water|steps|weight|workout, days: 1-365}: daily values, total, average, min, max.\n\
+     - query_metrics {kind: sleep|water|steps|weight|workout|all, days: 1-365}: daily values, total, average, min, max; kind all gives each measurement's latest value and average (health, how the user is doing).\n\
      - add_task {title, date?: YYYY-MM-DD, time?: HH:MM, remind?: true|false}: add one task; with a time it is a reminder unless remind is false.\n\
      - complete_task {task_id}: mark one open task done (take the task_id from query_tasks).\n\
      - log_metric {kind, date: YYYY-MM-DD, value, unit?: h|min|ml|l|glass|kg|lb|count, exercise?}: record one measurement.\n\
@@ -51,7 +51,7 @@ pub fn decision_schema() -> Value {
         obj("answer", json!({}), &[]),
         obj("search_notes", json!({ "query": { "type": "string", "minLength": 1, "maxLength": 100 } }), &["query"]),
         obj("query_tasks", json!({ "list": { "enum": ["today", "upcoming", "completed", "all"] }, "text": { "type": "string", "maxLength": 100 } }), &["list"]),
-        obj("query_metrics", json!({ "kind": { "enum": kind_names() }, "days": { "type": "integer", "minimum": 1, "maximum": 365 } }), &["kind", "days"]),
+        obj("query_metrics", json!({ "kind": { "enum": ([kind_names(), vec!["all"]].concat()) }, "days": { "type": "integer", "minimum": 1, "maximum": 365 } }), &["kind", "days"]),
         obj("add_task", json!({ "title": { "type": "string", "minLength": 1, "maxLength": 200 }, "date": date, "time": time, "remind": { "type": "boolean" } }), &["title"]),
         obj("complete_task", json!({ "task_id": { "type": "string", "minLength": 1, "maxLength": 64 } }), &["task_id"]),
         obj("log_metric", json!({ "kind": { "enum": kind_names() }, "date": date, "value": { "type": "number" }, "unit": { "enum": unit_names() }, "exercise": { "type": "string", "maxLength": 100 } }), &["kind", "date", "value"]),
@@ -189,6 +189,21 @@ fn unknown_keys(args: &Value, allowed: &[&str]) -> Result<(), String> {
     }
 }
 
+/// `query_metrics` with kind `all`: each measurement with values in the period, its latest value and
+/// its average. "sağlık durumum nasıl" names no measure; the model looked in the notes and found
+/// nothing while the cards showed every value (the owner's screenshot).
+fn overview(env: &ToolEnv<'_>, days: i64) -> Result<Value, String> {
+    let today = env.now.date_naive();
+    let mut found = Vec::new();
+    for kind in MetricKind::ALL {
+        let s = metrics::summary(env.pla, kind, days, today).map_err(|e| e.to_string())?;
+        let Some(latest) = s.days.last() else { continue };
+        found.push(json!({ "kind": kind.as_str(), "unit": kind.canonical_unit().as_str(), "latest": { "date": latest.date, "value": latest.value },
+                           "days_with_values": s.days.len(), "average": s.average, "min": s.min, "max": s.max }));
+    }
+    Ok(json!({ "kind": "all", "from": (today - Duration::days(days - 1)).to_string(), "to": today.to_string(), "measurements": found }))
+}
+
 /// FR-QA-004/005/016: checks `args`, then runs the tool. `Err` is a refusal the model hears once.
 pub fn run(env: &ToolEnv<'_>, tool: &str, args: &Value) -> Result<ToolRecord, String> {
     let done = |result: Value, undo: Option<Undo>| ToolRecord { tool: tool.to_owned(), args: args.clone(), ok: true, result, error: None, undo };
@@ -235,8 +250,11 @@ pub fn run(env: &ToolEnv<'_>, tool: &str, args: &Value) -> Result<ToolRecord, St
         }
         "query_metrics" => {
             unknown_keys(args, &["kind", "days"])?;
-            let kind = kind(args)?;
             let days = args["days"].as_i64().filter(|d| (1..=365).contains(d)).ok_or("days must be a whole number from 1 to 365")?;
+            if args["kind"] == "all" {
+                return Ok(done(overview(env, days)?, None));
+            }
+            let kind = kind(args)?;
             let s = metrics::summary(env.pla, kind, days, today).map_err(|e| e.to_string())?;
             let total: f64 = s.days.iter().map(|d| d.value).sum();
             let unit = kind.canonical_unit().as_str();
@@ -421,6 +439,23 @@ mod tests {
         super::super::undo(&pla, rec.undo.as_ref().unwrap(), now()).unwrap();
         let q = run(&env, "query_metrics", &json!({ "kind": "sleep", "days": 7 })).unwrap();
         assert_eq!(q.result["total"], json!(7.0));
+    }
+
+    #[test]
+    fn all_measurements_at_once() {
+        let (_t, vault, pla, cache) = env_parts();
+        let env = ToolEnv { vault: &vault, pla: &pla, cache: &cache, now: now(), validation: ValidationSettings::default() };
+        let empty = run(&env, "query_metrics", &json!({ "kind": "all", "days": 7 })).unwrap();
+        assert_eq!(empty.result["measurements"], json!([]));
+        run(&env, "log_metric", &json!({ "kind": "sleep", "date": "2026-10-04", "value": 6 })).unwrap();
+        run(&env, "log_metric", &json!({ "kind": "sleep", "date": "2026-10-05", "value": 8 })).unwrap();
+        run(&env, "log_metric", &json!({ "kind": "weight", "date": "2026-10-05", "value": 80, "unit": "kg" })).unwrap();
+        let q = run(&env, "query_metrics", &json!({ "kind": "all", "days": 7 })).unwrap();
+        let m = q.result["measurements"].as_array().unwrap();
+        assert_eq!(m.len(), 2, "only the measures with values");
+        assert_eq!((m[0]["kind"].clone(), m[0]["latest"]["value"].clone(), m[0]["average"].clone()), (json!("sleep"), json!(8.0), json!(7.0)));
+        assert_eq!(m[1]["kind"], "weight");
+        assert!(run(&env, "log_metric", &json!({ "kind": "all", "date": "2026-10-05", "value": 1 })).is_err(), "all is for reading only");
     }
 
     #[test]
