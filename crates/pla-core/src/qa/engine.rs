@@ -278,7 +278,8 @@ fn trimmed(rec: &ToolRecord, left: &mut usize) -> ToolRecord {
 /// half of its words) without a hedge gets one. The model copied "Bitirme projesinde Skywalker X8
 /// öne çıkıyor" as a fact although the line was hedged and rule 8 asked for it (memory-p5).
 fn with_hedge(text: String, recall: &Recall, question: &str, lang: &str) -> String {
-    const HEDGES: [&str; 9] = ["notlarına göre", "notlarında", "notlarına bakılırsa", "görünüyor", "muhtemelen", "according to your notes", "your notes", "seems", "likely"];
+    // any "... göre" / "according to ...": the model's own hedge ("Notlara göre") counts too
+    const HEDGES: [&str; 9] = ["göre", "notlarında", "notlarına bakılırsa", "görünüyor", "muhtemelen", "according to", "your notes", "seems", "likely"];
     let lower = text.to_lowercase();
     if HEDGES.iter().any(|h| lower.contains(h)) {
         return text;
@@ -1256,6 +1257,7 @@ Deniz:
         // hedged already, about something else, or no inferred line: as it was
         for (text, r) in [
             ("Notlarına göre Skywalker X8 öne çıkıyor gibi görünüyor.", &recall),
+            ("Notlara göre, Bitirme projesinde Skywalker X8 öne çıkıyor.", &recall),
             ("Spor saatin sabah 06:30.", &recall),
             ("Bitirme projesinde Skywalker X8 öne çıkıyor.", &Recall::default()),
         ] {
