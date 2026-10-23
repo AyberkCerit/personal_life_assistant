@@ -190,6 +190,37 @@ pub fn answer_language(question: &str, earlier: Option<&str>, ui: &str) -> &'sta
     guess(question).or_else(|| earlier.and_then(guess)).unwrap_or(if ui == "en" { "en" } else { "tr" })
 }
 
+/// Words that make a sentence a guess, a denial or a wish, not a fact (memory guard, spec
+/// 2026-10-18). Folded as `index::loose_words` reads them: no Turkish letters ("değil" is "degil").
+const UNSURE_WORDS: &[&str] = &[
+    "belki", "sanirim", "galiba", "herhalde", "muhtemelen", "acaba", "olabilir", "keske", "eger", "degil", "maybe", "might", "perhaps", "probably", "guess",
+    "not", "never", "if", "unless", "wish",
+];
+
+/// The question particle, alone or with its person ending ("mı", "misin", "muyuz").
+const QUESTION_WORDS: &[&str] = &[
+    "mi", "mu", "misin", "musun", "miyim", "muyum", "miyiz", "muyuz", "misiniz", "musunuz", "midir", "mudur", "miydi", "muydu", "miymis", "muymus",
+];
+
+/// Conditional and wish endings ("yaparsa", "gelirse", "yapsam", "olsak"), on words of five letters
+/// or more so "masa" or "sen" stay out.
+const CONDITIONAL_ENDINGS: &[&str] =
+    &["rsa", "rse", "zsa", "zse", "ysa", "yse", "rsam", "rsem", "rsan", "rsen", "rsak", "rsek", "sam", "sem", "saydi", "seydi", "saniz", "seniz"];
+
+/// Whether `text` hedges, denies, asks or sets a condition: such a sentence is never written to
+/// memory as a fact.
+pub fn is_unsure(text: &str) -> bool {
+    let lower = text.to_lowercase();
+    if lower.contains('?') || lower.contains("n't") || lower.contains("n’t") {
+        return true;
+    }
+    crate::index::loose_words(text).iter().any(|w| {
+        UNSURE_WORDS.contains(&w.as_str())
+            || QUESTION_WORDS.contains(&w.as_str())
+            || (w.chars().count() >= 5 && CONDITIONAL_ENDINGS.iter().any(|e| w.ends_with(e)))
+    })
+}
+
 /// The name the model is told.
 pub fn name(code: &str) -> &'static str {
     if code == "en" {
