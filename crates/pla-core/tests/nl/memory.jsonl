@@ -1,0 +1,47 @@
+// Chat → memory cases (assistant-memory plan Task 8), frozen before the prompt was tuned.
+// msg: the user's message; prev: the user's own previous message; topics: active topics; rejected: [topic, text].
+// expect.adds: each wanted write; file/person/topic alternatives with "|"; has: every group must be in the text
+// (alternatives with "|"); not: none may be. An empty adds list means nothing is written. expect.forget: topics.
+// Any write that matches nothing wanted is a wrong write.
+{"id":"chat-mem-d01","cat":"dev","msg":"Sabahları spor yapıyorum, genelde 7 gibi.","expect":{"adds":[{"file":"about|state","has":["sabah","spor"]}]}}
+{"id":"chat-mem-d02","cat":"dev","msg":"Kahveyi sütsüz içerim.","expect":{"adds":[{"file":"about","has":["kahve","sut"]}]}}
+{"id":"chat-mem-d03","cat":"dev","msg":"Laktoz intoleransım var.","expect":{"adds":[{"file":"about","has":["laktoz"]}]}}
+{"id":"chat-mem-d04","cat":"dev","msg":"Cevapların kısa olsun, uzun yazınca okumuyorum.","expect":{"adds":[{"file":"rules","has":["kisa"]}]}}
+{"id":"chat-mem-d05","cat":"dev","msg":"Bana hep madde madde cevap ver.","expect":{"adds":[{"file":"rules","has":["madde"]}]}}
+{"id":"chat-mem-d06","cat":"dev","msg":"Bitirme projesinde Skywalker X8 gövdesini seçtik.","expect":{"adds":[{"file":"state|about","has":["x8"]}]}}
+{"id":"chat-mem-d07","cat":"dev","ui":"en","msg":"I work night shifts at the hospital.","expect":{"adds":[{"file":"about|state","has":["night"]}]}}
+{"id":"chat-mem-d08","cat":"dev","msg":"Pazartesi ve perşembe günleri İngilizce kursum var.","expect":{"adds":[{"file":"about|state","has":["ingilizce"]}]}}
+{"id":"chat-mem-d09","cat":"dev","msg":"Deniz kahveyi sütsüz içer.","expect":{"adds":[{"file":"people","person":"Deniz","has":["sut"]}]}}
+{"id":"chat-mem-d10","cat":"dev","msg":"Annemin doğum günü 3 Mart.","expect":{"adds":[{"file":"people","person":"Annem|Anne","has":["mart"]}]}}
+{"id":"chat-mem-d11","cat":"dev","msg":"Can'ın fıstık alerjisi var.","expect":{"adds":[{"file":"people","person":"Can","has":["fistik"]}]}}
+{"id":"chat-mem-d12","cat":"dev","msg":"Ali ile aynı ekipteyiz, backend'i o yazıyor.","expect":{"adds":[{"file":"people","person":"Ali","has":["backend"]}]}}
+{"id":"chat-mem-d13","cat":"dev","msg":"Deniz kahveyi sütsüz içer, Can ise şekerli.","expect":{"adds":[{"file":"people","person":"Deniz","has":["sut"],"not":["seker"]},{"file":"people","person":"Can","has":["seker"],"not":["sut"]}]}}
+{"id":"chat-mem-d14","cat":"dev","ui":"en","msg":"My sister Emma is allergic to cats.","expect":{"adds":[{"file":"people","person":"Emma","has":["cat"]}]}}
+{"id":"chat-mem-d15","cat":"dev","msg":"Belki yarın sabah koşuya çıkarım.","expect":{"adds":[]}}
+{"id":"chat-mem-d16","cat":"dev","msg":"Sabah mı spor yapsam akşam mı?","expect":{"adds":[]}}
+{"id":"chat-mem-d17","cat":"dev","msg":"Kahve içmeyi bırakmayı düşünüyorum.","expect":{"adds":[]}}
+{"id":"chat-mem-d18","cat":"dev","msg":"Yarın 10'da dişçiye gideceğim.","expect":{"adds":[]}}
+{"id":"chat-mem-d19","cat":"dev","msg":"Bugün çok yorgunum.","expect":{"adds":[]}}
+{"id":"chat-mem-d20","cat":"dev","msg":"Deniz'in doğum günü ne zaman?","expect":{"adds":[]}}
+{"id":"chat-mem-d21","cat":"dev","msg":"Eğer işe girersem İstanbul'a taşınırım.","expect":{"adds":[]}}
+{"id":"chat-mem-d22","cat":"dev","prev":"Sence sabah mı spor yapmalıyım akşam mı?","msg":"tamam, öyle yapalım","expect":{"adds":[]}}
+{"id":"chat-mem-d23","cat":"dev","ui":"en","msg":"I don't think I like spicy food.","expect":{"adds":[]}}
+{"id":"chat-mem-d24","cat":"dev","msg":"Bu hafta spora gidemedim.","expect":{"adds":[]}}
+{"id":"chat-mem-d25","cat":"dev","topics":["spor-zamani","kahve"],"msg":"Artık akşamları spor yapıyorum.","expect":{"adds":[{"file":"about|state","topic":"spor-zamani","has":["aksam"]}]}}
+{"id":"chat-mem-d26","cat":"dev","topics":["spor-zamani","kahve"],"msg":"Kahve kısmını unut, yanlış anlamışsın.","expect":{"adds":[],"forget":["kahve"]}}
+{"id":"chat-mem-d27","cat":"dev","topics":["is-yeri"],"prev":"Aselsan'da çalışıyorum.","msg":"Bunu unut, artık orada çalışmıyorum.","expect":{"adds":[],"forget":["is-yeri"]}}
+{"id":"chat-mem-d28","cat":"dev","rejected":[["spor-zamani","Akşamları spor yapıyor."]],"msg":"Bugün akşam spor salonuna uğradım, kahveyi de artık sütsüz içiyorum.","expect":{"adds":[{"file":"about","has":["kahve","sut"]}]}}
+{"id":"chat-mem-d29","cat":"dev","prev":"Kahveyi sütsüz içerim.","msg":"bunu hatırla","expect":{"adds":[{"file":"about","has":["kahve","sut"]}]}}
+{"id":"chat-mem-d30","cat":"dev","topics":["deniz-kahve"],"msg":"Deniz artık kahveyi şekerli içiyor.","expect":{"adds":[{"file":"people","person":"Deniz","topic":"deniz-kahve","has":["seker"]}]}}
+{"id":"chat-mem-h01","cat":"heldout","msg":"Vejetaryenim, et yemiyorum.","expect":{"adds":[{"file":"about","has":["vejetaryen"]}]}}
+{"id":"chat-mem-h02","cat":"heldout","msg":"Haftada üç gün yüzmeye gidiyorum.","expect":{"adds":[{"file":"about|state","has":["yuz"]}]}}
+{"id":"chat-mem-h03","cat":"heldout","msg":"Kod örneklerini Rust ile yaz lütfen.","expect":{"adds":[{"file":"rules","has":["rust"]}]}}
+{"id":"chat-mem-h04","cat":"heldout","msg":"Kardeşim Elif tıp okuyor.","expect":{"adds":[{"file":"people","person":"Elif","has":["tip"]}]}}
+{"id":"chat-mem-h05","cat":"heldout","msg":"Babam emekli öğretmen.","expect":{"adds":[{"file":"people","person":"Babam|Baba","has":["ogretmen"]}]}}
+{"id":"chat-mem-h06","cat":"heldout","ui":"en","msg":"Maybe I'll start learning Spanish.","expect":{"adds":[]}}
+{"id":"chat-mem-h07","cat":"heldout","msg":"Toplantı kaçta başlıyordu?","expect":{"adds":[]}}
+{"id":"chat-mem-h08","cat":"heldout","msg":"Keşke daha erken kalkabilsem.","expect":{"adds":[]}}
+{"id":"chat-mem-h09","cat":"heldout","msg":"Bugün öğle yemeğini atladım.","expect":{"adds":[]}}
+{"id":"chat-mem-h10","cat":"heldout","topics":["uyku-saati"],"msg":"Son zamanlarda gece birde yatıyorum.","expect":{"adds":[{"file":"about|state","topic":"uyku-saati","has":["bir|1"]}]}}
+{"id":"chat-mem-h11","cat":"heldout","topics":["elif-okul"],"msg":"Elif'le ilgili yazdığını sil.","expect":{"adds":[],"forget":["elif-okul"]}}
+{"id":"chat-mem-h12","cat":"heldout","msg":"Murat kahveyi sade, Selin sütlü içer.","expect":{"adds":[{"file":"people","person":"Murat","has":["sade"],"not":["sut"]},{"file":"people","person":"Selin","has":["sut"],"not":["sade"]}]}}
