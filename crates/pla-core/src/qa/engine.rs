@@ -476,8 +476,9 @@ fn asked_for_note(text: &str) -> bool {
 
 /// A question about the user's health as a whole ("sağlık durumum nasıl", "how is my health?"): the
 /// measurements answer it, not the notes (the owner's screenshot: "no information" beside five cards).
+/// "sağli" (`key` reads ı as i) and not "sağl": "sağlar mısın", "sağlam mı" are not about health.
 fn asks_about_health(question: &str) -> bool {
-    asks(question) && words(question).iter().any(|w| ["sağl", "sagl", "health", "fitness", "ölçüm", "olcum", "measurement"].iter().any(|p| w.starts_with(p)))
+    asks(question) && words(question).iter().any(|w| ["sağli", "sagli", "health", "fitness", "ölçüm", "olcum", "measurement"].iter().any(|p| w.starts_with(p)))
 }
 
 /// What the code does when the model only answers but the user's words leave no doubt (the eval's
@@ -873,7 +874,7 @@ mod tests {
         tools::run(&tool_env, "log_metric", &json!({ "kind": "weight", "date": "2026-10-05", "value": 130, "unit": "kg" })).unwrap();
         let mut model = scripted(&["{\"tool\":\"answer\"}"], "Kilon 130 kg.");
         let ask = |model: &mut Scripted, text: &str| {
-            answer(model, &tool_env, &Question { text, turns: &[], memory: None, ui_lang: "tr" }, &AtomicBool::new(false), &mut |_| {}).unwrap()
+            answer(model, &tool_env, &Question { text, turns: &[], memory: None, ui_lang: "tr", persona: &Persona::default() }, &AtomicBool::new(false), &mut |_| {}).unwrap()
         };
         let a = ask(&mut model, "sağlık durumum nasıl");
         assert_eq!(a.tools.len(), 1);
@@ -883,6 +884,8 @@ mod tests {
         assert!(last.contains("\"measurements\""), "the answer sees the values");
         let a = ask(&mut scripted(&[], "Merhaba!"), "merhaba");
         assert!(a.tools.is_empty(), "no measurements for small talk");
+        assert!(asks_about_health("sağlığım nasıl") && asks_about_health("how is my health?"));
+        assert!(!asks_about_health("bana bir özet sağlar mısın?") && !asks_about_health("bu plan sağlam mı?"), "sağlamak is not health");
     }
 
     #[test]
