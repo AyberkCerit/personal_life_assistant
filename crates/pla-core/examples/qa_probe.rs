@@ -101,13 +101,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     println!("-- read-ahead (the panel opens)");
-    pla_core::qa::engine::warm(&mut probe, &dbs.cache, &Default::default(), now, &AtomicBool::new(false))?;
+    pla_core::qa::engine::warm(&mut probe, &dbs.cache, &Default::default(), now, &pla_core::recall::Recall::default(), "memory", &AtomicBool::new(false))?;
 
     let env = pla_core::qa::tools::ToolEnv { vault: &vault, pla: &dbs.pla, cache: &dbs.cache, now, validation: Default::default() };
     for q in ["Bu hafta neler yaptım?", "Sınav ne zaman?"] {
         println!("-- question: {q}");
         let t = Instant::now();
-        let r = pla_core::qa::engine::answer(&mut probe, &env, &pla_core::qa::engine::Question { text: q, turns: &[], memory: None, ui_lang: "tr", persona: &Default::default() }, &AtomicBool::new(false), &mut |_| {});
+        let r = pla_core::qa::engine::answer(&mut probe, &env, &pla_core::qa::engine::Question { text: q, turns: &[], memory: None, recall: None, ui_lang: "tr", persona: &Default::default() }, &AtomicBool::new(false), &mut |_| {});
         let tools: Vec<String> = r.as_ref().map(|a| a.tools.iter().map(|c| c.tool.clone()).collect()).unwrap_or_default();
         println!("   total {:.1} s, tools {tools:?}", t.elapsed().as_secs_f64());
     }

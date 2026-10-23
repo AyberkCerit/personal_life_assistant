@@ -1,7 +1,7 @@
 //! Commands for connected notes (M3): search, quick open, backlinks, tags and following a wikilink.
 
 use pla_core::files;
-use pla_core::index::{self, Backlink, QuickHit, SearchHit, TagCount};
+use pla_core::index::{self, Backlink, Graph, QuickHit, SearchHit, TagCount};
 use serde::Serialize;
 use tauri::State;
 
@@ -22,6 +22,11 @@ pub fn quick_open(state: State<AppState>, query: String) -> Result<Vec<QuickHit>
 #[tauri::command]
 pub fn backlinks(state: State<AppState>, path: String) -> Result<Vec<Backlink>, String> {
     with_cache(&state, |c| index::backlinks(c, &path))
+}
+
+#[tauri::command(async)]
+pub fn note_graph(state: State<AppState>) -> Result<Graph, String> {
+    with_cache(&state, index::graph)
 }
 
 #[tauri::command]

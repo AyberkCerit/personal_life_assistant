@@ -18,6 +18,7 @@ pub mod models;
 pub mod notes;
 pub mod pipeline;
 pub mod qa;
+pub mod recall;
 pub mod recovery;
 pub mod reminders;
 pub mod report;

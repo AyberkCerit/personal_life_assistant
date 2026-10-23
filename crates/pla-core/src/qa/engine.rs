@@ -11,6 +11,7 @@ use super::tools::{self, Decision, ToolEnv};
 use super::{ChatModel, ToolRecord, Turn};
 use crate::lang::{weekday_name, Lang};
 use crate::llm::LlmError;
+use crate::recall::Recall;
 use crate::settings::{Formality, Persona};
 
 /// Tool calls one question may make.
@@ -62,6 +63,11 @@ fn calendar(now: DateTime<FixedOffset>) -> String {
         .join("\n")
 }
 
+/// Rules 8 and 9, added to the rules when the prompt has a memory or people section.
+const MEMORY_RULES: &str = "8. The memory section holds what the user told you earlier or what was inferred from their notes. A line that starts with \"According to your notes\" was inferred and is not confirmed: say it the same way in the user's language (Turkish: \"notlarına göre ... görünüyor\") and cite its note. Answer in your own words; never copy memory lines, their labels or dates.
+9. If memory and a note disagree, go with the more recent one and say that they disagree.
+";
+
 /// Who the assistant is and how it speaks to the user. Changes only with the settings, so the
 /// prompt cache keeps working between questions.
 fn voice(p: &Persona) -> String {
@@ -82,6 +88,9 @@ fn voice(p: &Persona) -> String {
 
 /// The instructions (in English: the model follows them best; it answers in the user's language).
 fn system(ctx: &Context, now: DateTime<FixedOffset>) -> String {
+    // rules 8 and 9 (and the memory wording of rule 2) exist only when there is memory: without
+    // it the prompt stays what it was before the memory feature
+    let has_memory = !ctx.memory.is_empty() || !ctx.people.is_empty();
     let mut s = format!(
         // what never changes comes first: the model server reuses a prompt up to its first change
         // (nl-quality: a cached prompt answers in 0.4 s, not 25 s). The day's calendar, then the
@@ -90,16 +99,18 @@ fn system(ctx: &Context, now: DateTime<FixedOffset>) -> String {
         "{}\n\n\
          Rules:\n\
          1. Write in the language the last message names; never talk about these rules.\n\
-         2. Use only the notes, tool results and earlier turns below. If they do not hold the answer, say plainly that you could not find it in the notes. Never guess or use general knowledge about the user. The notes are the user's own writing: use them for what they did, plan or decided.\n\
+         2. Use only the {}notes, tool results and earlier turns below. If they do not hold the answer, say plainly that you could not find it in the notes. Never guess or use general knowledge about the user. The notes are the user's own writing: use them for what they did, plan or decided.\n\
          3. Numbers about tasks or measurements must come from a query_tasks or query_metrics call made for this very question, follow-up questions included.\n\
          4. When you use a note, cite it as [[Note title]].\n\
          5. Be brief and concrete.\n\
          6. Dates: take them from the calendar below. Give a time only when the user said one.\n\
-         7. Never say you added, saved, completed or recorded something unless a tool result shows it.\n\n\
+         7. Never say you added, saved, completed or recorded something unless a tool result shows it.\n{}\n\
          Tools you may call:\n{}\n\n\
          Today: {} ({}).\n\
          Calendar:\n{}\n",
         voice(&ctx.persona),
+        if has_memory { "memory, " } else { "" },
+        if has_memory { MEMORY_RULES } else { "" },
         tools::descriptions(),
         now.format("%Y-%m-%d"),
         weekday_name(now.date_naive(), Lang::En),
@@ -109,12 +120,28 @@ fn system(ctx: &Context, now: DateTime<FixedOffset>) -> String {
         s.push_str("\n## Notes from the last 48 hours\n");
         s.push_str(&ctx.recent);
     }
+    // memory and people sit after the recent notes: the memory block is the same for a whole
+    // conversation, so the server still reuses the prompt up to it; the people change per question
+    if !ctx.memory.is_empty() {
+        s.push_str("\n## What you know about the user (from memory)\n");
+        s.push_str(&ctx.memory);
+        s.push('\n');
+    }
+    if !ctx.people.is_empty() {
+        s.push_str("\n## People mentioned\n");
+        s.push_str(&ctx.people);
+        s.push('\n');
+    }
     if !ctx.found.is_empty() {
         s.push_str("\n## Notes found for this question\n");
         s.push_str(&ctx.found);
     }
     if ctx.recent.is_empty() && ctx.found.is_empty() {
-        s.push_str("\n(No notes matched this question.)\n");
+        if ctx.memory.is_empty() && ctx.people.is_empty() {
+            s.push_str("\n(No notes matched this question.)\n");
+        } else {
+            s.push_str("\n(No notes matched this question. Answer from the memory above if it holds the answer.)\n");
+        }
     }
     s.push_str(&format!("\nTime now: {}.\n", now.format("%H:%M")));
     s
@@ -604,8 +631,16 @@ pub fn cited(text: &str) -> Vec<String> {
 /// M6 performance: the model reads the prompt every question starts with (instructions, calendar,
 /// the last 48 hours) while the user is still typing; the server keeps it (`cache_prompt`) and the
 /// question reads only its own part. On 4 cores that part alone took ~30 s.
-pub fn warm(model: &mut dyn ChatModel, cache: &rusqlite::Connection, persona: &Persona, now: DateTime<FixedOffset>, cancel: &AtomicBool) -> Result<(), QaError> {
-    let ctx = Context { persona: persona.clone(), ..context::shared(cache, now)? };
+pub fn warm(
+    model: &mut dyn ChatModel,
+    cache: &rusqlite::Connection,
+    persona: &Persona,
+    now: DateTime<FixedOffset>,
+    recall: &Recall,
+    memory_folder: &str,
+    cancel: &AtomicBool,
+) -> Result<(), QaError> {
+    let ctx = Context { persona: persona.clone(), ..context::shared(cache, now, recall, memory_folder)? };
     let body = json!({
         "messages": messages(&ctx, "", &[], now, ""),
         "max_tokens": 1,
@@ -624,14 +659,19 @@ pub struct Question<'a> {
     pub memory: context::Memory<'a>,
     /// PLA's own language, the last say on the answer's (FR-QA-012).
     pub ui_lang: &'a str,
+    /// The conversation's memory snapshot; `None` reads as no memory.
+    pub recall: Option<&'a Recall>,
     /// The assistant's name and how it addresses the user.
     pub persona: &'a Persona,
 }
 
 /// FR-QA-003…016 for one question.
 pub fn answer(model: &mut dyn ChatModel, env: &ToolEnv<'_>, q: &Question<'_>, cancel: &AtomicBool, on: &mut dyn FnMut(Progress)) -> Result<Answer, QaError> {
-    let Question { text: question, turns, memory, ui_lang, persona } = *q;
-    let ctx = Context { persona: persona.clone(), ..context::build(env.cache, question, turns, env.now, memory, &env.vault.config.folders.reports)? };
+    let Question { text: question, turns, memory, ui_lang, recall, persona } = *q;
+    let none = Recall::default();
+    let folders = &env.vault.config.folders;
+    let built = context::build(env.cache, question, turns, env.now, memory, &folders.reports, recall.unwrap_or(&none), &folders.memory)?;
+    let ctx = Context { persona: persona.clone(), ..built };
     let lang = super::lang::answer_language(question, turns.last().map(|t| t.question.as_str()), ui_lang);
     let mut calls: Vec<ToolRecord> = Vec::new(); // as the model sees them
     let mut shown: Vec<ToolRecord> = Vec::new(); // as the user sees them
@@ -845,7 +885,7 @@ mod tests {
         let a = answer(
             &mut model,
             &tool_env,
-            &Question { text: "Yarın saat 10'da doktor randevum var, hatırlat", turns: &[], memory: None, ui_lang: "tr", persona: &Persona::default() },
+            &Question { text: "Yarın saat 10'da doktor randevum var, hatırlat", turns: &[], memory: None, recall: None, ui_lang: "tr", persona: &Persona::default() },
             &AtomicBool::new(false),
             &mut |p| events.push(p),
         )
@@ -897,7 +937,7 @@ mod tests {
         let a = answer(
             &mut model,
             &tool_env,
-            &Question { text: "Cuma günü annemi aramam lazım", turns: &[], memory: None, ui_lang: "tr", persona: &Persona::default() },
+            &Question { text: "Cuma günü annemi aramam lazım", turns: &[], memory: None, recall: None, ui_lang: "tr", persona: &Persona::default() },
             &AtomicBool::new(false),
             &mut |_| {},
         )
@@ -907,7 +947,7 @@ mod tests {
         let a = answer(
             &mut model,
             &tool_env,
-            &Question { text: "Cuma 10'da annemi ara", turns: &[], memory: None, ui_lang: "tr", persona: &Persona::default() },
+            &Question { text: "Cuma 10'da annemi ara", turns: &[], memory: None, recall: None, ui_lang: "tr", persona: &Persona::default() },
             &AtomicBool::new(false),
             &mut |_| {},
         )
@@ -932,7 +972,7 @@ mod tests {
         let e = env();
         let tool_env = ToolEnv { vault: &e.vault, pla: &e.pla, cache: &e.cache, now: now(), validation: ValidationSettings::default() };
         let err =
-            answer(&mut Breaks, &tool_env, &Question { text: "Yarın doktor", turns: &[], memory: None, ui_lang: "tr", persona: &Persona::default() }, &AtomicBool::new(false), &mut |_| {})
+            answer(&mut Breaks, &tool_env, &Question { text: "Yarın doktor", turns: &[], memory: None, recall: None, ui_lang: "tr", persona: &Persona::default() }, &AtomicBool::new(false), &mut |_| {})
                 .unwrap_err();
         let QaError::Model { tools, .. } = err else { panic!("expected a model error") };
         assert_eq!(tools.len(), 1);
@@ -945,7 +985,7 @@ mod tests {
         let tool_env = ToolEnv { vault: &e.vault, pla: &e.pla, cache: &e.cache, now: now(), validation: ValidationSettings::default() };
         let cancel = AtomicBool::new(false);
         let mut model = scripted(&["{\"tool\":\"add_task\",\"args\":{\"title\":\"x\",\"date\":\"2026-10-07\"}}"], "");
-        let err = answer(&mut model, &tool_env, &Question { text: "x ekle", turns: &[], memory: None, ui_lang: "tr", persona: &Persona::default() }, &cancel, &mut |p| {
+        let err = answer(&mut model, &tool_env, &Question { text: "x ekle", turns: &[], memory: None, recall: None, ui_lang: "tr", persona: &Persona::default() }, &cancel, &mut |p| {
             if matches!(p, Progress::Working(None)) {
                 cancel.store(true, Ordering::SeqCst); // Stop lands while the model decides
             }
@@ -965,7 +1005,7 @@ mod tests {
         let a = answer(
             &mut model,
             &tool_env,
-            &Question { text: "Cumartesi markete gitmem gerekiyor", turns: &[], memory: None, ui_lang: "tr", persona: &Persona::default() },
+            &Question { text: "Cumartesi markete gitmem gerekiyor", turns: &[], memory: None, recall: None, ui_lang: "tr", persona: &Persona::default() },
             &AtomicBool::new(false),
             &mut |_| {},
         )
@@ -983,7 +1023,7 @@ mod tests {
         let bad = "{\"tool\":\"add_task\",\"args\":{\"title\":\"x\",\"date\":\"yarın\"}}";
         let mut model = scripted(&[bad, bad], "Ekleyemedim.");
         let a =
-            answer(&mut model, &tool_env, &Question { text: "x ekle", turns: &[], memory: None, ui_lang: "tr", persona: &Persona::default() }, &AtomicBool::new(false), &mut |_| {}).unwrap();
+            answer(&mut model, &tool_env, &Question { text: "x ekle", turns: &[], memory: None, recall: None, ui_lang: "tr", persona: &Persona::default() }, &AtomicBool::new(false), &mut |_| {}).unwrap();
         assert_eq!(a.tools.len(), 1, "only the second refusal reaches the user");
         assert!(a.tools[0].error.as_deref().unwrap().contains("not a date"));
         let second = model.bodies[1]["messages"].as_array().unwrap();
@@ -997,7 +1037,7 @@ mod tests {
         let q = |list: &str| format!("{{\"tool\":\"query_tasks\",\"args\":{{\"list\":\"{list}\"}}}}");
         let calls = [q("today"), q("upcoming"), q("completed"), q("all"), q("today")];
         let mut model = scripted(&calls.iter().map(String::as_str).collect::<Vec<_>>(), "Tamam.");
-        let a = answer(&mut model, &tool_env, &Question { text: "görevlerim", turns: &[], memory: None, ui_lang: "tr", persona: &Persona::default() }, &AtomicBool::new(false), &mut |_| {})
+        let a = answer(&mut model, &tool_env, &Question { text: "görevlerim", turns: &[], memory: None, recall: None, ui_lang: "tr", persona: &Persona::default() }, &AtomicBool::new(false), &mut |_| {})
             .unwrap();
         assert_eq!(a.tools.len(), MAX_CALLS);
     }
@@ -1010,7 +1050,7 @@ mod tests {
         let cancel = AtomicBool::new(false);
         let mut model = scripted(&[], "bir iki üç dört beş");
         let mut seen = 0;
-        let err = answer(&mut model, &tool_env, &Question { text: "say", turns: &[], memory: None, ui_lang: "tr", persona: &Persona::default() }, &cancel, &mut |p| {
+        let err = answer(&mut model, &tool_env, &Question { text: "say", turns: &[], memory: None, recall: None, ui_lang: "tr", persona: &Persona::default() }, &cancel, &mut |p| {
             if matches!(p, Progress::Token(_)) {
                 seen += 1;
                 if seen == 2 {
@@ -1035,7 +1075,7 @@ mod tests {
         let tool_env = ToolEnv { vault: &e.vault, pla: &e.pla, cache: &e.cache, now: now(), validation: ValidationSettings::default() };
         let persona = Persona { name: "Atlas".into(), address: "Ayberk Bey".into(), formality: Formality::Formal };
         let mut model = scripted(&[], "Bugün bir şey bulamadım Ayberk Bey.");
-        answer(&mut model, &tool_env, &Question { text: "Bugün ne yaptım?", turns: &[], memory: None, ui_lang: "tr", persona: &persona }, &AtomicBool::new(false), &mut |_| {}).unwrap();
+        answer(&mut model, &tool_env, &Question { text: "Bugün ne yaptım?", turns: &[], memory: None, recall: None, ui_lang: "tr", persona: &persona }, &AtomicBool::new(false), &mut |_| {}).unwrap();
         for body in &model.bodies {
             let system = body["messages"][0]["content"].as_str().unwrap();
             assert!(system.starts_with("You are Atlas, a private assistant in the PLA app"), "{system}");
@@ -1062,6 +1102,100 @@ mod tests {
         assert!(sa.char_indices().nth(shared).map_or(sa.len(), |(i, _)| i) >= end_of_recent, "{sa}\n---\n{sb}");
     }
 
+    fn memory_context() -> Context {
+        Context {
+            recent: "Note [[Bugün]], last changed 2026-10-10:\nToplantı notları.\n\n".into(),
+            memory: "About the user:\n- Sabah erken kalkar (said by the user, 2026-10-01)".into(),
+            people: "About people mentioned:\nDeniz:\n- Kardeşi (said by the user, 2026-10-02)".into(),
+            found: "Note [[Sınav]]:\nCuma.\n\n".into(),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn memory_sits_after_the_recent_notes() {
+        let ctx = memory_context();
+        let s = system(&ctx, now());
+        let at = |needle: &str| s.find(needle).unwrap_or_else(|| panic!("{needle} missing in {s}"));
+        let order = [
+            at("Rules:"),
+            at("Calendar:"),
+            at("## Notes from the last 48 hours"),
+            at("## What you know about the user (from memory)"),
+            at("## People mentioned"),
+            at("## Notes found for this question"),
+            at("Time now:"),
+        ];
+        assert!(order.windows(2).all(|w| w[0] < w[1]), "{order:?}\n{s}");
+        assert!(!s.contains("(No notes matched"), "{s}");
+        // nothing to say: no empty headings
+        let bare = system(&Context::default(), now());
+        assert!(!bare.contains("from memory") && !bare.contains("People mentioned"), "{bare}");
+        assert!(bare.contains("
+(No notes matched this question.)
+"), "{bare}");
+        // memory without notes: the notes are missing, but the prompt points to the memory
+        let only_memory = system(&Context { memory: ctx.memory.clone(), ..Default::default() }, now());
+        assert!(only_memory.contains("(No notes matched this question. Answer from the memory above if it holds the answer.)"), "{only_memory}");
+        let only_people = system(&Context { people: "Deniz: arkadaş".into(), ..Default::default() }, now());
+        assert!(only_people.contains("Answer from the memory above if it holds the answer."), "{only_people}");
+    }
+
+    #[test]
+    fn a_memory_change_keeps_the_prompt_up_to_the_recent_notes() {
+        let recent = "Note [[Bugün]], last changed 2026-10-10:\nToplantı notları.\n\n".to_owned();
+        let a = Context { recent: recent.clone(), memory: "About the user:\n- Kahve sever".into(), found: "Note [[Sınav]]:\nCuma.\n\n".into(), ..Default::default() };
+        let b = Context {
+            recent: recent.clone(),
+            memory: "About the user:\n- Çay sever".into(),
+            people: "About people mentioned:\nDeniz:\n- Kardeşi".into(),
+            found: "Note [[Bütçe]]:\nKira.\n\n".into(),
+            ..Default::default()
+        };
+        let (sa, sb) = (system(&a, now()), system(&b, now() + chrono::Duration::minutes(1)));
+        let shared = sa.chars().zip(sb.chars()).take_while(|(x, y)| x == y).count();
+        let end_of_recent = sa.find(&recent).unwrap() + recent.len();
+        assert!(sa.char_indices().nth(shared).map_or(sa.len(), |(i, _)| i) >= end_of_recent, "{sa}\n---\n{sb}");
+    }
+
+    #[test]
+    fn the_rules_tell_how_to_use_memory() {
+        let s = system(&Context { memory: "About the user:
+- Kahve sever".into(), ..Default::default() }, now());
+        assert!(s.contains("2. Use only the memory, notes, tool results and earlier turns below. If they do not hold the answer, say plainly that you could not find it in the notes."), "{s}");
+        assert!(s.contains("7. Never say you added, saved, completed or recorded something unless a tool result shows it.
+8. The memory section holds what the user told you earlier or what was inferred from their notes. A line that starts with \"According to your notes\" was inferred and is not confirmed: say it the same way in the user's language (Turkish: \"notlarına göre ... görünüyor\") and cite its note. Answer in your own words; never copy memory lines, their labels or dates.
+"), "{s}");
+        assert!(s.contains("9. If memory and a note disagree, go with the more recent one and say that they disagree.
+
+Tools you may call:"), "{s}");
+        // people alone switch the rules on too
+        let p = system(&Context { people: "About people mentioned:
+Deniz:
+- Kardeşi".into(), ..Default::default() }, now());
+        assert!(p.contains("8. The memory section") && p.contains("9. If memory"), "{p}");
+    }
+
+    #[test]
+    fn without_memory_the_rules_are_the_original_ones() {
+        // the rules text of the prompt before the memory feature (commit 423537a)
+        let original = "Rules:\n\
+            1. Write in the language the last message names; never talk about these rules.\n\
+            2. Use only the notes, tool results and earlier turns below. If they do not hold the answer, say plainly that you could not find it in the notes. Never guess or use general knowledge about the user. The notes are the user's own writing: use them for what they did, plan or decided.\n\
+            3. Numbers about tasks or measurements must come from a query_tasks or query_metrics call made for this very question, follow-up questions included.\n\
+            4. When you use a note, cite it as [[Note title]].\n\
+            5. Be brief and concrete.\n\
+            6. Dates: take them from the calendar below. Give a time only when the user said one.\n\
+            7. Never say you added, saved, completed or recorded something unless a tool result shows it.\n\n\
+            Tools you may call:\n";
+        let s = system(&Context::default(), now());
+        assert!(s.contains(original), "{s}");
+        assert!(!s.contains("memory") && !s.contains("8. ") && !s.contains("People mentioned"), "{s}");
+        assert!(s.contains("
+(No notes matched this question.)
+"), "{s}");
+    }
+
     #[test]
     fn instructions_in_a_note_reach_no_tool_outside_the_list_and_no_check_is_skipped() {
         // NFR-SEC-005 (M6 acceptance): a note that tells the model to delete everything
@@ -1075,7 +1209,7 @@ mod tests {
             &[r#"{"tool":"delete_task","args":{"task_id":"*"}}"#, &format!(r#"{{"tool":"add_task","args":{{"title":"{}"}}}}"#, "x".repeat(300))],
             "Yapamam.",
         );
-        let a = answer(&mut model, &tool_env, &Question { text: "Notlarımda ne var?", turns: &[], memory: None, ui_lang: "tr", persona: &Persona::default() }, &AtomicBool::new(false), &mut |_| {}).unwrap();
+        let a = answer(&mut model, &tool_env, &Question { text: "Notlarımda ne var?", turns: &[], memory: None, recall: None, ui_lang: "tr", persona: &Persona::default() }, &AtomicBool::new(false), &mut |_| {}).unwrap();
         // the grammar the model is held to names the fixed tools, whatever the notes say
         let schema = model.bodies[0]["response_format"]["json_schema"]["schema"].to_string();
         assert!(model.bodies[0]["messages"][0]["content"].as_str().unwrap().contains("delete_task"), "the note was read");
@@ -1096,14 +1230,39 @@ mod tests {
         crate::index::index_note(&e.cache, "notes/dün.md", "# Dün\n\nProje toplantısında bütçeyi konuştuk.", ms - 3_600_000, 10).unwrap();
         let tool_env = ToolEnv { vault: &e.vault, pla: &e.pla, cache: &e.cache, now: now(), validation: ValidationSettings::default() };
         let mut model = scripted(&[], "Bütçeyi konuştunuz.");
-        warm(&mut model, &e.cache, &Persona::default(), now() - chrono::Duration::minutes(2), &AtomicBool::new(false)).unwrap();
-        answer(&mut model, &tool_env, &Question { text: "Toplantıda ne konuştuk?", turns: &[], memory: None, ui_lang: "tr", persona: &Persona::default() }, &AtomicBool::new(false), &mut |_| {}).unwrap();
+        warm(&mut model, &e.cache, &Persona::default(), now() - chrono::Duration::minutes(2), &Recall::default(), "memory", &AtomicBool::new(false)).unwrap();
+        answer(&mut model, &tool_env, &Question { text: "Toplantıda ne konuştuk?", turns: &[], memory: None, recall: None, ui_lang: "tr", persona: &Persona::default() }, &AtomicBool::new(false), &mut |_| {}).unwrap();
         let (warmed, asked) = (&model.bodies[0], &model.bodies[1]);
         assert_eq!(warmed["max_tokens"], 1);
         assert_eq!(warmed["cache_prompt"], true);
         let (w, a) = (warmed["messages"][0]["content"].as_str().unwrap(), asked["messages"][0]["content"].as_str().unwrap());
         let recent_end = w.find("Proje toplantısında bütçeyi konuştuk.").unwrap() + "Proje toplantısında bütçeyi konuştuk.".len();
         assert_eq!(w[..recent_end], a[..recent_end], "the question's prompt starts with what was warmed");
+    }
+
+    #[test]
+    fn warming_with_memory_shares_the_prompt_through_the_memory_block() {
+        let e = env();
+        let ms = now().timestamp_millis();
+        crate::index::index_note(&e.cache, "notes/dün.md", "# Dün\n\nProje toplantısında bütçeyi konuştuk.", ms - 3_600_000, 10).unwrap();
+        let mut recall = Recall::default();
+        recall.about.push(crate::recall::Entry {
+            id: String::new(),
+            text: "Sabah erken kalkar".into(),
+            kind: crate::recall::Kind::Manual,
+            topic: String::new(),
+            source: None,
+            date: chrono::NaiveDate::from_ymd_opt(2026, 10, 1).unwrap(),
+            person: None,
+            notes: Vec::new(),
+        });
+        let tool_env = ToolEnv { vault: &e.vault, pla: &e.pla, cache: &e.cache, now: now(), validation: ValidationSettings::default() };
+        let mut model = scripted(&[], "Bütçeyi konuştunuz.");
+        warm(&mut model, &e.cache, &Persona::default(), now() - chrono::Duration::minutes(2), &recall, "memory", &AtomicBool::new(false)).unwrap();
+        answer(&mut model, &tool_env, &Question { text: "Toplantıda ne konuştuk?", turns: &[], memory: None, recall: Some(&recall), ui_lang: "tr", persona: &Persona::default() }, &AtomicBool::new(false), &mut |_| {}).unwrap();
+        let (w, a) = (model.bodies[0]["messages"][0]["content"].as_str().unwrap(), model.bodies[1]["messages"][0]["content"].as_str().unwrap());
+        let end = w.find("Sabah erken kalkar").expect("memory in the warmed prompt") + "Sabah erken kalkar".len();
+        assert_eq!(w[..end], a[..end], "the question's prompt starts with what was warmed, memory included");
     }
 
     #[test]
@@ -1116,7 +1275,7 @@ mod tests {
         let a = answer(
             &mut model,
             &tool_env,
-            &Question { text: "PLA kararları neler", turns: &[], memory: None, ui_lang: "tr", persona: &Persona::default() },
+            &Question { text: "PLA kararları neler", turns: &[], memory: None, recall: None, ui_lang: "tr", persona: &Persona::default() },
             &AtomicBool::new(false),
             &mut |_| {},
         )
@@ -1126,7 +1285,7 @@ mod tests {
         let a = answer(
             &mut model,
             &tool_env,
-            &Question { text: "PLA kararları neler", turns: &[], memory: None, ui_lang: "tr", persona: &Persona::default() },
+            &Question { text: "PLA kararları neler", turns: &[], memory: None, recall: None, ui_lang: "tr", persona: &Persona::default() },
             &AtomicBool::new(false),
             &mut |_| {},
         )
@@ -1141,7 +1300,7 @@ mod tests {
         let e = env();
         let tool_env = ToolEnv { vault: &e.vault, pla: &e.pla, cache: &e.cache, now: now(), validation: ValidationSettings::default() };
         let mut model = scripted(&[], "Selam!");
-        answer(&mut model, &tool_env, &Question { text: "selam", turns: &[], memory: None, ui_lang: "en", persona: &Persona::default() }, &AtomicBool::new(false), &mut |_| {}).unwrap();
+        answer(&mut model, &tool_env, &Question { text: "selam", turns: &[], memory: None, recall: None, ui_lang: "en", persona: &Persona::default() }, &AtomicBool::new(false), &mut |_| {}).unwrap();
         let last = model.bodies[1]["messages"].as_array().unwrap().last().unwrap()["content"].as_str().unwrap().to_owned();
         assert!(last.ends_with("Write it in Turkish."), "{last}");
         let offer = ToolRecord { tool: "suggest_note".into(), args: json!({}), ok: true, result: json!({}), error: None, undo: None };
@@ -1230,7 +1389,7 @@ mod tests {
         let a = answer(
             &mut model,
             &tool_env,
-            &Question { text: "annemi aradım, o görevi tamamla", turns: &[], memory: None, ui_lang: "tr", persona: &Persona::default() },
+            &Question { text: "annemi aradım, o görevi tamamla", turns: &[], memory: None, recall: None, ui_lang: "tr", persona: &Persona::default() },
             &AtomicBool::new(false),
             &mut |_| {},
         )
@@ -1256,7 +1415,7 @@ mod tests {
         let a = answer(
             &mut model,
             &tool_env,
-            &Question { text: "elektrikçiyi aradım", turns: &[], memory: None, ui_lang: "tr", persona: &Persona::default() },
+            &Question { text: "elektrikçiyi aradım", turns: &[], memory: None, recall: None, ui_lang: "tr", persona: &Persona::default() },
             &AtomicBool::new(false),
             &mut |_| {},
         )
@@ -1280,7 +1439,7 @@ mod tests {
         let a = answer(
             &mut model,
             &tool_env,
-            &Question { text: "yarın ne işim var, unuttum", turns: &[], memory: None, ui_lang: "tr", persona: &Persona::default() },
+            &Question { text: "yarın ne işim var, unuttum", turns: &[], memory: None, recall: None, ui_lang: "tr", persona: &Persona::default() },
             &AtomicBool::new(false),
             &mut |_| {},
         )
@@ -1300,7 +1459,7 @@ mod tests {
         let a = answer(
             &mut model,
             &tool_env,
-            &Question { text: "sen karar ver", turns: &[turn("yarın öğleden sonra toplantı ekle")], memory: None, ui_lang: "tr", persona: &Persona::default() },
+            &Question { text: "sen karar ver", turns: &[turn("yarın öğleden sonra toplantı ekle")], memory: None, recall: None, ui_lang: "tr", persona: &Persona::default() },
             &AtomicBool::new(false),
             &mut |_| {},
         )
@@ -1361,7 +1520,7 @@ mod tests {
         let a = answer(
             &mut model,
             &tool_env,
-            &Question { text: "notlarıma ekle bunu", turns: &[told], memory: None, ui_lang: "tr", persona: &Persona::default() },
+            &Question { text: "notlarıma ekle bunu", turns: &[told], memory: None, recall: None, ui_lang: "tr", persona: &Persona::default() },
             &AtomicBool::new(false),
             &mut |_| {},
         )
@@ -1392,7 +1551,7 @@ mod tests {
             ],
             "Tamam.",
         );
-        answer(&mut model, &tool_env, &Question { text: "cuma kargoyu al", turns: &[], memory: None, ui_lang: "tr", persona: &Persona::default() }, &AtomicBool::new(false), &mut |_| {})
+        answer(&mut model, &tool_env, &Question { text: "cuma kargoyu al", turns: &[], memory: None, recall: None, ui_lang: "tr", persona: &Persona::default() }, &AtomicBool::new(false), &mut |_| {})
             .unwrap();
         let open: i64 = e.pla.query_row("SELECT count(*) FROM task WHERE status = 'open'", [], |r| r.get(0)).unwrap();
         assert_eq!(open, 1);
@@ -1412,14 +1571,14 @@ mod tests {
         let tool_env = ToolEnv { vault: &e.vault, pla: &e.pla, cache: &e.cache, now: now(), validation: ValidationSettings::default() };
         let mut model = scripted(&["{\"tool\":\"query_tasks\",\"args\":{\"list\":\"all\",\"text\":\"faturayı ödedim\"}}"], "Tamam.");
         let a =
-            answer(&mut model, &tool_env, &Question { text: "faturayı ödedim", turns: &[], memory: None, ui_lang: "tr", persona: &Persona::default() }, &AtomicBool::new(false), &mut |_| {})
+            answer(&mut model, &tool_env, &Question { text: "faturayı ödedim", turns: &[], memory: None, recall: None, ui_lang: "tr", persona: &Persona::default() }, &AtomicBool::new(false), &mut |_| {})
                 .unwrap();
         assert!(a.tools.iter().any(|t| t.tool == "complete_task" && t.ok && t.undo.is_some()), "{:?}", a.tools);
         let mut model = scripted(&["{\"tool\":\"query_tasks\",\"args\":{\"list\":\"all\",\"text\":\"fatura\"}}"], "Evet.");
         let asked = answer(
             &mut model,
             &tool_env,
-            &Question { text: "faturayı ödedim mi?", turns: &[], memory: None, ui_lang: "tr", persona: &Persona::default() },
+            &Question { text: "faturayı ödedim mi?", turns: &[], memory: None, recall: None, ui_lang: "tr", persona: &Persona::default() },
             &AtomicBool::new(false),
             &mut |_| {},
         )
@@ -1439,7 +1598,7 @@ mod tests {
         let a = answer(
             &mut model,
             &tool_env,
-            &Question { text: "sen karar ver", turns: &turns, memory: None, ui_lang: "tr", persona: &Persona::default() },
+            &Question { text: "sen karar ver", turns: &turns, memory: None, recall: None, ui_lang: "tr", persona: &Persona::default() },
             &AtomicBool::new(false),
             &mut |_| {},
         )
@@ -1450,7 +1609,7 @@ mod tests {
         let chat = answer(
             &mut model,
             &tool_env,
-            &Question { text: "sen karar ver", turns: &[turn("akşam ne yesek bilemedim")], memory: None, ui_lang: "tr", persona: &Persona::default() },
+            &Question { text: "sen karar ver", turns: &[turn("akşam ne yesek bilemedim")], memory: None, recall: None, ui_lang: "tr", persona: &Persona::default() },
             &AtomicBool::new(false),
             &mut |_| {},
         )
@@ -1484,7 +1643,7 @@ mod tests {
         answer(
             &mut model,
             &tool_env,
-            &Question { text: "Peki ya cuma?", turns: &[earlier], memory: None, ui_lang: "tr", persona: &Persona::default() },
+            &Question { text: "Peki ya cuma?", turns: &[earlier], memory: None, recall: None, ui_lang: "tr", persona: &Persona::default() },
             &AtomicBool::new(false),
             &mut |_| {},
         )
@@ -1509,7 +1668,7 @@ mod tests {
         );
         model.extraction = r#"{"items":[{"type":"task","title":"Annemi ara","when":{"day_offset":1,"time":"08:00"}},{"type":"task","title":"Kahvaltıya git","when":{"day_offset":1,"time":"10:00"}}]}"#.into();
         let q = "yarın annemi arayacağım 8 de sonra da 10 da hep birlikte kahvaltıya gideceğiz";
-        let a = answer(&mut model, &tool_env, &Question { text: q, turns: &[], memory: None, ui_lang: "tr", persona: &Persona::default() }, &AtomicBool::new(false), &mut |_| {}).unwrap();
+        let a = answer(&mut model, &tool_env, &Question { text: q, turns: &[], memory: None, recall: None, ui_lang: "tr", persona: &Persona::default() }, &AtomicBool::new(false), &mut |_| {}).unwrap();
         let added: Vec<(&str, &str, &str)> = a
             .tools
             .iter()
@@ -1532,7 +1691,7 @@ mod tests {
         let a = answer(
             &mut model,
             &tool_env,
-            &Question { text: "yarın annemi arayacağım", turns: &[], memory: None, ui_lang: "tr", persona: &Persona::default() },
+            &Question { text: "yarın annemi arayacağım", turns: &[], memory: None, recall: None, ui_lang: "tr", persona: &Persona::default() },
             &AtomicBool::new(false),
             &mut |_| {},
         )

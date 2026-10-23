@@ -117,6 +117,8 @@ export interface MetricInput {
 export interface SearchHit { note_path: string; title: string; snippet: string; line_text: string | null }
 export interface QuickHit { note_path: string; title: string; alias: string | null }
 export interface Backlink { source_path: string; source_title: string; line: number; line_text: string }
+/** Every note and the links between them; an edge is a pair of indexes into `nodes`. */
+export interface NoteGraph { nodes: { path: string; title: string }[]; edges: [number, number][] }
 export interface TagCount { tag: string; count: number }
 /** FR-EDT-006/007: the open note's frontmatter, `lines` with both fences. */
 export interface FrontMatter { state: "none" | "ok" | "invalid"; tags: string[]; aliases: string[]; lines: number }
@@ -194,6 +196,7 @@ export const api = {
   quickOpen: (query: string) => call<QuickHit[]>("quick_open", { query }),
   backlinks: (path: string) => call<Backlink[]>("backlinks", { path }),
   listTags: () => call<TagCount[]>("list_tags"),
+  noteGraph: () => call<NoteGraph>("note_graph"),
   /** Resolves a wikilink; a missing target is created in the inbox (FR-EDT-009). */
   openLink: (target: string) => call<{ path: string; created: boolean }>("open_link", { target }),
   onIndexChanged: (cb: () => void) => on<unknown>("index-changed", () => cb()),

@@ -580,6 +580,115 @@ pub fn backlinks(conn: &Connection, rel: &str) -> rusqlite::Result<Vec<Backlink>
     Ok(out)
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct GraphNode {
+    pub path: String,
+    pub title: String,
+}
+
+/// The whole vault as the graph view draws it: every note, and one edge per pair of notes that link
+/// each other (either way), as indexes into `nodes`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Default)]
+pub struct Graph {
+    pub nodes: Vec<GraphNode>,
+    pub edges: Vec<(usize, usize)>,
+}
+
+/// Resolves many links from one read of the names, the way `resolve_link` does one: path, then
+/// title, then alias; the shortest path wins a tie.
+struct Resolver {
+    /// Sorted by path; the indexes below point into it.
+    names: Vec<Name>,
+    by_path: std::collections::HashMap<String, usize>,
+    by_title: std::collections::HashMap<String, usize>,
+    by_alias: std::collections::HashMap<String, usize>,
+    index_of: std::collections::HashMap<String, usize>,
+}
+
+impl Resolver {
+    fn new(conn: &Connection) -> rusqlite::Result<Self> {
+        use std::collections::HashMap;
+        let mut names = names(conn)?;
+        names.sort_by(|a, b| a.0.cmp(&b.0));
+        let mut by_path: HashMap<String, usize> = HashMap::new();
+        let mut by_title: HashMap<String, usize> = HashMap::new();
+        let mut by_alias: HashMap<String, usize> = HashMap::new();
+        let put = |map: &mut HashMap<String, usize>, k: String, i: usize| {
+            let wins = map.get(&k).is_none_or(|&current| (names[i].0.len(), &names[i].0) < (names[current].0.len(), &names[current].0));
+            if wins {
+                map.insert(k, i);
+            }
+        };
+        for (i, (path, title, aliases, _)) in names.iter().enumerate() {
+            put(&mut by_path, normalize_name(path), i);
+            put(&mut by_title, key(title), i);
+            for alias in aliases {
+                put(&mut by_alias, key(alias), i);
+            }
+        }
+        let index_of = names.iter().enumerate().map(|(i, n)| (n.0.clone(), i)).collect();
+        Ok(Self { names, by_path, by_title, by_alias, index_of })
+    }
+
+    /// The note a stored (already normalised) link target goes to.
+    fn resolve(&self, target: &str) -> Option<usize> {
+        self.by_path.get(target).or_else(|| self.by_title.get(target)).or_else(|| self.by_alias.get(target)).copied()
+    }
+
+    /// The notes `i` links to and, with `incoming`, the notes linking to it; each once, without `i`.
+    fn linked(&self, conn: &Connection, i: usize, incoming: bool) -> rusqlite::Result<std::collections::BTreeSet<usize>> {
+        let (path, title, aliases, _) = &self.names[i];
+        let mut out = std::collections::BTreeSet::new();
+        let targets: Vec<String> = conn.prepare("SELECT DISTINCT target_path FROM link WHERE source_path = ?1")?.query_map([path], |r| r.get(0))?.collect::<Result<_, _>>()?;
+        out.extend(targets.iter().filter_map(|t| self.resolve(t)));
+        // a link to this note is written as its path, title or an alias
+        let mut written: std::collections::BTreeSet<String> = [normalize_name(path), key(title)].into();
+        written.extend(aliases.iter().map(|a| key(a)));
+        let mut stmt = conn.prepare("SELECT DISTINCT source_path FROM link WHERE target_path = ?1")?;
+        for name in written.iter().filter(|_| incoming) {
+            if self.resolve(name) != Some(i) {
+                continue; // another note owns this name
+            }
+            for source in stmt.query_map([name], |r| r.get::<_, String>(0))? {
+                out.extend(self.index_of.get(&source?).copied());
+            }
+        }
+        out.remove(&i);
+        Ok(out)
+    }
+}
+
+/// Every note with the links between them, each link resolved like `resolve_link`. Links to notes
+/// that do not exist yet and notes linking themselves are left out.
+pub fn graph(conn: &Connection) -> rusqlite::Result<Graph> {
+    let r = Resolver::new(conn)?;
+    let mut edges = std::collections::BTreeSet::new();
+    let mut stmt = conn.prepare("SELECT DISTINCT source_path, target_path FROM link")?;
+    for row in stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))? {
+        let (source, target) = row?;
+        let Some(&from) = r.index_of.get(&source) else { continue };
+        let Some(to) = r.resolve(&target) else { continue };
+        if from != to {
+            edges.insert((from.min(to), from.max(to)));
+        }
+    }
+    let nodes = r.names.into_iter().map(|(path, title, _, _)| GraphNode { path, title }).collect();
+    Ok(Graph { nodes, edges: edges.into_iter().collect() })
+}
+
+/// For each of `paths`, the notes it links to and, with `incoming`, the notes linking to it (sorted,
+/// without itself); a path the index does not know has none.
+pub fn linked_notes(conn: &Connection, paths: &[&str], incoming: bool) -> rusqlite::Result<Vec<Vec<String>>> {
+    let r = Resolver::new(conn)?;
+    paths
+        .iter()
+        .map(|p| match r.index_of.get(*p) {
+            Some(&i) => Ok(r.linked(conn, i, incoming)?.into_iter().map(|j| r.names[j].0.clone()).collect()),
+            None => Ok(Vec::new()),
+        })
+        .collect()
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct QuickHit {
     pub note_path: String,
@@ -817,6 +926,47 @@ mod tests {
         assert!(backlinks(&conn, "notes/PLA2.md").unwrap().is_empty(), "a note linking itself is not a backlink");
         remove_note(&conn, "daily/a.md").unwrap();
         assert!(backlinks(&conn, "notes/PLA.md").unwrap().is_empty());
+    }
+
+    #[test]
+    fn the_graph_joins_notes_that_link_each_other_once() {
+        let (_t, conn) = db();
+        put(&conn, "notes/PLA.md", "---\naliases: [Asistan]\n---\n[[Plan]] ve [[Plan]] bir daha; [[Yok Böyle Not]]; [[PLA]]");
+        put(&conn, "notes/Plan.md", "geri [[pla]]");
+        put(&conn, "projeler/eski/PLA.md", "başka PLA");
+        put(&conn, "daily/a.md", "[[Asistan]] ve [[projeler/eski/PLA]]");
+        put(&conn, "daily/b.md", "bağlantı yok");
+        let g = graph(&conn).unwrap();
+        let path = |i: usize| g.nodes[i].path.as_str();
+        let mut pairs: Vec<(&str, &str)> = g.edges.iter().map(|&(a, b)| (path(a), path(b))).collect();
+        pairs.sort();
+        assert_eq!(
+            g.nodes.iter().map(|n| n.path.as_str()).collect::<Vec<_>>(),
+            vec!["daily/a.md", "daily/b.md", "notes/PLA.md", "notes/Plan.md", "projeler/eski/PLA.md"]
+        );
+        assert_eq!(
+            pairs,
+            vec![("daily/a.md", "notes/PLA.md"), ("daily/a.md", "projeler/eski/PLA.md"), ("notes/PLA.md", "notes/Plan.md")],
+            "both directions are one edge; a missing note and a self link draw nothing"
+        );
+        assert!(graph(&db().1).unwrap().nodes.is_empty());
+    }
+
+    #[test]
+    fn linked_notes_go_both_ways_and_follow_names_like_links_do() {
+        let (_t, conn) = db();
+        put(&conn, "notes/PLA.md", "---\naliases: [Asistan]\n---\n[[Mimari]] ve [[Yok]]; kendine [[PLA]]");
+        put(&conn, "notes/Mimari.md", "SQLite");
+        put(&conn, "projeler/eski/PLA.md", "başka PLA");
+        put(&conn, "daily/a.md", "[[Asistan]] üzerinde çalıştım");
+        put(&conn, "daily/b.md", "[[projeler/eski/PLA]] arşivde");
+        let got = linked_notes(&conn, &["notes/PLA.md", "notes/Mimari.md", "projeler/eski/PLA.md", "yok.md"], true).unwrap();
+        assert_eq!(got[0], ["daily/a.md", "notes/Mimari.md"], "out by name, in by alias; never itself");
+        assert_eq!(got[1], ["notes/PLA.md"], "a backlink");
+        assert_eq!(got[2], ["daily/b.md"], "[[PLA]] belongs to the shorter path, not to this note");
+        assert!(got[3].is_empty());
+        let out = linked_notes(&conn, &["notes/PLA.md", "notes/Mimari.md"], false).unwrap();
+        assert_eq!(out, [vec!["notes/Mimari.md"], vec![]], "only the links the note itself makes");
     }
 
     #[test]

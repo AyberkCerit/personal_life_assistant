@@ -305,6 +305,11 @@ Amaç: Dil modelinin bağlam sınırını aşmadan ve RAM taşmasına (OOM) yol 
   | ~%20 | Araçların döndürdüğü hesaplanmış değerler (görevler, metrik istatistikleri) |
 
 - Embedding için çok dilli küçük bir model Rust süreci içinde çalışır (ör. *multilingual-e5-small* sınıfı, ONNX).
+- **Asistan hafızası (FR-MEM-015…018):** Asistan, vault içindeki `memory/` klasöründe rolleri dosya adından anlaşılan küçük Markdown listeleri tutar: kullanıcı hakkında, kurallar, güncel durum, kişiler ve arşiv. Arşiv dışındaki dosyalar sorgu aramasına girmez; istemde taşınır.
+  - **FR-MEM-015:** Hafıza dosyalarının "kullanıcı / kurallar / durum" bloğu en çok 600, sohbette adı geçen kişiler en çok 300 token tutar; ikisi de bulunan notların payından düşer. Blok, son 48 saatin ham notlarından sonra gelir.
+  - **FR-MEM-016:** Her kayıt bir türle işaretlenir: *söz* (kullanıcı söyledi), *çıkarım* (notlardan çıkarıldı, kaynak notuyla) ya da *elle* (kullanıcı kendisi yazdı). Çıkarım, kullanıcının sözü gibi sunulmaz; hafıza ile not çelişirse daha yeni olan söylenir ve çelişki belirtilir.
+  - **FR-MEM-017:** Hafıza konuşmanın ilk sorusunda okunur ve konuşma boyunca aynı kalır; sohbet sırasında yazılan kayıt o konuşmanın istemine girmez.
+  - **FR-MEM-018:** Kullanıcının bir kaydı geri alması o kaydın reddidir: aynı çıkarım yeniden önerilmez.
 
 ---
 

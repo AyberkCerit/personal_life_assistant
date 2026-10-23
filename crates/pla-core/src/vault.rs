@@ -32,6 +32,7 @@ pub struct Folders {
     pub reports: String,
     pub attachments: String,
     pub templates: String,
+    pub memory: String,
 }
 
 impl Default for Folders {
@@ -43,6 +44,7 @@ impl Default for Folders {
             reports: "reports".into(),
             attachments: "attachments".into(),
             templates: "templates".into(),
+            memory: "memory".into(),
         }
     }
 }
@@ -94,7 +96,7 @@ pub fn open_vault(root: &Path) -> Result<Vault, VaultError> {
     }
 
     let f = &config.folders;
-    for dir in [&f.inbox, &f.daily, &f.notes, &f.reports, &f.attachments, &f.templates] {
+    for dir in [&f.inbox, &f.daily, &f.notes, &f.reports, &f.attachments, &f.templates, &f.memory] {
         if !is_valid_folder(dir) {
             return Err(VaultError::InvalidFolder(dir.clone()));
         }
@@ -504,6 +506,7 @@ mod tests {
         }
         assert_eq!(v.config.vault_id.len(), 32);
         assert!(!root.join(".obsidian").exists(), "must never create .obsidian");
+        assert!(!root.join("memory").exists(), "the memory folder is created at its first write");
 
         let again = open_vault(&root).unwrap();
         assert_eq!(again.config.vault_id, v.config.vault_id);
@@ -521,6 +524,19 @@ mod tests {
         let written = std::fs::read_to_string(tmp.path().join(".pla/config")).unwrap();
         assert!(written.contains("Günlük"));
         assert!(written.contains(&v.config.vault_id));
+    }
+
+    #[test]
+    fn an_old_config_gets_the_memory_folder() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::create_dir(tmp.path().join(".pla")).unwrap();
+        std::fs::write(tmp.path().join(".pla/config"), "[folders]\ndaily = \"Günlük\"\ninbox = \"Gelen\"\n").unwrap();
+
+        let v = open_vault(tmp.path()).unwrap();
+        assert_eq!(v.config.folders.memory, "memory");
+        assert_eq!(v.config.folders.daily, "Günlük");
+        assert_eq!(v.config.folders.inbox, "Gelen");
+        assert!(!tmp.path().join("memory").exists(), "created at the first write, not at open");
     }
 
     #[test]
