@@ -226,6 +226,34 @@ fn model_failure(reason: String) -> String {
     UserError::new("model", "").because(reason).into()
 }
 
+/// How one day's summary went.
+enum DaySummary {
+    Saved,
+    /// The model answered nothing.
+    Empty,
+    /// The cache refused it; the day stays as it was.
+    Unsaved,
+}
+
+/// FR-MEM-006: one day's notes summarised into the cache, for the maintenance and the weekly
+/// report alike. A question, a model removal or closing stops the request itself (final review I3).
+fn summarize_day(
+    model: &mut dyn qa::ChatModel,
+    cache: &Connection,
+    sources: &pla_core::summary::DaySources,
+    interrupt: &AtomicBool,
+    saved_at: impl FnOnce() -> DateTime<FixedOffset>,
+) -> Result<DaySummary, LlmError> {
+    let text = pla_core::summary::summarize(model, sources, crate::notify::ui_language(), interrupt)?;
+    Ok(if text.is_empty() {
+        DaySummary::Empty
+    } else if pla_core::summary::save(cache, sources, &text, saved_at()).is_ok() {
+        DaySummary::Saved
+    } else {
+        DaySummary::Unsaved
+    })
+}
+
 /// Lets a closing session interrupt a long run: once stopped, the next model call fails like an
 /// outage, so the pipeline stops and keeps the rest queued (FR-EXT-022).
 struct Cancellable<'a> {
@@ -584,13 +612,9 @@ impl Worker {
                 let fresh = pla_core::summary::get(&cache, &folders, day).ok().flatten().is_some_and(|s| !s.stale);
                 if let Ok(sources) = pla_core::summary::sources(&cache, &folders, day) {
                     if !fresh && !sources.notes.is_empty() {
-                        match pla_core::summary::summarize(model, &sources, crate::notify::ui_language(), &self.interrupt) {
-                            Ok(text) if !text.is_empty() => {
-                                if pla_core::summary::save(&cache, &sources, &text, now).is_ok() {
-                                    summarised.push(day.format("%Y-%m-%d").to_string());
-                                }
-                            }
-                            Ok(_) => {}
+                        match summarize_day(model, &cache, &sources, &self.interrupt, || now) {
+                            Ok(DaySummary::Saved) => summarised.push(day.format("%Y-%m-%d").to_string()),
+                            Ok(DaySummary::Empty | DaySummary::Unsaved) => {}
                             Err(LlmError::Cancelled) => busy = true,
                             // the model is not answering: no more days (final review I2)
                             Err(e) => model_error = Some(e.to_string()),
@@ -704,16 +728,14 @@ impl Worker {
             }
             self.status.busy = true;
             (self.notify)(&self.status);
-            // a question, a model removal or closing stops the request itself (final review I3)
-            match pla_core::summary::summarize(model, &sources, crate::notify::ui_language(), &self.interrupt) {
-                Ok(text) if !text.is_empty() => {
-                    if pla_core::summary::save(&cache, &sources, &text, (self.clock)()).is_ok() {
-                        if let Some(listener) = &self.on_summary {
-                            listener(&day.format("%Y-%m-%d").to_string(), None);
-                        }
+            match summarize_day(model, &cache, &sources, &self.interrupt, &self.clock) {
+                Ok(DaySummary::Saved) => {
+                    if let Some(listener) = &self.on_summary {
+                        listener(&day.format("%Y-%m-%d").to_string(), None);
                     }
                 }
-                Ok(_) => tell(&self.on_summary, "model"),
+                Ok(DaySummary::Unsaved) => {}
+                Ok(DaySummary::Empty) => tell(&self.on_summary, "model"),
                 Err(LlmError::Cancelled) => {
                     tell(&self.on_summary, "busy");
                     break;
@@ -1227,6 +1249,46 @@ mod tests {
         assert_eq!(rx.recv_timeout(Duration::from_secs(10)).unwrap(), ReportOutcome::Written("reports/weekly/2026-W41.md".into()));
         let text = std::fs::read_to_string(tmp.path().join("reports/weekly/2026-W41.md")).unwrap();
         assert!(text.contains("Dil modeli bu hafta için özet yazamadı"), "{text}");
+        handle.shutdown();
+    }
+
+    #[test]
+    fn a_weekly_report_summarises_only_the_past_days_without_a_fresh_summary() {
+        // FR-SCH-008: a fresh summary is kept, today is not over, the open notes hear their days
+        let tmp = tempfile::tempdir().unwrap();
+        let vault = open_vault(tmp.path()).unwrap();
+        let data = tmp.path().join(".data");
+        let dbs = open_databases(&data).unwrap();
+        let mtime = Local::now().timestamp_millis();
+        for day in ["2026-10-05", "2026-10-06", "2026-10-08"] {
+            pla_core::index::index_note(&dbs.cache, &format!("daily/2026/{day}.md"), "# Gün\n\nBütçe toplantısı.", mtime, 10).unwrap();
+        }
+        let now = chrono::DateTime::parse_from_rfc3339("2026-10-08T12:00:00+03:00").unwrap();
+        let monday = pla_core::summary::sources(&dbs.cache, &vault.config.folders, NaiveDate::from_ymd_opt(2026, 10, 5).unwrap()).unwrap();
+        pla_core::summary::save(&dbs.cache, &monday, "- Eski özet", now).unwrap();
+        let (sum_tx, sum_rx) = std::sync::mpsc::channel();
+        let sum_tx = Mutex::new(sum_tx);
+        let (tx, rx) = std::sync::mpsc::channel();
+        let tx = Mutex::new(tx);
+        let handle = Worker::new(vault, dbs.pla, Some(Box::new(Chatty { extract_delay: Duration::ZERO })), Box::new(|_| {}))
+            .with_clock(Box::new(move || now))
+            .with_summary_listener(Box::new(move |d, why| {
+                let _ = sum_tx.lock().unwrap().send((d.to_owned(), why.map(str::to_owned)));
+            }))
+            .with_report_listener(Box::new(move |_, outcome| {
+                let _ = tx.lock().unwrap().send(outcome.clone());
+            }))
+            .spawn();
+        let week = pla_core::report::Week::parse("2026-W41").unwrap();
+        handle.send(Command::WeeklyReport { week, cache_path: data.join("cache.db"), lang: "tr".into() });
+        rx.recv_timeout(Duration::from_secs(10)).expect("an answer");
+        let heard: Vec<(String, Option<String>)> = sum_rx.try_iter().collect();
+        assert_eq!(heard, [("2026-10-06".to_owned(), None)]);
+        let reader = rusqlite::Connection::open(data.join("cache.db")).unwrap();
+        let kept: String = reader.query_row("SELECT summary_text FROM daily_summary WHERE date = '2026-10-05'", [], |r| r.get(0)).unwrap();
+        assert_eq!(kept, "- Eski özet");
+        let today: i64 = reader.query_row("SELECT count(*) FROM daily_summary WHERE date = '2026-10-08'", [], |r| r.get(0)).unwrap();
+        assert_eq!(today, 0, "today is not over");
         handle.shutdown();
     }
 
