@@ -108,6 +108,21 @@ fn answer_language(text: &str) -> Option<&'static str> {
     }
 }
 
+/// The words that speak to the user as "sen": the pronoun, the verb ending -sın/-sin/-sun/-sün,
+/// the conditional -rsan/-rsen, and "your" on a plural (-ların, -lerinde). Rough on purpose: the
+/// failures are read by hand, and a few common words with the same ending are let through.
+fn informal_words(text: &str) -> Vec<String> {
+    const PRONOUNS: [&str; 7] = ["sen", "sana", "seni", "senin", "sende", "senden", "seninle"];
+    const ENDINGS: [&str; 13] = ["sin", "sun", "sün", "rsan", "rsen", "larin", "lerin", "larinda", "lerinde", "larindan", "lerinden", "larina", "lerine"];
+    const NOT_SEN: [&str; 6] = ["kesin", "olsun", "insan", "hasan", "gelsin", "versin"];
+    // `key` folds ı to i: "mısın" is "misin", "notlarında" is "notlarinda"
+    pla_core::index::key(text)
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|w| PRONOUNS.contains(w) || (!NOT_SEN.contains(w) && ENDINGS.iter().any(|e| w.len() > e.len() && w.ends_with(e))))
+        .map(str::to_owned)
+        .collect()
+}
+
 /// Whether `got` satisfies `want`: numbers equal, text contains (case-insensitively), dates by token.
 fn arg_matches(key: &str, want: &Value, got: &Value) -> bool {
     match want {
@@ -167,7 +182,9 @@ fn assistant_case(model: &mut ModelHost, case: &Value, with_memory: bool) -> Res
     let env = ToolEnv { vault: &vault, pla: &dbs.pla, cache: &dbs.cache, now: now(), validation: ValidationSettings::default() };
     let lang = case["ui"].as_str().unwrap_or("tr");
     let q = case["q"].as_str().unwrap();
-    let answer = engine::answer(model, &env, &engine::Question { text: q, turns: &turns, memory: None, recall: Some(&recall), ui_lang: lang, persona: &Default::default() }, &AtomicBool::new(false), &mut |_| {})?;
+    // name, address and formality as the settings store them; none = the default
+    let persona: pla_core::settings::Persona = case.get("persona").map(|p| serde_json::from_value(p.clone())).transpose()?.unwrap_or_default();
+    let answer = engine::answer(model, &env, &engine::Question { text: q, turns: &turns, memory: None, recall: Some(&recall), ui_lang: lang, persona: &persona }, &AtomicBool::new(false), &mut |_| {})?;
 
     let want = &case["expect"];
     let mut fails = Vec::new();
@@ -216,6 +233,12 @@ fn assistant_case(model: &mut ModelHost, case: &Value, with_memory: bool) -> Res
         let got = answer.tools.iter().any(|t| t.tool == "suggest_note");
         if got != s {
             fails.push(format!("suggested a note: {got}, wanted {s}"));
+        }
+    }
+    if want["formal"].as_bool() == Some(true) {
+        let informal = informal_words(&answer.text);
+        if !informal.is_empty() {
+            fails.push(format!("speaks as sen: {informal:?}"));
         }
     }
     if want["no_question"].as_bool() == Some(true) && answer.text.contains('?') {
