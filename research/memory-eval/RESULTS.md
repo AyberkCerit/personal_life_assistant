@@ -120,7 +120,7 @@ sistem istemine her zaman eklediği "In Turkish, speak to the user as sen" cüml
 ayarda bile eklendiği için küçük model bunu Türkçe cevap işareti olarak okuyor. Hafızayla ilgisi yok,
 main'de de aynı kod var.
 
-- [ ] `qa_probe -- <ref>` hafızalı ve hafızasız: ilk cevap süresi ve `cache_n`
+- [x] `qa_probe -- <ref>` hafızalı ve hafızasız: ilk cevap süresi ve `cache_n` (aşağıda)
 
 ## Sohbetten hafızaya yazma (Aşama 2, Task 8)
 
@@ -175,3 +175,96 @@ Notlar:
 - İngilizce mesajlara model örneklere rağmen Türkçe metin yazıyor; guard o zaman kullanıcının sözünü olduğu gibi yazar ("I work night shifts at the hospital.").
 - Reddedilene Jaccard ≥ 0,5 olan öneri, kullanıcı aynı şeyi açıkça yeniden söylese de atılıyor (Task 7 testi). Spec "kullanıcı yeniden söylerse yazılır" diyor; bu vakalarda o durum yok, karar açık.
 - Asistanın sohbet ve çıkarım istemleri değişmedi; eski 138 nl-eval vakası bu kodu kullanmaz, yeniden koşulmadı.
+
+## Kalan hafıza hataları (`memory-p6-all`, 2026-10-24)
+
+### Nedenler
+
+- **Çıkarım çekincesiz** (`memory-bitirme-govde`, `memory-h-kabuk`): hafıza bloğunda satır
+  `- According to your notes ([[Not]], tarih): Bitirme projesinde Skywalker X8 öne çıkıyor.` biçimindeydi.
+  Model Türkçe yazarken İngilizce etiketi atıp iki noktadan sonraki cümleyi kelimesi kelimesine
+  kopyalıyordu; kural 8 bunu yasaklasa da uymadı.
+- **"Notlarda bulamadım"** (`memory-h-cenk-oyun`, `memory-h-telefon`): ikisinde de karar adımı
+  `search_notes` çağırmıştı (örnek bankasındaki "Ali'nin telefon numarası neydi → search_notes" gibi
+  örnekler). Yazma isteminde modelin en son okuduğu şey `Tool result: {"notes":[]}` oluyor, kişi/hafıza
+  bölümünde cevap dururken "bulamadım" diyordu. Geliştirme benzeri `Ali'nin en sevdiği yemek hangisi?`
+  (hafızada "mantı") aynı istemle iki koşuda da aynı hatayı verdi; istem dökümünde hafıza satırı ve
+  "Answer from the memory above" cümlesi yerindeydi.
+
+### Değişiklikler
+
+1. `recall/load.rs`: çıkarım satırı çekinceyi iki noktadan sonra, satırın kendi dilinde tekrarlar:
+   `… (…): Notlarına göre, Bitirme projesinde …`. Kural 8'in metni değişmedi (satır hâlâ
+   "According to your notes" ile başlıyor).
+2. `qa/engine.rs` `with_hedge`: cevap bir çıkarım satırını kullanıyorsa (notunu anıyor ya da uzun
+   kelimelerinin yarısını taşıyor) ve hiç çekince ("göre", "notlarında", "görünüyor", "according to"…)
+   yoksa başına "Notlarına göre, " / "According to your notes, " eklenir. Panel `Done`'da kayıtlı
+   metni gösterdiği için önek kullanıcıya ulaşır (akış sırasında görünmez).
+3. `qa/engine.rs` `messages`: istemde hafıza ya da kişi bölümü varken `search_notes` sonucunun yanına
+   "If these notes do not answer the question, the memory sections above may: answer from them. Memory
+   is not a note: give it no [[link]]." eklenir. Son cümle, ilk denemede görülen "[[Note title]]"
+   yer tutucusu kopyalamasını kaldırdı.
+
+Hafıza yokken istem ve cevap değişmez (birim testleri: `a_search_result_points_back_to_the_memory`,
+`an_inferred_memory_line_is_never_said_as_a_fact`, `without_memory_the_rules_are_the_original_ones`).
+
+**Denenip geri alınan:** yazma talimatının sonuna hafıza hatırlatması ("If the memory section answers my
+message…; begin your answer with "Notlarına göre"") çekinceyi hiç sağlamadı, `memory-alerji`'yi de
+düşürdü.
+
+### Yöntem: saklı vakalar
+
+Ayar yalnız 8 geliştirme vakası ve commit edilmeyen 6 geçici benzerle yapıldı (çıkarım: "tez konum ne
+olacak gibi duruyor?"; arama yolu: Ece/film, Ali/yemek; ayrıca bilgisayar, kulaklık; bir saat sorusu
+belirsiz olduğu için sayılmadı). Her değişiklik ilgili vakalarda iki koşuyla denendi. Saklı `memory-h-*`
+vakaları yalnız sondaki tam koşuda ölçüldü; onlardan bilinen tek şey p5'teki cevap metinleriydi (görev
+tanımında verilen hata türü).
+
+### Sonuç
+
+Gemma 4 E2B Q3_K_M, 152 vaka, hafızalı, kod `0e25ee0` (çift çekince düzeltmesinden önce), 59 dk:
+
+| | p5 (`7bb5f98`) | p6 |
+| --- | --- | --- |
+| Hafıza vakaları (13) | 9/13 | **12/13** |
+| Eski vakalar (138) | 121/138 | 130/138 |
+| Toplam | 131/152 | **143/152** |
+
+- Dört hedef hatanın dördü geçti: `memory-bitirme-govde`, `memory-h-kabuk` ("Notlarına göre, …"),
+  `memory-h-cenk-oyun` ("Hades"), `memory-h-telefon` ("Pixel 8").
+- p6'da `memory-bitirme-govde` "Notlarına göre, Notlara göre, …" yazdı: model kendi çekincesini
+  "Notlara göre" diye kurmuş, koruma bu biçimi tanımıyordu. Her "göre" / "according to" artık çekince
+  sayılıyor; vaka bu düzeltmeyle iki koşuda da tek önekle geçti. Tam koşu bu düzeltmeden önce yapıldı.
+- `memory-alerji` kaldı ("özel bir not bulunmuyor"). İstemi değişmedi (çıkarım satırı ve arama yok);
+  `5abf257` koduyla da 1/2, bu kodla 0/3. Hafızayı okuma değil, "fıstık alerjisi → yemek" çıkarımı
+  sorunu; kararsız.
+- Eski vakalardaki artış (+9) çoğunlukla main'e giren dil düzeltmesinden (İngilizce vakalar,
+  `lang-thanks`); hafızasız istemde değişiklik yok. İki eski vaka kaldı: `note-bunu-not-al`
+  (İngilizce "Not alındı" algısı) ve `heldout-elektrikci` (`complete_task` yok). İkisi de `5abf257`
+  koduyla iki koşuda aynı biçimde kalıyor: bu değişikliğin gerilemesi değil.
+- Hafızasız tam koşu tekrarlanmadı: hafıza yokken istem bayt bayt aynı (birim testleri).
+- Koşu `5abf257` üstünde yapıldı. Dal sonra `b05cc55`'e taşındı (persona düzeltmesi `3236c6d`
+  `voice`/`write_instruction`'ı değiştirdi); bu taban üstünde tam koşu tekrarlanmadı.
+
+## Süre ve önbellek (`qa_probe`, 2026-10-24)
+
+Referans veri seti `make_reference -- %TEMP%\pla-reference 10000 0` (10 000 not, eksiz), `perf` ile
+indekslendi. `qa_probe --memory`, `tests/retrieval/vault.json`'daki hafıza fixture'ını (14 satır)
+geçici bir kasadan yükler; referans kasaya yazmaz. Makinede aynı anda başka oturumların koşuları
+olabilirdi, mutlak süreler kaba.
+
+| | Hafızasız | Hafızalı |
+| --- | --- | --- |
+| Önceden okuma: istem / süre | 705 tok / 6,6 s | 1346 tok / 21,0 s |
+| Soru 1 karar: yeni / önbellek (`cache_n`) / süre | 742 / 700 / 14,4 s | 742 / 1341 / 15,3 s |
+| Soru 1 toplam (araçlı, `query_tasks`) | 51,6 s | 39,1 s* |
+| Soru 2 karar: yeni / `cache_n` / süre | 701 / 700 / 12,7 s | 701 / 1341 / 13,9 s |
+| Soru 2 toplam (araçsız) | 14,9 s | 15,3 s |
+
+\* Fark cevabın uzunluğundan (338 / 113 token üretildi), hafızadan değil.
+
+- Hafıza bloğu (~640 token) önceden okumada bir kez okunuyor ve her soruda tamamen önbellekten geliyor:
+  sorunun yeni token sayısı hafızalı ve hafızasız aynı. Soru başına maliyet ~1 s (daha uzun bağlam).
+- `nl_eval`'deki 1,6 katlık süre farkı düzenekten: her vaka yeni bir hafıza ile soğuk başlıyor, önceden
+  okuma yok.
+- Önceden okuma (panel açılınca) hafızayla 6,6 → 21 s uzadı.
