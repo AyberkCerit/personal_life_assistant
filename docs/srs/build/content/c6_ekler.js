@@ -34,7 +34,13 @@ const EARS_NAMES = { U: "Her zaman geçerli", E: "Olay güdümlü", S: "Durum g�
 const earsRows = Object.keys(EARS_NAMES).map((k) => [EARS_NAMES[k], String(earsCount[k] || 0)]);
 
 // ---------------------------------------------------------------- inisiyatif kararlarını md'den oku
-const md = fs.readFileSync(path.join(__dirname, "..", "..", "INISIYATIF_KARARLARI.md"), "utf8");
+// The decisions file is private and kept out of git (.gitignore): building needs a local copy.
+const decisionsFile = path.join(__dirname, "..", "..", "INISIYATIF_KARARLARI.md");
+if (!fs.existsSync(decisionsFile)) {
+  console.error(`SRS: ${decisionsFile} is missing. It is kept locally, not in git; copy it there to build Ek E.`);
+  process.exit(1);
+}
+const md = fs.readFileSync(decisionsFile, "utf8");
 const decisionBlocks = [];
 let group = null;
 for (const line of md.split(/\r?\n/)) {

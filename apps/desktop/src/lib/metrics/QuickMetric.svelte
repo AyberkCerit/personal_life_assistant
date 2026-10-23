@@ -27,7 +27,7 @@
   // svelte-ignore state_referenced_locally
   const start = record;
   let kind = $state<MetricKind>(start?.kind ?? lastKind);
-  let amount = $state(start?.value != null ? String(Math.round(start.value * 100) / 100).replace(".", lang === "tr" ? "," : ".") : "");
+  let amount = $state(start?.value != null ? new Intl.NumberFormat(lang, { maximumFractionDigits: 2, useGrouping: false }).format(start.value) : "");
   let unit = $state<MetricUnit>(start ? (UNITS[start.kind][0] === "glass" ? "ml" : UNITS[start.kind][0]) : UNITS[lastKind][0]);
   let date = $state(start?.date ?? todayIso());
   let exercise = $state(start?.exercise ?? "");

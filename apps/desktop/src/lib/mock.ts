@@ -7,6 +7,11 @@ const files = new Map<string, string>([
 import type { Task } from "./tasks";
 import type { Routine } from "./routines";
 import { todayIso } from "./tasks";
+import { noteName } from "./links";
+
+/** The vault's own folders and no restore offer, as the Rust commands answer them. */
+const FOLDERS = { daily: "daily", inbox: "inbox", notes: "notes", reports: "reports", attachments: "attachments", templates: "templates" };
+const vaultInfo = (path: string | null) => ({ path, inbox: "inbox", folders: FOLDERS, restore_offer: null });
 
 export const mockListeners = new Map<string, Array<(payload: unknown) => void>>();
 
@@ -185,7 +190,7 @@ function mockMetrics(cmd: string, args: Record<string, unknown>): unknown {
 
 // Links and search stand-in: plain substring search over the mock files, same shapes as Rust.
 function mockLinks(cmd: string, args: Record<string, unknown>): unknown {
-  const title = (p: string) => p.split("/").pop()!.replace(/\.md$/i, "");
+  const title = noteName;
   const fold = (s: string) => s.toLocaleLowerCase("tr");
   switch (cmd) {
     case "search_notes": {
@@ -346,7 +351,7 @@ export async function mockBackend<T>(cmd: string, args: Record<string, unknown>)
   const path = String(args.path ?? "");
   switch (cmd) {
     case "startup":
-      return { vault_path: vault, first_run: vault === null, show_wizard: !setupDone, language: mockLang, settings_recovered: false, theme: "dark", error: null, inbox: vault ? "inbox" : null, vault_in_app_data: false } as T;
+      return { vault_path: vault, first_run: vault === null, show_wizard: !setupDone, language: mockLang, settings_recovered: false, theme: "dark", error: null, inbox: vault ? "inbox" : null, folders: vault ? FOLDERS : null, vault_in_app_data: false, restore_offer: null } as T;
     case "wizard_defaults":
       return { suggested_vault: String.raw`C:\Users\ayse\OneDrive\Belgeler\PLA Vault` } as T;
     case "inspect_vault_folder": {
@@ -358,7 +363,7 @@ export async function mockBackend<T>(cmd: string, args: Record<string, unknown>)
     case "setup_vault":
       if (String(args.path).includes("Program Files")) throw `not_writable|${args.path}|Erişim engellendi. (os error 5)`;
       vault = String(args.path).trim();
-      return { path: vault, inbox: "inbox" } as T;
+      return vaultInfo(vault) as T;
     case "set_language":
       mockLang = args.lang as "tr" | "en";
       return undefined as T;
@@ -450,7 +455,7 @@ export async function mockBackend<T>(cmd: string, args: Record<string, unknown>)
       return undefined as T;
     case "open_vault":
       vault = path;
-      return { path: vault, inbox: "inbox" } as T;
+      return vaultInfo(vault) as T;
     case "list_tree":
       return tree() as T;
     case "read_note": {
@@ -475,7 +480,7 @@ export async function mockBackend<T>(cmd: string, args: Record<string, unknown>)
     case "queue_note":
       return undefined as T;
     case "vault_info":
-      return { path: vault, inbox: "inbox" } as T;
+      return vaultInfo(vault) as T;
     case "worker_status":
       return { queued: 0, model: "not_installed", busy: false, last_error: null, added: 0, paused: false } as T;
     case "list_tasks":
@@ -485,7 +490,18 @@ export async function mockBackend<T>(cmd: string, args: Record<string, unknown>)
     case "edit_task": {
       const input = args.input as MockInput;
       tasks = tasks.map((t) =>
-        t.task_id === args.id ? { ...t, title: input.title, date: input.date || null, time: input.time || null, details: input.details || null, user_modified: true } : t,
+        t.task_id !== args.id
+          ? t
+          : {
+              ...t,
+              title: input.title,
+              date: input.date || null,
+              time: input.time || null,
+              details: input.details || null,
+              // the Rust rule: `remind` switches the reminder on or off, a missing one keeps it
+              notify_at: (input.remind ?? t.notify_at !== null) && input.date ? `${input.date}T${input.time || "09:00"}` : null,
+              user_modified: true,
+            },
       );
       return undefined as T;
     }

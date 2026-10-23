@@ -1,5 +1,5 @@
 import type { Failure, Progress } from "./api";
-import { fill, t, type Key } from "./i18n";
+import { fill, langOf, t, tIn, type Key } from "./i18n";
 
 const GB = 1024 ** 3;
 const MB = 1024 ** 2;
@@ -12,15 +12,13 @@ export function formatBytes(n: number, lang: string): string {
 
 export function formatEta(secs: number | null, lang: string): string {
   if (secs === null) return "";
-  const tr = lang.startsWith("tr");
-  if (secs < 60) return tr ? "<1 dk kaldı" : "<1 min left";
-  const min = Math.ceil(secs / 60);
-  return tr ? `~${min} dk kaldı` : `~${min} min left`;
+  if (secs < 60) return tIn(langOf(lang), "fmt.eta.soon");
+  return fill(tIn(langOf(lang), "fmt.eta.minutes"), { n: Math.ceil(secs / 60) });
 }
 
 export function progressLine(p: Progress, lang: string): string {
   const speed = new Intl.NumberFormat(lang, { maximumFractionDigits: 1, minimumFractionDigits: 1 }).format(p.bytes_per_sec / MB);
-  const unit = lang.startsWith("tr") ? "MB/sn" : "MB/s";
+  const unit = tIn(langOf(lang), "fmt.speed");
   return `${formatBytes(p.received, lang)} / ${formatBytes(p.total, lang)} · ${speed} ${unit} · ${formatEta(p.eta_secs, lang)}`;
 }
 

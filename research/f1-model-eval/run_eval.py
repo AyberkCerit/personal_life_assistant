@@ -307,6 +307,7 @@ class Server:
                 pass
             time.sleep(0.1)
         else:
+            self.close()  # the process must not outlive a failed start
             raise RuntimeError("server did not become healthy")
         self.load_s = time.perf_counter() - self.t0
 
@@ -382,7 +383,8 @@ def run(key):
         n_gold = len(gold_items)
         n_pred = sum(r["score"]["pred_n"] for r in rs)
         n_corr = sum(it["correct"] for it in gold_items)
-        lat = [r["latency"] for r in rs[1:]] if lang == "all" else [r["latency"] for r in rs]
+        # the first request warms the model up: left out of every group, not only "all"
+        lat = [r["latency"] for r in rs if r["id"] != rows[0]["id"]] or [r["latency"] for r in rs]
         empty = [r for r in rs if r["score"]["gold_n"] == 0]
         kws = [it["kw"] for it in gold_items if it["kw"] is not None]
         summ[lang] = {
