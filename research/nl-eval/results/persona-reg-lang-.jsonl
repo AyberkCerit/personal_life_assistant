@@ -1,0 +1,12 @@
+{"id":"lang-selam","pass":true,"fails":[],"got":{"answer":"selam","tools":[]}}
+{"id":"lang-merhaba","pass":true,"fails":[],"got":{"answer":"Merhaba.","tools":[]}}
+{"id":"lang-naber","pass":true,"fails":[],"got":{"answer":"İyiyim, teşekkür ederim. Sen nasılsın?","tools":[]}}
+{"id":"lang-gunaydin","pass":true,"fails":[],"got":{"answer":"Günaydın.","tools":[]}}
+{"id":"lang-tesekkur","pass":true,"fails":[],"got":{"answer":"Teşekkür ederim.","tools":[]}}
+{"id":"lang-sa","pass":true,"fails":[],"got":{"answer":"sa","tools":[]}}
+{"id":"lang-tamam","pass":true,"fails":[],"got":{"answer":"Yarın için kayıtlı bir görevin yok.","tools":[]}}
+{"id":"lang-hi","pass":true,"fails":[],"got":{"answer":"Hi.","tools":[]}}
+{"id":"lang-hello","pass":true,"fails":[],"got":{"answer":"I am functioning as expected.","tools":[]}}
+{"id":"lang-thanks","pass":true,"fails":[],"got":{"answer":"I am sorry, but you have not provided a last message for me to respond to. Please provide the message you are referring to.","tools":[]}}
+{"id":"lang-iyi-geceler","pass":true,"fails":[],"got":{"answer":"İyi geceler.","tools":[]}}
+{"id":"lang-en-ui-tr-short","pass":true,"fails":[],"got":{"answer":"You have no tasks for tomorrow.","tools":[]}}
