@@ -1,7 +1,7 @@
 <script lang="ts">
   import { api } from "./api";
   import { failure, lang, t, tf, type Failure } from "./i18n";
-  import { offerText, type RestoreOffer } from "./settings";
+  import { longDay, offerText, type RestoreOffer } from "./settings";
   import Button from "./ui/Button.svelte";
   import ErrorBanner from "./ui/ErrorBanner.svelte";
 
@@ -10,11 +10,7 @@
   let { offer, onDone, onBeforeRestore }: { offer: RestoreOffer; onDone: () => void; onBeforeRestore: () => Promise<void> } = $props();
 
   const said = $derived(offerText(offer));
-  const day = $derived.by(() => {
-    if (!said.day) return "";
-    const [y, m, d] = said.day.split("-").map(Number);
-    return new Intl.DateTimeFormat(lang, { day: "numeric", month: "long", year: "numeric" }).format(new Date(y, m - 1, d));
-  });
+  const day = $derived(said.day ? longDay(said.day, lang) : "");
   let busy = $state(false);
   let error = $state<Failure | null>(null);
 

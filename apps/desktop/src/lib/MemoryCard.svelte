@@ -6,7 +6,7 @@
   import Play from "@lucide/svelte/icons/play";
   import { api, type DownloadState, type MemoryStatus } from "./api";
   import { lang, t, tf, type Key } from "./i18n";
-  import { failureKey, formatBytes, progressLine } from "./modelText";
+  import { downloadFailureText, formatBytes, progressLine } from "./modelText";
   import { describeError } from "./settings";
   import Button from "./ui/Button.svelte";
 
@@ -22,14 +22,7 @@
     progress = { pending: status.pending, total: status.total };
   });
 
-  const failure = $derived(
-    download?.state === "failed"
-      ? t(failureKey(download.failure.kind) as Key)
-          .replace("{needed}", formatBytes(download.failure.needed ?? 0, lang))
-          .replace("{available}", formatBytes(download.failure.available ?? 0, lang))
-          .replace("{status}", String(download.failure.status ?? ""))
-      : "",
-  );
+  const failure = $derived(download?.state === "failed" ? downloadFailureText(download.failure, lang) : "");
 
   async function start() {
     error = null;

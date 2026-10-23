@@ -1,6 +1,7 @@
 // Metrics view helpers: formatting and chart layout only. Every statistic comes from the Rust core
 // (FR-MET-010); nothing here averages or merges records.
-import type { Key } from "./i18n";
+import { splitError, type Key } from "./i18n";
+import { addDays } from "./tasks";
 
 export const KINDS = ["sleep", "weight", "steps", "water", "workout"] as const;
 export type MetricKind = (typeof KINDS)[number];
@@ -58,12 +59,6 @@ export function parseAmount(text: string, kind: MetricKind): number | null {
 
 export interface ChartDay { date: string; value: number | null; conflict: boolean }
 
-function addDays(iso: string, n: number): string {
-  const [y, m, d] = iso.split("-").map(Number);
-  const date = new Date(Date.UTC(y, m - 1, d + n));
-  return date.toISOString().slice(0, 10);
-}
-
 /** The core returns only days with a value; the chart needs every day of the period. */
 export function fillDays(days: DayValue[], from: string, count: number): ChartDay[] {
   const byDate = new Map(days.map((d) => [d.date, d]));
@@ -107,7 +102,7 @@ const CODES = ["out_of_range", "missing_value", "empty_workout", "invalid_date",
 
 /** Reads the metrics commands' errors, e.g. `out_of_range|reps|600` (ask the user to confirm). */
 export function metricError(err: string): { key: Key; field: string | null; value: number | null; detail?: string } {
-  const [code, field, value] = err.split("|");
+  const { code, detail: field, reason: value } = splitError(err);
   if (!CODES.includes(code)) return { key: "metrics.error.other", field: null, value: null, detail: err };
   return { key: `metrics.error.${code}` as Key, field: field || null, value: value ? Number(value) : null };
 }

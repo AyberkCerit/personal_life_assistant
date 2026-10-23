@@ -7,6 +7,7 @@
   import { api, type DayInfo } from "./api";
   import { lang, t, tf, type Key } from "./i18n";
   import { answerParts } from "./qa";
+  import { noteName } from "./links";
   import Button from "./ui/Button.svelte";
 
   // FR-MEM-006, owner decision B: a daily note shows its day's summary above it; nothing is
@@ -32,7 +33,7 @@
     }
   }
 
-  const name = (p: string) => p.split("/").pop()!.replace(/\.md$/i, "");
+  const name = noteName;
   const when = (iso: string) => new Intl.DateTimeFormat(lang, { dateStyle: "medium", timeStyle: "short" }).format(new Date(iso));
 
   onMount(() => {

@@ -1,7 +1,7 @@
 // "Added by AI" toasts (FR-EXT-015): each stays a fixed time, at most a few are shown at once, and
 // the timers stop while the user hovers or focuses them so Undo stays reachable (WCAG 2.2.1).
 
-import type { Clock } from "./triggers";
+import { browserClock, type Clock } from "./triggers";
 
 export interface Toast<T> {
   key: number;
@@ -13,11 +13,6 @@ interface Entry<T> extends Toast<T> {
   startedAt: number;
   timer: number | null;
 }
-
-const browserClock: Clock = {
-  set: (fn, ms) => window.setTimeout(fn, ms),
-  clear: (id) => window.clearTimeout(id),
-};
 
 export class ToastQueue<T> {
   private entries: Entry<T>[] = [];

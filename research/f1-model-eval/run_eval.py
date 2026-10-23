@@ -196,8 +196,12 @@ def validate(item):
     t = item.get("type")
     w = item.get("when") or {}
     if "time" in w:
-        hh, mm = map(int, w["time"].split(":"))
-        if hh > 23 or mm > 59:
+        # like Rust's NaiveTime "%H:%M": a time that is not HH:MM goes to Review, it does not crash
+        try:
+            hh, mm = map(int, w["time"].split(":"))
+        except (AttributeError, ValueError):
+            return False
+        if not (0 <= hh <= 23 and 0 <= mm <= 59):
             return False
     if sum(k in w for k in ("day_offset", "date", "weekday")) > 1:
         return False

@@ -1,4 +1,5 @@
-import type { Progress } from "./api";
+import type { Failure, Progress } from "./api";
+import { fill, t, type Key } from "./i18n";
 
 const GB = 1024 ** 3;
 const MB = 1024 ** 2;
@@ -24,6 +25,15 @@ export function progressLine(p: Progress, lang: string): string {
 }
 
 const KINDS = ["network", "host", "https", "space", "checksum", "io", "http"];
+
+/** A failed download in the user's words: what failed, with the sizes or HTTP status it names. */
+export function downloadFailureText(failure: Failure, lang: string): string {
+  return fill(t(failureKey(failure.kind) as Key), {
+    needed: formatBytes(failure.needed ?? 0, lang),
+    available: formatBytes(failure.available ?? 0, lang),
+    status: String(failure.status ?? ""),
+  });
+}
 
 /** i18n key for a download failure kind (IR-UI-006 texts live in i18n.ts). */
 export function failureKey(kind: string): `model.error.${string}` {

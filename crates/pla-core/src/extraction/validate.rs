@@ -166,6 +166,29 @@ mod tests {
     use super::*;
     use crate::extraction::parse_extraction;
 
+    #[test]
+    fn review_reasons_keep_the_wording_the_task_panel_translates() {
+        // apps/desktop/src/lib/tasks.ts `reviewReason` reads these texts (stored in review_item.reason)
+        let said = |r: InvalidReason| r.to_string();
+        assert_eq!(said(InvalidReason::InvalidTime("25:00".into())), "invalid time: 25:00");
+        assert_eq!(said(InvalidReason::ConflictingDate), "more than one of day_offset, date and weekday");
+        assert_eq!(said(InvalidReason::Date(DateError::InvalidDate("x".into()))), "invalid calendar date: x");
+        assert_eq!(said(InvalidReason::Date(DateError::OffsetOutOfRange(9))), "day offset out of range: 9");
+        assert!(said(InvalidReason::RepeatWithDate).starts_with("repeat "));
+        assert!(said(InvalidReason::RepeatOnMetric).starts_with("repeat "));
+        assert!(said(InvalidReason::EmptyRepeat).starts_with("repeat "));
+        assert_eq!(said(InvalidReason::MissingTitle), "task or reminder without a title");
+        assert_eq!(said(InvalidReason::UnexpectedMetric), "task or reminder carrying a metric");
+        assert_eq!(said(InvalidReason::MissingMetricKind), "metric without a kind");
+        assert_eq!(said(InvalidReason::MissingValue), "metric without a value");
+        assert_eq!(said(InvalidReason::EmptyWorkout), "workout without sets, reps or weight");
+        assert!(said(InvalidReason::OutOfRange { kind: MetricKind::Sleep, value: 30.0 }).ends_with("is outside its plausible range"));
+        for e in [crate::llm::LlmError::Status(400), crate::llm::LlmError::Timeout] {
+            assert!(e.to_string().starts_with("llama-server "), "{e}");
+        }
+        assert_eq!(crate::llm::LlmError::BadResponse.to_string(), "unexpected response from llama-server");
+    }
+
     fn d(s: &str) -> NaiveDate {
         NaiveDate::parse_from_str(s, "%Y-%m-%d").unwrap()
     }

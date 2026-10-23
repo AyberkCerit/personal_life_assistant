@@ -38,7 +38,7 @@
   import type { MetricRecord } from "./lib/api";
   import { describeError, type Section } from "./lib/settings";
   import type { Progress } from "./lib/wizard";
-  import { failure, sayAgain, t, tf, lang, setLang, type Failure, type Lang } from "./lib/i18n";
+  import { failure, sayAgain, splitError, t, tf, lang, setLang, type Failure, type Lang } from "./lib/i18n";
   import ErrorBanner from "./lib/ui/ErrorBanner.svelte";
   import RestoreDialog from "./lib/RestoreDialog.svelte";
   import type { RestoreOffer } from "./lib/settings";
@@ -167,15 +167,14 @@
       if (opened.created) await refresh();
       await openNote(opened.path);
     } catch (e) {
-      const [code, what] = String(e).split("|");
-      error = code === "not_a_note" ? tf("links.notANote", { target: what ?? target }) : failure(e);
+      const { code, detail } = splitError(String(e));
+      error = code === "not_a_note" ? tf("links.notANote", { target: detail || target }) : failure(e);
     }
   }
 
   /** FR-EDT-010: titles (or the alias that matched) for `[[` completion. */
   async function suggestLinks(query: string) {
     const hits = (await api.quickOpen(query).catch(() => [])).slice(0, 8);
-    const fold = (s: string) => s.toLocaleLowerCase("tr");
     // A title two notes share is written with its path, so the link reaches the chosen one (M3).
     const shared = (h: (typeof hits)[number]) => hits.filter((o) => fold(o.title) === fold(h.title)).length > 1;
     return hits.map((h) => ({

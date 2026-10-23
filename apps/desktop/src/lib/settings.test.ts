@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { SECTIONS, WEEKDAYS, backupDay, backupLine, describeError, offerText, reportLine, settingsError, trapIndex } from "./settings";
+import { SECTIONS, WEEKDAYS, attempt, backupDay, backupLine, describeError, longDay, offerText, reportLine, settingsError, trapIndex } from "./settings";
 import { errorText } from "./i18n";
 
 describe("settings screen", () => {
@@ -56,6 +56,14 @@ describe("settings screen", () => {
       at: "2026-10-06T23:00:00+03:00",
       error: errorText("disk_full||").text, // M6 translations: said, not the stored English reason
     });
+  });
+});
+
+describe("shared settings helpers", () => {
+  it("say an action's error or nothing, and write a backup's day out", async () => {
+    expect(await attempt(async () => {})).toBeNull();
+    expect(await attempt(async () => Promise.reject("missing||"))).toEqual(describeError("missing||"));
+    expect(longDay("2026-10-19", "en")).toBe("October 19, 2026");
   });
 });
 
