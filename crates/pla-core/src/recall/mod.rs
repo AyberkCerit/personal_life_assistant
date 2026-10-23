@@ -1,6 +1,7 @@
 //! The assistant's memory files (`memory/*.md`): small Markdown lists the assistant reads and writes.
 
 pub mod apply;
+pub mod extract;
 pub mod format;
 pub mod load;
 
