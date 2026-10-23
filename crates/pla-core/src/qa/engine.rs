@@ -914,7 +914,7 @@ mod tests {
         tools::run(&tool_env, "log_metric", &json!({ "kind": "weight", "date": "2026-10-05", "value": 130, "unit": "kg" })).unwrap();
         let mut model = scripted(&["{\"tool\":\"answer\"}"], "Kilon 130 kg.");
         let ask = |model: &mut Scripted, text: &str| {
-            answer(model, &tool_env, &Question { text, turns: &[], memory: None, ui_lang: "tr", persona: &Persona::default() }, &AtomicBool::new(false), &mut |_| {}).unwrap()
+            answer(model, &tool_env, &Question { text, turns: &[], memory: None, recall: None, ui_lang: "tr", persona: &Persona::default() }, &AtomicBool::new(false), &mut |_| {}).unwrap()
         };
         let a = ask(&mut model, "sağlık durumum nasıl");
         assert_eq!(a.tools.len(), 1);
