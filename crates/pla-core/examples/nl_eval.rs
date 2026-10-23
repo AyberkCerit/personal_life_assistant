@@ -3,7 +3,7 @@
 //! real model on the cases in `tests/nl/`. Not part of `cargo test`: it needs the model.
 //!   $env:PLA_LLAMA_SERVER = "C:\dev\PLA\apps\desktop\src-tauri\llama\llama-server.exe"
 //!   $env:PLA_MODEL = "C:\dev\PLA\research\f1-model-eval\models\gemma-4-E2B-it-Q3_K_M.gguf"
-//!   cargo run --release -p pla-core --example nl_eval -- <label> [id-prefix] [--no-memory]
+//!   cargo run --release -p pla-core --example nl_eval -- <label> [id-prefix|assistant|extraction|memory] [--no-memory]
 //! `--no-memory` leaves the cases' `memory` unwritten and unloaded (the without-memory run).
 //! Writes research/nl-eval/results/<label>.jsonl and prints the score by category.
 
@@ -286,6 +286,112 @@ fn extraction_case(model: &mut ModelHost, case: &Value) -> Result<(Vec<String>, 
     Ok((fails, json!({ "raw": raw, "items": shown })))
 }
 
+/// `text` folded without Turkish letters, the way the memory cases spell `has` and `not`.
+fn loose(text: &str) -> String {
+    pla_core::index::key(text).chars().map(|c| match c {
+        'ç' => 'c',
+        'ğ' => 'g',
+        'ş' => 's',
+        'ö' => 'o',
+        'ü' => 'u',
+        c => c,
+    }).collect()
+}
+
+/// Whether `got` is one of the `|`-separated `alternatives`.
+fn one_of(alternatives: &str, got: &str) -> bool {
+    alternatives.split('|').any(|a| loose(a.trim()) == loose(got.trim()))
+}
+
+fn role_name(role: pla_core::recall::Role) -> &'static str {
+    use pla_core::recall::Role;
+    match role {
+        Role::About => "about",
+        Role::Rules => "rules",
+        Role::State => "state",
+        Role::People => "people",
+        Role::Archive => "archive",
+    }
+}
+
+/// The topic as `recall::apply` stores it (a person's topic starts with their name).
+fn stored_topic(p: &pla_core::recall::Proposal) -> String {
+    use pla_core::recall::topic_key;
+    let key = topic_key(&p.topic);
+    match &p.person {
+        Some(name) if p.role == pla_core::recall::Role::People => {
+            let pk = topic_key(name);
+            if key == pk || key.starts_with(&format!("{pk}-")) { key } else { format!("{pk}-{key}") }
+        }
+        _ => key,
+    }
+}
+
+fn wanted_add(w: &Value, p: &pla_core::recall::Proposal) -> bool {
+    let text = loose(&p.text);
+    let groups = |k: &str| w[k].as_array().cloned().unwrap_or_default().into_iter().filter_map(|v| v.as_str().map(str::to_owned)).collect::<Vec<_>>();
+    w["file"].as_str().is_none_or(|f| one_of(f, role_name(p.role)))
+        && w["person"].as_str().is_none_or(|n| p.person.as_deref().is_some_and(|got| one_of(n, got)))
+        && w["topic"].as_str().is_none_or(|t| pla_core::recall::topic_key(t) == stored_topic(p))
+        && groups("has").iter().all(|g| g.split('|').any(|a| text.contains(&loose(a))))
+        && !groups("not").iter().any(|g| g.split('|').any(|a| text.contains(&loose(a))))
+}
+
+/// Chat → memory (plan Task 8): the app's request, the model, `parse` and `guard`, then the
+/// changes compared with the wanted ones. `got` carries `wanted`, `found` and `wrong` counts.
+fn memory_case(model: &mut ModelHost, case: &Value) -> Result<(Vec<String>, Value), Box<dyn std::error::Error>> {
+    use pla_core::qa::ChatModel;
+    use pla_core::recall::{extract, Change};
+    let msg = case["msg"].as_str().unwrap();
+    let prev = case["prev"].as_str();
+    let topics: Vec<String> = case["topics"].as_array().cloned().unwrap_or_default().iter().filter_map(|t| t.as_str().map(str::to_owned)).collect();
+    let rejected: Vec<(String, String)> = case["rejected"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default()
+        .iter()
+        .map(|r| (r[0].as_str().unwrap_or_default().to_owned(), r[1].as_str().unwrap_or_default().to_owned()))
+        .collect();
+    let lang = if case["ui"] == "en" { pla_core::lang::Lang::En } else { pla_core::lang::Lang::Tr };
+    let raw = model.complete(&extract::request(msg, prev, &topics, &rejected, lang), &AtomicBool::new(false))?;
+    let changes = extract::guard(extract::parse(&raw)?, msg, prev, &topics, &rejected);
+
+    let want = &case["expect"];
+    let adds = want["adds"].as_array().cloned().unwrap_or_default();
+    let forgets: Vec<String> = want["forget"].as_array().cloned().unwrap_or_default().iter().filter_map(|t| t.as_str().map(pla_core::recall::topic_key)).collect();
+    let mut taken = vec![false; adds.len()];
+    let mut forgot = vec![false; forgets.len()];
+    let mut fails = Vec::new();
+    let mut shown = Vec::new();
+    for c in &changes {
+        match c {
+            Change::Add(p) => {
+                shown.push(json!({ "add": p.text, "file": role_name(p.role), "person": p.person, "topic": stored_topic(p) }));
+                match (0..adds.len()).find(|&i| !taken[i] && wanted_add(&adds[i], p)) {
+                    Some(i) => taken[i] = true,
+                    None => fails.push(format!("wrong write: {} ({}{})", p.text, role_name(p.role), p.person.as_deref().map(|n| format!(", {n}")).unwrap_or_default())),
+                }
+            }
+            Change::Forget { topic, reason } => {
+                shown.push(json!({ "forget": topic, "reason": reason }));
+                match (0..forgets.len()).find(|&i| !forgot[i] && forgets[i] == pla_core::recall::topic_key(topic)) {
+                    Some(i) => forgot[i] = true,
+                    None => fails.push(format!("wrong write: forget {topic}")),
+                }
+            }
+        }
+    }
+    let wrong = fails.len();
+    for (w, _) in adds.iter().zip(&taken).filter(|(_, t)| !**t) {
+        fails.push(format!("missing {w}"));
+    }
+    for (t, _) in forgets.iter().zip(&forgot).filter(|(_, f)| !**f) {
+        fails.push(format!("did not forget {t}"));
+    }
+    let found = taken.iter().chain(&forgot).filter(|t| **t).count();
+    Ok((fails, json!({ "raw": raw, "changes": shown, "wanted": adds.len() + forgets.len(), "found": found, "wrong": wrong })))
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let with_memory = !std::env::args().any(|a| a == "--no-memory");
     let args: Vec<String> = std::env::args().skip(1).filter(|a| a != "--no-memory").collect();
@@ -313,22 +419,53 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
+    // the same rule for the chat → memory cases: a held-out message is not close to a dev case or
+    // to an example in the prompt, and no case is an example
+    let memory_cases: Vec<Value> =
+        std::fs::read_to_string(format!("{CASES}/memory.jsonl"))?.lines().filter(|l| l.starts_with('{')).map(serde_json::from_str).collect::<Result<_, _>>()?;
+    let examples = pla_core::recall::extract::example_messages();
+    let near: Vec<&str> = memory_cases.iter().filter(|c| c["cat"] == "dev").filter_map(|c| c["msg"].as_str()).chain(examples.iter().copied()).collect();
+    for case in &memory_cases {
+        let msg = case["msg"].as_str().unwrap_or_default();
+        if examples.iter().any(|e| e.to_lowercase() == msg.to_lowercase()) {
+            return Err(format!("case {} is an example in recall::extract", case["id"]).into());
+        }
+        if case["cat"] != "heldout" {
+            continue;
+        }
+        if let Some((score, close)) = near.iter().map(|d| (closeness(msg, d), d)).max_by(|a, b| a.0.total_cmp(&b.0)).filter(|(s, _)| *s >= HELD_OUT_MAX) {
+            return Err(format!("held-out case {} is {score:.2} close to {close:?}", case["id"]).into());
+        }
+    }
+
     let mut results = Vec::new();
     let mut score: BTreeMap<String, (usize, usize)> = BTreeMap::new();
+    // memory: (found, wanted, wrong writes) per category
+    let mut writes: BTreeMap<String, (u64, u64, u64)> = BTreeMap::new();
     let started = Instant::now();
-    for (file, kind) in [("assistant.jsonl", "assistant"), ("extraction.jsonl", "extraction")] {
+    for (file, kind) in [("assistant.jsonl", "assistant"), ("extraction.jsonl", "extraction"), ("memory.jsonl", "memory")] {
         for line in std::fs::read_to_string(format!("{CASES}/{file}"))?.lines().filter(|l| !l.trim().is_empty() && !l.starts_with("//")) {
             let case: Value = serde_json::from_str(line).map_err(|e| format!("{file}: {e}: {line}"))?;
             let id = case["id"].as_str().unwrap();
-            // `assistant` or `extraction` runs one file; anything else is an id prefix
-            let wanted = if only == "assistant" || only == "extraction" { only == kind } else { id.starts_with(&only) };
+            // `assistant`, `extraction` or `memory` runs one file; anything else is an id prefix
+            let wanted = if ["assistant", "extraction", "memory"].contains(&only.as_str()) { only == kind } else { id.starts_with(&only) };
             if !wanted {
                 continue;
             }
             let t = Instant::now();
-            let outcome = if kind == "assistant" { assistant_case(&mut model, &case, with_memory) } else { extraction_case(&mut model, &case) };
+            let outcome = match kind {
+                "assistant" => assistant_case(&mut model, &case, with_memory),
+                "extraction" => extraction_case(&mut model, &case),
+                _ => memory_case(&mut model, &case),
+            };
             let (fails, got) = outcome.unwrap_or_else(|e| (vec![format!("error: {e}")], Value::Null));
             let cat = format!("{kind}/{}", case["cat"].as_str().unwrap_or("-"));
+            if kind == "memory" {
+                let w = writes.entry(cat.clone()).or_default();
+                w.0 += got["found"].as_u64().unwrap_or(0);
+                w.1 += got["wanted"].as_u64().unwrap_or(0);
+                w.2 += got["wrong"].as_u64().unwrap_or(0);
+            }
             let e = score.entry(cat).or_default();
             e.1 += 1;
             if fails.is_empty() {
@@ -352,6 +489,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!("| {cat} | {p}/{n} |");
     }
     println!("| **total** | **{pass}/{all}** ({:.0}%) |", 100.0 * pass as f64 / all.max(1) as f64);
+    if !writes.is_empty() {
+        println!("\n| memory | right writes | wrong writes |\n| --- | --- | --- |");
+        for (cat, (found, wanted, wrong)) in &writes {
+            println!("| {cat} | {found}/{wanted} ({:.0}%) | {wrong} |", 100.0 * *found as f64 / (*wanted).max(1) as f64);
+        }
+    }
     println!("\n{out} in {:.0}s", started.elapsed().as_secs_f64());
     Ok(())
 }

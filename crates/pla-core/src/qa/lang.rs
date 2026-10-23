@@ -185,16 +185,22 @@ fn guess(text: &str) -> Option<&'static str> {
     }
 }
 
+/// `tr` or `en` for `text`, or `None` when it does not tell (the memory guard's language check).
+pub fn language_of(text: &str) -> Option<&'static str> {
+    guess(text)
+}
+
 /// The answer's language: the question's own, else the earlier question's, else PLA's (`ui`).
 pub fn answer_language(question: &str, earlier: Option<&str>, ui: &str) -> &'static str {
     guess(question).or_else(|| earlier.and_then(guess)).unwrap_or(if ui == "en" { "en" } else { "tr" })
 }
 
-/// Words that make a sentence a guess, a denial or a wish, not a fact (memory guard, spec
-/// 2026-10-18). Folded as `index::loose_words` reads them: no Turkish letters ("değil" is "degil").
+/// Words that make a sentence a guess, a denial, a wish or a proposal, not a fact (memory guard,
+/// spec 2026-10-18). Folded as `index::loose_words` reads them: no Turkish letters ("değil" is
+/// "degil").
 const UNSURE_WORDS: &[&str] = &[
-    "belki", "sanirim", "galiba", "herhalde", "muhtemelen", "acaba", "olabilir", "keske", "eger", "degil", "maybe", "might", "perhaps", "probably", "guess",
-    "not", "never", "if", "unless", "wish",
+    "belki", "sanirim", "galiba", "herhalde", "muhtemelen", "acaba", "olabilir", "keske", "eger", "degil", "dusunuyorum", "planliyorum", "maybe", "might",
+    "perhaps", "probably", "guess", "think", "not", "never", "if", "unless", "wish", "let",
 ];
 
 /// The question particle, alone or with its person ending ("mı", "misin", "muyuz").
@@ -202,23 +208,44 @@ const QUESTION_WORDS: &[&str] = &[
     "mi", "mu", "misin", "musun", "miyim", "muyum", "miyiz", "muyuz", "misiniz", "musunuz", "midir", "mudur", "miydi", "muydu", "miymis", "muymus",
 ];
 
-/// Conditional and wish endings ("yaparsa", "gelirse", "yapsam", "olsak"), on words of five letters
-/// or more so "masa" or "sen" stay out.
+/// Conditional and wish endings ("yaparsa", "gelirse", "yapsam"), on words of five letters or
+/// more so "masa" or "sen" stay out; and the "let us" ending ("yapalım", "gidelim") on six or more.
 const CONDITIONAL_ENDINGS: &[&str] =
     &["rsa", "rse", "zsa", "zse", "ysa", "yse", "rsam", "rsem", "rsan", "rsen", "rsak", "rsek", "sam", "sem", "saydi", "seydi", "saniz", "seniz"];
+const PROPOSAL_ENDINGS: &[&str] = &["alim", "elim"];
+/// Words that only look conditional ("akşam" ends like "yapsam").
+const NOT_CONDITIONAL: &[&str] = &["aksam"];
 
-/// Whether `text` hedges, denies, asks or sets a condition: such a sentence is never written to
-/// memory as a fact.
-pub fn is_unsure(text: &str) -> bool {
-    let lower = text.to_lowercase();
+/// Words that tie a clause to one day or week ("bugün yorgunum"): true now, not lasting.
+const PASSING_WORDS: &[&str] = &["bugun", "dun", "yarin", "simdilik", "today", "tomorrow", "yesterday", "tonight", "will", "gonna", "going"];
+const PASSING_PAIRS: &[[&str; 2]] = &[["bu", "hafta"], ["bu", "sabah"], ["bu", "aksam"], ["bu", "gece"], ["this", "week"], ["this", "morning"]];
+
+/// Future endings ("gideceğim", "yapacak"): a plan, not a fact yet.
+const FUTURE_ENDINGS: &[&str] = &["acagim", "ecegim", "acagiz", "ecegiz", "acaksin", "eceksin", "acak", "ecek"];
+
+/// Whether a sentence hedges, denies, asks, sets a condition or proposes: such a sentence is never
+/// written to memory as a fact.
+pub fn is_unsure(sentence: &str) -> bool {
+    let lower = sentence.to_lowercase();
     if lower.contains('?') || lower.contains("n't") || lower.contains("n’t") {
         return true;
     }
-    crate::index::loose_words(text).iter().any(|w| {
+    crate::index::loose_words(sentence).iter().any(|w| {
+        let n = w.chars().count();
         UNSURE_WORDS.contains(&w.as_str())
             || QUESTION_WORDS.contains(&w.as_str())
-            || (w.chars().count() >= 5 && CONDITIONAL_ENDINGS.iter().any(|e| w.ends_with(e)))
+            || (n >= 5 && !NOT_CONDITIONAL.contains(&w.as_str()) && CONDITIONAL_ENDINGS.iter().any(|e| w.ends_with(e)))
+            || (n >= 6 && PROPOSAL_ENDINGS.iter().any(|e| w.ends_with(e)))
     })
+}
+
+/// Whether a clause speaks of one day or of a plan ("yarın gideceğim", "bu hafta gidemedim"): true
+/// now or later, not lasting. Read per clause, so "bugün uğradım, kahveyi sütsüz içiyorum" keeps
+/// its second half.
+pub fn is_passing(clause: &str) -> bool {
+    let words = crate::index::loose_words(clause);
+    words.windows(2).any(|p| PASSING_PAIRS.iter().any(|q| p[0] == q[0] && p[1] == q[1]))
+        || words.iter().any(|w| PASSING_WORDS.contains(&w.as_str()) || FUTURE_ENDINGS.iter().any(|e| w.ends_with(e) && w.len() > e.len() + 1))
 }
 
 /// The name the model is told.
