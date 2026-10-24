@@ -259,15 +259,42 @@ pub fn is_general(sentence: &str) -> bool {
     crate::index::loose_words(sentence).last().is_some_and(|w| w.chars().count() >= 6 && GENERAL_ENDINGS.iter().any(|e| w.ends_with(e)))
 }
 
-/// Whether a sentence passes on what the user heard ("taşınacakmış", "artırmış"): some clause
-/// ends in the reported past. Someone else's news is not the user's state.
+/// Whether a sentence passes on what the user heard: some clause ends in the reported past
+/// ("taşınacakmış", "artırmış"), or an English marker says so ("apparently", "I heard", "word
+/// is"; "I heard back" is the user's own news). Someone else's news is not the user's state.
 pub fn is_hearsay(sentence: &str) -> bool {
+    let words = crate::index::loose_words(sentence);
+    let heard = words.windows(2).enumerate().any(|(i, p)| p[0] == "i" && p[1] == "heard" && words.get(i + 2).is_none_or(|w| w != "back"));
+    if heard || words.iter().any(|w| EN_HEARSAY.contains(&w.as_str())) || words.windows(2).any(|p| EN_HEARSAY_PAIRS.iter().any(|q| p[0] == q[0] && p[1] == q[1])) {
+        return true;
+    }
     sentence.split([',', ';', '.', '!', '\n']).any(|clause| {
         crate::index::loose_words(clause)
             .last()
             .is_some_and(|w| w.chars().count() >= 5 && !NOT_HEARSAY.contains(&w.as_str()) && HEARSAY_ENDINGS.iter().any(|e| w.ends_with(e)))
     })
 }
+
+/// Whether an English sentence is news of someone else ("Priya got promoted."): it opens with a
+/// name and a verb, and the user is not in it.
+pub fn is_person_news(sentence: &str) -> bool {
+    let tokens: Vec<&str> = sentence.split_whitespace().map(|t| t.trim_matches(|c: char| !c.is_alphanumeric())).filter(|t| !t.is_empty()).collect();
+    let [first, second, ..] = tokens.as_slice() else { return false };
+    let name = first.chars().next().is_some_and(char::is_uppercase) && !first.contains(['\'', '’']) && !NOT_NAMES.contains(&first.to_lowercase().as_str());
+    let me = crate::index::loose_words(sentence).iter().any(|w| FIRST_PERSON.contains(&w.as_str()));
+    name && PEOPLE_VERBS.contains(&second.to_lowercase().as_str()) && !me
+}
+
+/// English hearsay markers, folded.
+const EN_HEARSAY: &[&str] = &["apparently", "reportedly", "supposedly", "allegedly", "rumor", "rumour", "rumors", "rumours"];
+/// Two-word hearsay markers ("word is", "they say").
+const EN_HEARSAY_PAIRS: &[[&str; 2]] = &[["word", "is"], ["they", "say"], ["heard", "that"]];
+/// Words that open an English sentence without naming anyone.
+const NOT_NAMES: &[&str] = &["the", "this", "that", "these", "those", "it", "a", "an", "there", "here", "next", "now", "today", "everything", "nothing", "all", "my", "our", "we", "i"];
+/// Verbs a piece of news about someone follows their name with ("Mia is moving", "Jack got").
+const PEOPLE_VERBS: &[&str] = &["is", "was", "got", "gets", "has", "had", "left", "quit", "joined", "moved", "married", "retired", "started", "became", "will"];
+/// The user in an English sentence.
+const FIRST_PERSON: &[&str] = &["i", "me", "my", "mine", "myself", "we", "us", "our", "ours"];
 
 /// The reported past, folded ("-mış", "-mişler").
 const HEARSAY_ENDINGS: &[&str] = &["mis", "mus", "misler", "mislar", "muslar", "musler"];
@@ -324,6 +351,18 @@ mod tests {
         }
         for s in ["Geçmiş projeler arşivde.", "Motor siparişi verildi.", "Raporu teslim ettim."] {
             assert!(!is_hearsay(s), "{s}");
+        }
+        for s in ["Apparently Sam is leaving the company.", "I heard the gym is closing.", "Word is the club moves to Fridays.", "Rumour has it the fees go up."] {
+            assert!(is_hearsay(s), "{s}");
+        }
+        for s in ["I'm helping Sam with his thesis.", "I heard back from the university and got in.", "Our word count is at 4000."] {
+            assert!(!is_hearsay(s), "{s}");
+        }
+        for s in ["Priya got promoted.", "Jack got engaged last week.", "Mia is moving to Lisbon."] {
+            assert!(is_person_news(s), "{s}");
+        }
+        for s in ["Bike rack is installed.", "Our team is moving offices.", "I got the job.", "Cabinets arrived and are installed.", "The website is live now.", "Tom's wedding is in May and I wrote the speech."] {
+            assert!(!is_person_news(s), "{s}");
         }
         for s in ["Passport, charger, two shirts, sunscreen.", "Süt, yumurta, ekmek, domates."] {
             assert!(is_list(s), "{s}");

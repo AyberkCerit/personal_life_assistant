@@ -389,3 +389,42 @@ Not başına süre bu turda da aynı: ilk istek soğuk ~20 s, sonrakiler 1,3–6
 Sonraki adım için öneri (yapılmadı): İngilizce duyulan haber işaretleri ("apparently", "I heard", "reportedly")
 ve özne kullanıcı değilken (üçüncü tekil ad) satırı yazmama. Ardından dördüncü bir saklı küme gerekir, yine
 düzeltmelerden önce dondurulmuş olarak.
+
+### Dördüncü tur: İngilizce duyulan haber (2026-10-24)
+
+Sıra:
+1. `a035615` (`test(recall): freeze a fourth held-out note set`): h21–h30 `note-v6-heldout`'ta bir kez saklı
+   olarak koşulduğu için `seen` yapıldı. Yeni saklı küme h31–h40 guard'dan önce donduruldu. İçerik: İngilizce
+   ve Türkçe duyulan haber, başka biri geçse de kullanıcının kendi durumu, liste, karışık günlük not. Mevcut
+   guard'ların geçireceği vakalar seçilmedi. Jaccard 0,5 denetimi model koşmadan geçti. Bu küme yazıldıktan sonra
+   kapı koşusuna kadar guard tasarımı için tekrar okunmadı.
+2. `a0e76db`: geliştirme kümesine d22–d25 eklendi: İngilizce duyulan haber işaretleri, başkalarının haberi,
+   başka biri geçen kendi durum ("I'm the best man at Tom's wedding…") ve kişi adıyla değil bir eşyayla
+   açılan durum satırı ("Bike rack is installed.").
+3. Guard (`qa::lang`):
+   - `is_hearsay` artık İngilizce işaretleri de tanıyor: "apparently", "reportedly", "supposedly",
+     "allegedly", "rumo(u)r", "word is", "they say", "heard that", "I heard" ("I heard back" hariç).
+   - Yeni `is_person_news`: İngilizce cümle büyük harfli bir adla ve "is/got/has/left/moved…" fiiliyle
+     açılıyor, kullanıcı (I/my/we/our…) cümlede yok. Notun başlığındaki sözcükle açılan cümle haber
+     sayılmaz ("Website is live" bir "Website" notunda). Ad, katlanmamış kanıtta aranır.
+
+| Küme | Koşu | Vaka | Doğru yazım | Yanlış yazım |
+| --- | --- | --- | --- | --- |
+| Geliştirme d01–d25 | `note-v7-note-mem-d` | 25/25 | 14/14 | 0 |
+| Görülen h01–h30 | `note-v7-note-mem-h0`, `-h1`, `-h2`, `-h30` | 29/30 | 15/16 | 0 |
+| **Saklı h31–h40** | `note-v7-heldout-*`, ilk ve tek kez | 8/10 | 3/5 (%60) | **0** |
+
+**Kapı: geçti** (saklıda yanlış yazım 0).
+
+Eksik kalan iki doğru yazım, ikisi de yazmama yönünde. Model iki cümleyi tek kanıtta birleştirdi; birinin
+guard'a takılması bütün satırı düşürdü:
+- h36: "Sabah dişçiye gittim. Bitirme tezinin sunumu 9 Aralık'a kesinleşti." Gün parçası "sabah" yüzünden
+  tez sunumu da yazılmadı.
+- h40: "Word is the chess club will move to Thursdays. I'm still preparing for the regional tournament…"
+  Duyulan haber işareti yüzünden turnuva hazırlığı da yazılmadı.
+
+Olası iyileştirme (yapılmadı): kanıtı cümlelere bölüp guard'a takılmayan cümleyle satırı kurmak. Bu,
+doğru yazımı artırır ama satır metni modelin birleşik cümlesinden gelir; ayrı ölçüm ister.
+
+Not başına süre bu koşuda daha yüksek: soğuk ilk istek 36–39 s, sonrakiler 2,7–11,6 s. Nedeni ölçülmedi
+(makinede başka yük olabilir); önceki turlardaki 4–5 s sıcak ortalama karşılaştırma için durur.

@@ -16,7 +16,7 @@ use crate::index;
 use crate::lang::Lang;
 use crate::llm::LlmError;
 use crate::notes::is_excluded;
-use crate::qa::lang::{answer_language, is_day_event, is_general, is_hearsay, is_list, is_unsure, name};
+use crate::qa::lang::{answer_language, is_day_event, is_general, is_hearsay, is_list, is_person_news, is_unsure, name};
 use crate::qa::ChatModel;
 use crate::util::{content_hash, tokens};
 use crate::vault::{Folders, Vault};
@@ -272,6 +272,8 @@ pub fn changes(raw: &str, note_path: &str, note_hash: &str, text: &str, current:
     // a daily note is named by its day (`daily/2026-10-23.md`), whatever the folder is called
     let stem = note_path.rsplit('/').next().unwrap_or(note_path).trim_end_matches(".md");
     let daily = chrono::NaiveDate::parse_from_str(stem, "%Y-%m-%d").is_ok();
+    // a sentence that opens with the note's own subject ("Website is live" in "Website") is no one's news
+    let title = index::loose_words(&index::parse_note(note_path, text).title);
     // what the earlier lines said that the note says no more ("tamirde" once the note is a how-to)
     let stale: HashSet<String> = earlier.iter().flat_map(|e| stems(&e.text)).filter(|s| !in_note.contains(s)).collect();
     let mut kept: Vec<(String, String)> = Vec::new();
@@ -290,7 +292,11 @@ pub fn changes(raw: &str, note_path: &str, note_hash: &str, text: &str, current:
         let Some(sentence) = sentence_of(&folded, &line.evidence) else { continue };
         let turned_down = |t: &String| closeness(line_text, t) >= REJECTED_SIMILARITY || closeness(&line.evidence, t) >= REJECTED_SIMILARITY;
         // how things are, a bare list, someone's news, and in a daily note what one part of the day held
-        let not_state = sentence.split(['.', '!', '\n']).any(|s| is_general(s) || is_list(s) || (daily && is_day_event(s))) || is_hearsay(&sentence);
+        let news = |s: &str| is_person_news(s) && !index::loose_words(s).first().is_some_and(|w| title.contains(w));
+        // the folded sentence has lost its capitals: a name is looked for in the quote as written
+        let not_state = sentence.split(['.', '!', '\n']).any(|s| is_general(s) || is_list(s) || (daily && is_day_event(s)))
+            || line.evidence.split(['.', '!', '\n']).any(news)
+            || is_hearsay(&sentence);
         if is_unsure(&sentence) || not_state ||stems(line_text).iter().any(|s| stale.contains(s)) || rejected.iter().any(|(_, t)| turned_down(t)) {
             continue;
         }
@@ -605,6 +611,11 @@ mod tests {
         let raw = answer(&[("Tez taslağını danışmanıma gönderdim", "tez", "Tez taslağını danışmanına gönderdi."), ("Akşam arkadaşlarla yemeğe çıktık", "aksam", "Arkadaşlarla yemeğe çıktı.")]);
         let got = changes(&raw, "daily/2026-10-23.md", "1234abcd", day, &[], &[]);
         assert_eq!(added(&got).iter().map(|p| p.topic.as_str()).collect::<Vec<_>>(), ["tez"], "{got:?}");
+        // Someone else's news is not written; the note's own subject and the user's state are.
+        let team = "# Website\n\nApparently Sam is leaving. Priya got promoted. Website is live now.";
+        let raw = answer(&[("Apparently Sam is leaving", "sam", "Sam is leaving."), ("Priya got promoted", "priya", "Priya got promoted."), ("Website is live now", "website", "Website is live now.")]);
+        let got = changes(&raw, "notes/Website.md", "1234abcd", team, &[], &[]);
+        assert_eq!(added(&got).iter().map(|p| p.topic.as_str()).collect::<Vec<_>>(), ["website"], "{got:?}");
         // Not JSON: nothing changes (the note's lines are not dropped for a broken answer).
         let current = [inferred("iha-govde", "X8 önde.", "iha/İHA.md#0000")];
         assert!(changes("not json", "iha/İHA.md", "1234abcd", text, &current, &[]).is_empty());
