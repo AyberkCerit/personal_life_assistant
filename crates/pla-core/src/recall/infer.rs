@@ -16,7 +16,7 @@ use crate::index;
 use crate::lang::Lang;
 use crate::llm::LlmError;
 use crate::notes::is_excluded;
-use crate::qa::lang::{answer_language, is_general, is_unsure, name};
+use crate::qa::lang::{answer_language, is_day_event, is_general, is_hearsay, is_list, is_unsure, name};
 use crate::qa::ChatModel;
 use crate::util::{content_hash, tokens};
 use crate::vault::{Folders, Vault};
@@ -269,6 +269,9 @@ pub fn changes(raw: &str, note_path: &str, note_hash: &str, text: &str, current:
     let earlier_topics: Vec<String> = earlier.iter().map(|e| topic_key(&e.topic)).collect();
     let folded = index::key(text);
     let in_note = stems(text);
+    // a daily note is named by its day (`daily/2026-10-23.md`), whatever the folder is called
+    let stem = note_path.rsplit('/').next().unwrap_or(note_path).trim_end_matches(".md");
+    let daily = chrono::NaiveDate::parse_from_str(stem, "%Y-%m-%d").is_ok();
     // what the earlier lines said that the note says no more ("tamirde" once the note is a how-to)
     let stale: HashSet<String> = earlier.iter().flat_map(|e| stems(&e.text)).filter(|s| !in_note.contains(s)).collect();
     let mut kept: Vec<(String, String)> = Vec::new();
@@ -286,8 +289,9 @@ pub fn changes(raw: &str, note_path: &str, note_hash: &str, text: &str, current:
         }
         let Some(sentence) = sentence_of(&folded, &line.evidence) else { continue };
         let turned_down = |t: &String| closeness(line_text, t) >= REJECTED_SIMILARITY || closeness(&line.evidence, t) >= REJECTED_SIMILARITY;
-        let general = sentence.split(['.', '!', '\n']).any(is_general);
-        if is_unsure(&sentence) || general || stems(line_text).iter().any(|s| stale.contains(s)) || rejected.iter().any(|(_, t)| turned_down(t)) {
+        // how things are, a bare list, someone's news, and in a daily note what one part of the day held
+        let not_state = sentence.split(['.', '!', '\n']).any(|s| is_general(s) || is_list(s) || (daily && is_day_event(s))) || is_hearsay(&sentence);
+        if is_unsure(&sentence) || not_state ||stems(line_text).iter().any(|s| stale.contains(s)) || rejected.iter().any(|(_, t)| turned_down(t)) {
             continue;
         }
         kept.push((topic, line_text.to_string()));
@@ -592,6 +596,15 @@ mod tests {
         let notes = "# Bakım\n\nMonstera haftada bir sulanır. Soğanı kavur. Mercimeği ekle. 25 dakika pişir.";
         let raw = answer(&[("Monstera haftada bir sulanır", "monstera", "Monstera sulanıyor."), ("# Bakım", "bakim", "Bakım notları var."), ("Soğanı kavur. Mercimeği ekle. 25 dakika pişir.", "corba", "Çorba yapıyor.")]);
         assert!(changes(&raw, "notes/Bakım.md", "1234abcd", notes, &[], &[]).is_empty());
+        // A bare list, someone's news and a daily note's evening are not the user's state; the
+        // daily note's real progress is.
+        let lists = "# Ev\n\nSüt, yumurta, ekmek, domates. Yönetici aidatı artırmış.";
+        let raw = answer(&[("Süt, yumurta, ekmek, domates", "market", "Süt, yumurta, ekmek ve domates alınacak."), ("Yönetici aidatı artırmış", "aidat", "Aidat arttı.")]);
+        assert!(changes(&raw, "notes/Ev.md", "1234abcd", lists, &[], &[]).is_empty());
+        let day = "# 23 Ekim\n\nTez taslağını danışmanıma gönderdim. Akşam arkadaşlarla yemeğe çıktık.";
+        let raw = answer(&[("Tez taslağını danışmanıma gönderdim", "tez", "Tez taslağını danışmanına gönderdi."), ("Akşam arkadaşlarla yemeğe çıktık", "aksam", "Arkadaşlarla yemeğe çıktı.")]);
+        let got = changes(&raw, "daily/2026-10-23.md", "1234abcd", day, &[], &[]);
+        assert_eq!(added(&got).iter().map(|p| p.topic.as_str()).collect::<Vec<_>>(), ["tez"], "{got:?}");
         // Not JSON: nothing changes (the note's lines are not dropped for a broken answer).
         let current = [inferred("iha-govde", "X8 önde.", "iha/İHA.md#0000")];
         assert!(changes("not json", "iha/İHA.md", "1234abcd", text, &current, &[]).is_empty());

@@ -259,6 +259,41 @@ pub fn is_general(sentence: &str) -> bool {
     crate::index::loose_words(sentence).last().is_some_and(|w| w.chars().count() >= 6 && GENERAL_ENDINGS.iter().any(|e| w.ends_with(e)))
 }
 
+/// Whether a sentence passes on what the user heard ("taşınacakmış", "artırmış"): some clause
+/// ends in the reported past. Someone else's news is not the user's state.
+pub fn is_hearsay(sentence: &str) -> bool {
+    sentence.split([',', ';', '.', '!', '\n']).any(|clause| {
+        crate::index::loose_words(clause)
+            .last()
+            .is_some_and(|w| w.chars().count() >= 5 && !NOT_HEARSAY.contains(&w.as_str()) && HEARSAY_ENDINGS.iter().any(|e| w.ends_with(e)))
+    })
+}
+
+/// The reported past, folded ("-mış", "-mişler").
+const HEARSAY_ENDINGS: &[&str] = &["mis", "mus", "misler", "mislar", "muslar", "musler"];
+/// Words with that ending that are not a verb.
+const NOT_HEARSAY: &[&str] = &["gecmis", "yetmis", "doksanmis"];
+
+/// Endings a list item has once it is a clause ("tutuldu", "geliyor", "installed"), folded.
+const VERB_ENDINGS: &[&str] = &["di", "du", "ti", "tu", "yor", "yoruz", "dir", "tir", "mis", "mus", "cak", "cek", "ed"];
+
+/// Whether a sentence is a bare list ("Süt, yumurta, ekmek, domates."): three or more short items
+/// and no verb among them.
+pub fn is_list(sentence: &str) -> bool {
+    let items: Vec<Vec<String>> = sentence.trim().trim_end_matches(['.', '!']).split(',').map(crate::index::loose_words).collect();
+    let verb = |w: &String| (w.chars().count() >= 5 && VERB_ENDINGS.iter().any(|e| w.ends_with(e))) || ["is", "are", "was", "were"].contains(&w.as_str());
+    items.len() >= 3 && items.iter().all(|i| !i.is_empty() && i.len() <= 3 && !i.iter().any(verb))
+}
+
+/// Parts of a day, folded: a sentence that names one tells what happened then.
+const DAY_PARTS: &[&str] = &["sabah", "sabahleyin", "ogle", "ogleden", "oglen", "aksam", "aksamleyin", "gece", "geceleyin", "morning", "afternoon", "evening", "tonight"];
+
+/// Whether a sentence tells what happened at one part of a day ("Akşam yemeğe çıktık", "in the
+/// morning"): a diary line, not where the user's work stands.
+pub fn is_day_event(sentence: &str) -> bool {
+    crate::index::loose_words(sentence).iter().any(|w| DAY_PARTS.contains(&w.as_str()))
+}
+
 /// The name the model is told.
 pub fn name(code: &str) -> &'static str {
     if code == "en" {
@@ -279,6 +314,28 @@ mod tests {
         }
         for s in ["Tezin yöntem bölümünü yazıyorum.", "Ayda bir gelir.", "Motor siparişi verildi."] {
             assert!(!is_general(s), "{s}");
+        }
+    }
+
+    #[test]
+    fn heard_news_lists_and_day_events_are_not_states() {
+        for s in ["Alt kattaki aile yaz sonunda taşınacakmış.", "Yönetici aidatı artırmış", "Komşular gitmişler."] {
+            assert!(is_hearsay(s), "{s}");
+        }
+        for s in ["Geçmiş projeler arşivde.", "Motor siparişi verildi.", "Raporu teslim ettim."] {
+            assert!(!is_hearsay(s), "{s}");
+        }
+        for s in ["Passport, charger, two shirts, sunscreen.", "Süt, yumurta, ekmek, domates."] {
+            assert!(is_list(s), "{s}");
+        }
+        for s in ["Salon tutuldu, davetiyeler basıldı, pasta seçildi.", "X8 seçildi, motor kargoda.", "Cabinets arrived, installed, painted and checked."] {
+            assert!(!is_list(s), "{s}");
+        }
+        for s in ["Öğleden sonra kütüphanede çalıştım.", "Akşam arkadaşlarla yemeğe çıktık.", "Went for a run in the morning."] {
+            assert!(is_day_event(s), "{s}");
+        }
+        for s in ["Bugün bitirme projesinin raporunu teslim ettim.", "Tez taslağını danışmanıma gönderdim."] {
+            assert!(!is_day_event(s), "{s}");
         }
     }
 

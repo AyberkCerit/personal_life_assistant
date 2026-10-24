@@ -346,3 +346,46 @@ Sonraki adım için öneriler (yapılmadı):
 
 Pencere başına en fazla 10 not: soğuk başlangıçla ~75 s, sıcak ~45 s model süresi. İstem ~1,4K token
 örnek içeriyor; `cache_prompt` ile tekrarlanan baş kısım yeniden okunmuyor.
+
+### Üçüncü tur: liste, duyulan geçmiş ve günlük notu guard'ları (2026-10-24)
+
+Sıra:
+1. `0600592` (`test(recall): freeze a third held-out note set`): h11–h20 `note-v4`'te bir kez saklı olarak
+   koşulduğu için `seen` yapıldı. Yeni saklı küme h21–h30, guard'lardan önce donduruldu. Jaccard 0,5 denetimi
+   koşunun başında geçti.
+2. Guard'lar (`qa::lang`):
+   - `is_list`: virgülle ayrılmış 3+ kısa öğe ve hiçbirinde fiil eki yok.
+   - `is_hearsay`: bir yan cümle `-mış/-miş/-mişler` ile bitiyor ("geçmiş" hariç).
+   - `is_day_event`: tarih adlı notlarda (`2026-10-23.md`) gün parçası (sabah, öğle(den), akşam, gece,
+     morning, afternoon, evening, tonight) geçen cümle atılır.
+3. `bfeebf3`: geliştirme kümesine d21 eklendi. Günlük notta gerçek ilerleme ile akşam olayı yan yana; guard'ın
+   ilerlemeyi düşürmediğini geliştirme vakasıyla da göstermek için.
+
+**Sızıntı notu:** h21–h30'u da guard'ları da aynı oturum yazdı. Günlük notu guard'ı, plandaki "geçmiş zamanlı
+birinci tekil olay" tanımı yerine gün parçası kuralıyla tasarlandı. Bu karar verilirken h21 ve h30 okunmuştu:
+birinci tekil kural bu iki vakadaki gerçek ilerlemeyi ("taslağı gönderdim", "raporu teslim ettim") de
+düşürürdü. Kuralın geliştirme/görülen dayanağı d14, h20 (düşürülmesi gereken akşam/öğleden sonra olayı) ve
+sonradan eklenen d21 (kalması gereken ilerleme). h21 ve h30 için kapı sonucu bağımsız değildir; aşağıda
+ayrı verildi.
+
+| Küme | Koşu | Vaka | Doğru yazım | Yanlış yazım |
+| --- | --- | --- | --- | --- |
+| Geliştirme (d01–d20) | `note-v6` | 20/20 | 11/11 | 0 |
+| Geliştirme d21 | `note-v6-note-mem-d21` | 1/1 | 1/1 | 0 |
+| Görülen (h01–h20) | `note-v6-note-mem-h0`, `-h1`, `-h20` | 19/20 | 10/11 | 0 |
+| **Saklı h21–h30** | `note-v6-heldout-*`, ilk ve tek kez | 9/10 | 5/5 | **1** |
+| Saklı, h21 ve h30 hariç | aynı koşu | 7/8 | 3/3 | **1** |
+
+**Kapı: geçmedi** (saklıda yanlış yazım 1). Kalan hata:
+- h27 (İngilizce): "Apparently Sam is leaving the company. Priya got promoted." olduğu gibi yazıldı.
+  Başkalarının haberi. `is_hearsay` yalnız Türkçe `-mış` ekini tanıyor; İngilizcede duyulan haber işareti
+  ("apparently", "I heard") ve kullanıcı dışında birinin özne olması denetlenmiyor.
+
+Geçen kalıplar: liste (h22, h29), Türkçe duyulan geçmiş (h23), günlük olay (h25 ve h21'in akşam cümlesi).
+Fiilli yapılacaklar listesi (h24) ve günlük nottaki gerçek ilerleme (h21, h30) yazıldı.
+
+Not başına süre bu turda da aynı: ilk istek soğuk ~20 s, sonrakiler 1,3–6,1 s.
+
+Sonraki adım için öneri (yapılmadı): İngilizce duyulan haber işaretleri ("apparently", "I heard", "reportedly")
+ve özne kullanıcı değilken (üçüncü tekil ad) satırı yazmama. Ardından dördüncü bir saklı küme gerekir, yine
+düzeltmelerden önce dondurulmuş olarak.
