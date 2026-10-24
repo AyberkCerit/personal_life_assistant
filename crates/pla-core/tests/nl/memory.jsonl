@@ -79,3 +79,14 @@
 {"id":"note-mem-h08","cat":"heldout","note":"notes/Kuzenin düğünü.md","text":"# Kuzenin düğünü\n\nMerve'nin düğünü İzmir'de olacak. Gelin arabasını Kaan süsleyecek.","expect":{"adds":[]}}
 {"id":"note-mem-h09","cat":"heldout","note":"notes/Staj.md","text":"# Staj\n\nYaz stajını Baykar'da tamamladım, staj defterini 10 Kasım'a kadar teslim etmem gerekiyor.","expect":{"adds":[{"has":["staj"]},{"has":["staj|defter"],"optional":true}]}}
 {"id":"note-mem-h10","cat":"heldout","note":"daily/2026-10-22.md","text":"# 22 Ekim\n\nSabah yağmur yağdı, otobüsü kaçırdım. Öğlen arkadaşlarla lahmacun yedik.","expect":{"adds":[]}}
+// Second held-out note set, frozen after note-v3-heldout saw h01..h10 (RESULTS.md, "Notlardan Durum").
+{"id":"note-mem-h11","cat":"heldout","note":"notes/Kitap yazımı.md","text":"# Kitap yazımı\n\nRomanın ilk taslağını bitirdim, şimdi editörle ikinci okumayı yapıyoruz.","expect":{"adds":[{"has":["taslak|editor|okuma"]},{"has":["taslak|editor|okuma|roman"],"optional":true}]}}
+{"id":"note-mem-h12","cat":"heldout","note":"notes/Ev.md","current":[["ev-kredisi","Konut kredisi için bankalarla görüşüyor."]],"text":"# Ev\n\nZiraat'tan konut kredisi onaylandı, tapu randevusu 12 Aralık'ta.","expect":{"adds":[{"topic":"ev-kredisi","has":["onay|tapu"]}]}}
+{"id":"note-mem-h13","cat":"heldout","note":"notes/Kamera.md","current":[["kamera","Kamera lensini değiştirmek için servise verdi."]],"text":"# Kamera\n\nISO 100, diyafram f/8, enstantane 1/125 manzara için iyi ayar.","expect":{"adds":[],"drop":["kamera"]}}
+{"id":"note-mem-h14","cat":"heldout","note":"notes/Python notları.md","text":"# Python notları\n\nList comprehension ile filtreleme yapılır. dict.get varsayılan değer döndürür.","expect":{"adds":[]}}
+{"id":"note-mem-h15","cat":"heldout","ui":"en","note":"notes/Packing list.md","text":"# Packing list\n\nPassport, charger, two shirts, sunscreen.","expect":{"adds":[]}}
+{"id":"note-mem-h16","cat":"heldout","ui":"en","note":"notes/Website.md","current":[["website","Building a personal website."]],"text":"# Website\n\nThe website is live now. Next I want to add a blog section.","expect":{"adds":[{"topic":"website","has":["live"]}]}}
+{"id":"note-mem-h17","cat":"heldout","note":"notes/Komşular.md","text":"# Komşular\n\nAlt kattaki aile yaz sonunda taşınacakmış. Yönetici aidatı artırmış.","expect":{"adds":[]}}
+{"id":"note-mem-h18","cat":"heldout","note":"notes/Spor salonu.md","text":"# Spor salonu\n\nBelki ocakta spor salonuna yazılırım, fiyatlara bakacağım.","expect":{"adds":[]}}
+{"id":"note-mem-h19","cat":"heldout","note":"notes/Düğün hazırlığı.md","text":"# Düğün hazırlığı\n\n- [x] Salon tutuldu\n- [x] Davetiyeler basıldı\n- [ ] Pasta tadımı","expect":{"adds":[{"has":["salon|davetiye"]},{"has":["salon|davetiye|pasta"],"optional":true}]}}
+{"id":"note-mem-h20","cat":"heldout","note":"daily/2026-10-20.md","text":"# 20 Ekim\n\nÖğleden sonra kütüphanede çalıştım, akşam yemeği için makarna yaptım.","expect":{"adds":[]}}
