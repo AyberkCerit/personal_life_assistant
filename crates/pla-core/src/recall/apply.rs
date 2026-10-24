@@ -9,7 +9,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
 use chrono::{DateTime, FixedOffset, NaiveDate};
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, OptionalExtension};
 
 use crate::fs_atomic::write_atomic;
 use crate::index;
@@ -163,6 +163,18 @@ pub fn reconcile(vault: &Vault, db: &Connection) -> Result<(), RecallError> {
     })
 }
 
+/// The reason of a line turned down from its toast (`undo`).
+pub const UNDONE: &str = "undone";
+
+/// The toast's Undo for a line PLA just wrote: forgotten into the archive with the reason
+/// `undone`, so it is not written again. `false` when the line is no longer an active one.
+pub fn undo(vault: &Vault, db: &Connection, id: &str, now: DateTime<FixedOffset>, lang: Lang, wrote: &dyn Fn(&str)) -> Result<bool, RecallError> {
+    let topic: Option<String> = db.query_row("SELECT topic FROM memory_entry WHERE id = ?1 AND state = 'active'", [id], |r| r.get(0)).optional()?;
+    let Some(topic) = topic else { return Ok(false) };
+    apply(vault, db, &[Change::Forget { topic, reason: UNDONE.to_string() }], now, lang, wrote)?;
+    Ok(true)
+}
+
 /// `(topic, text)` of every rejected line, oldest first: what the writers must not write again.
 pub fn rejected(db: &Connection) -> Vec<(String, String)> {
     let Ok(mut st) = db.prepare("SELECT topic, text FROM memory_entry WHERE state = 'rejected' ORDER BY changed_at, id") else { return Vec::new() };
@@ -231,9 +243,11 @@ impl Why {
         match (self, lang) {
             (Why::Outdated, Lang::Tr) => "Eskidi".to_string(),
             (Why::Overflow, Lang::Tr) => "Sınırdan taştı".to_string(),
+            (Why::Rejected, Lang::Tr) if reason == UNDONE => "Geri alındı".to_string(),
             (Why::Rejected, Lang::Tr) => format!("Reddedildi: {reason}"),
             (Why::Outdated, Lang::En) => "Outdated".to_string(),
             (Why::Overflow, Lang::En) => "Over the limit".to_string(),
+            (Why::Rejected, Lang::En) if reason == UNDONE => "Undone".to_string(),
             (Why::Rejected, Lang::En) => format!("Rejected: {reason}"),
         }
     }

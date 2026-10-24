@@ -195,6 +195,27 @@ pub fn parse(raw: &str) -> Result<Vec<Raw>, String> {
     Ok(out)
 }
 
+/// Words that point back at the user's earlier message ("bunu hatırla", "remember that"): only
+/// then is that message given to the model and the guard.
+const POINTERS: &[&str] = &["bunu", "sunu", "onu", "bunlari", "sunlari", "onlari", "this", "that", "it", "these", "those"];
+
+/// Whether `message` points back at the user's earlier message.
+pub fn points_back(message: &str) -> bool {
+    index::loose_words(message).iter().any(|w| POINTERS.contains(&w.as_str()))
+}
+
+/// The topics of the lines PLA wrote, as the model is shown them (`request`) and `guard` checks a
+/// forget against.
+pub fn known_topics(recall: &super::Recall) -> Vec<String> {
+    let mut topics: Vec<String> = Vec::new();
+    for e in recall.about.iter().chain(&recall.rules).chain(&recall.state).chain(&recall.people).filter(|e| e.kind != Kind::Manual) {
+        if !topics.contains(&e.topic) {
+            topics.push(e.topic.clone());
+        }
+    }
+    topics
+}
+
 /// The changes the code lets through, whatever the model said: the quote is the user's (message or
 /// `previous`), its sentence states a fact (`qa::lang::is_unsure`) and its clause a lasting one
 /// (`is_passing`), it is not a request to forget, the line is in the message's language, a person's
@@ -499,6 +520,13 @@ mod tests {
         assert_eq!(added(&guard(vec![raw], msg, None, &[], &[]))[0].person.as_deref(), Some("Annem"));
         assert_eq!(kin_in("Kardeşimle konuştum"), Some("Kardeşim".into()));
         assert_eq!(kin_in("Deniz geldi"), None);
+    }
+
+    #[test]
+    fn only_a_message_that_points_back_takes_the_previous_one() {
+        assert!(points_back("bunu hatırla"));
+        assert!(points_back("Remember that"));
+        assert!(!points_back("Kahveyi sütsüz içerim."));
     }
 
     #[test]

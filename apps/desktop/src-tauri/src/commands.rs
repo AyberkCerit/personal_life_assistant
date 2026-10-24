@@ -186,6 +186,7 @@ fn start_session(app: &AppHandle, root: &Path, settings: &AppSettings, own: Arc<
     .with_added_listener(Box::new(move |items: &[AddedItem]| {
         let _ = added_app.emit("items-added", items);
     }))
+    .with_self_writes(Arc::clone(&own))
     .with_summary_listener({
         let summary_app = app.clone();
         Box::new(move |date: &str, error: Option<&str>| {
