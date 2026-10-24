@@ -81,13 +81,25 @@
 {"id":"note-mem-h10","cat":"seen","note":"daily/2026-10-22.md","text":"# 22 Ekim\n\nSabah yağmur yağdı, otobüsü kaçırdım. Öğlen arkadaşlarla lahmacun yedik.","expect":{"adds":[]}}
 // note-mem-h01..h10 ran once as held-out (note-v3-heldout) and are "seen" since. Second held-out
 // note set below, frozen after that run and before the fixes it led to (RESULTS.md, "Notlardan Durum").
-{"id":"note-mem-h11","cat":"heldout","note":"notes/Kitap yazımı.md","text":"# Kitap yazımı\n\nRomanın ilk taslağını bitirdim, şimdi editörle ikinci okumayı yapıyoruz.","expect":{"adds":[{"has":["taslak|editor|okuma"]},{"has":["taslak|editor|okuma|roman"],"optional":true}]}}
-{"id":"note-mem-h12","cat":"heldout","note":"notes/Ev.md","current":[["ev-kredisi","Konut kredisi için bankalarla görüşüyor."]],"text":"# Ev\n\nZiraat'tan konut kredisi onaylandı, tapu randevusu 12 Aralık'ta.","expect":{"adds":[{"topic":"ev-kredisi","has":["onay|tapu"]}]}}
-{"id":"note-mem-h13","cat":"heldout","note":"notes/Kamera.md","current":[["kamera","Kamera lensini değiştirmek için servise verdi."]],"text":"# Kamera\n\nISO 100, diyafram f/8, enstantane 1/125 manzara için iyi ayar.","expect":{"adds":[],"drop":["kamera"]}}
-{"id":"note-mem-h14","cat":"heldout","note":"notes/Python notları.md","text":"# Python notları\n\nList comprehension ile filtreleme yapılır. dict.get varsayılan değer döndürür.","expect":{"adds":[]}}
-{"id":"note-mem-h15","cat":"heldout","ui":"en","note":"notes/Packing list.md","text":"# Packing list\n\nPassport, charger, two shirts, sunscreen.","expect":{"adds":[]}}
-{"id":"note-mem-h16","cat":"heldout","ui":"en","note":"notes/Website.md","current":[["website","Building a personal website."]],"text":"# Website\n\nThe website is live now. Next I want to add a blog section.","expect":{"adds":[{"topic":"website","has":["live"]}]}}
-{"id":"note-mem-h17","cat":"heldout","note":"notes/Komşular.md","text":"# Komşular\n\nAlt kattaki aile yaz sonunda taşınacakmış. Yönetici aidatı artırmış.","expect":{"adds":[]}}
-{"id":"note-mem-h18","cat":"heldout","note":"notes/Spor salonu.md","text":"# Spor salonu\n\nBelki ocakta spor salonuna yazılırım, fiyatlara bakacağım.","expect":{"adds":[]}}
-{"id":"note-mem-h19","cat":"heldout","note":"notes/Düğün hazırlığı.md","text":"# Düğün hazırlığı\n\n- [x] Salon tutuldu\n- [x] Davetiyeler basıldı\n- [ ] Pasta tadımı","expect":{"adds":[{"has":["salon|davetiye"]},{"has":["salon|davetiye|pasta"],"optional":true}]}}
-{"id":"note-mem-h20","cat":"heldout","note":"daily/2026-10-20.md","text":"# 20 Ekim\n\nÖğleden sonra kütüphanede çalıştım, akşam yemeği için makarna yaptım.","expect":{"adds":[]}}
+{"id":"note-mem-h11","cat":"seen","note":"notes/Kitap yazımı.md","text":"# Kitap yazımı\n\nRomanın ilk taslağını bitirdim, şimdi editörle ikinci okumayı yapıyoruz.","expect":{"adds":[{"has":["taslak|editor|okuma"]},{"has":["taslak|editor|okuma|roman"],"optional":true}]}}
+{"id":"note-mem-h12","cat":"seen","note":"notes/Ev.md","current":[["ev-kredisi","Konut kredisi için bankalarla görüşüyor."]],"text":"# Ev\n\nZiraat'tan konut kredisi onaylandı, tapu randevusu 12 Aralık'ta.","expect":{"adds":[{"topic":"ev-kredisi","has":["onay|tapu"]}]}}
+{"id":"note-mem-h13","cat":"seen","note":"notes/Kamera.md","current":[["kamera","Kamera lensini değiştirmek için servise verdi."]],"text":"# Kamera\n\nISO 100, diyafram f/8, enstantane 1/125 manzara için iyi ayar.","expect":{"adds":[],"drop":["kamera"]}}
+{"id":"note-mem-h14","cat":"seen","note":"notes/Python notları.md","text":"# Python notları\n\nList comprehension ile filtreleme yapılır. dict.get varsayılan değer döndürür.","expect":{"adds":[]}}
+{"id":"note-mem-h15","cat":"seen","ui":"en","note":"notes/Packing list.md","text":"# Packing list\n\nPassport, charger, two shirts, sunscreen.","expect":{"adds":[]}}
+{"id":"note-mem-h16","cat":"seen","ui":"en","note":"notes/Website.md","current":[["website","Building a personal website."]],"text":"# Website\n\nThe website is live now. Next I want to add a blog section.","expect":{"adds":[{"topic":"website","has":["live"]}]}}
+{"id":"note-mem-h17","cat":"seen","note":"notes/Komşular.md","text":"# Komşular\n\nAlt kattaki aile yaz sonunda taşınacakmış. Yönetici aidatı artırmış.","expect":{"adds":[]}}
+{"id":"note-mem-h18","cat":"seen","note":"notes/Spor salonu.md","text":"# Spor salonu\n\nBelki ocakta spor salonuna yazılırım, fiyatlara bakacağım.","expect":{"adds":[]}}
+{"id":"note-mem-h19","cat":"seen","note":"notes/Düğün hazırlığı.md","text":"# Düğün hazırlığı\n\n- [x] Salon tutuldu\n- [x] Davetiyeler basıldı\n- [ ] Pasta tadımı","expect":{"adds":[{"has":["salon|davetiye"]},{"has":["salon|davetiye|pasta"],"optional":true}]}}
+{"id":"note-mem-h20","cat":"seen","note":"daily/2026-10-20.md","text":"# 20 Ekim\n\nÖğleden sonra kütüphanede çalıştım, akşam yemeği için makarna yaptım.","expect":{"adds":[]}}
+// note-mem-h11..h20 ran once as held-out (note-v4) and are "seen" since. Third held-out note set
+// below, frozen before the list, hearsay and daily-note guards (RESULTS.md, "Notlardan Durum").
+{"id":"note-mem-h21","cat":"heldout","note":"daily/2026-10-23.md","text":"# 23 Ekim\n\nTez taslağını danışmanıma gönderdim. Akşam arkadaşlarla yemeğe çıktık.","expect":{"adds":[{"has":["taslak|danisman"]}]}}
+{"id":"note-mem-h22","cat":"heldout","note":"notes/Market.md","text":"# Market\n\nSüt, yumurta, ekmek, domates.","expect":{"adds":[]}}
+{"id":"note-mem-h23","cat":"heldout","note":"notes/Ofis.md","text":"# Ofis\n\nMüdür yeni bir projeye başlamış. Muhasebe ekibi ikinci kata taşınmış.","expect":{"adds":[]}}
+{"id":"note-mem-h24","cat":"heldout","note":"notes/Taşınma.md","text":"# Taşınma\n\n- [x] Nakliyeci ayarlandı\n- [x] Kutular toplandı\n- [ ] İnternet aboneliği","expect":{"adds":[{"has":["nakliye|kutu"]},{"has":["nakliye|kutu|internet"],"optional":true}]}}
+{"id":"note-mem-h25","cat":"heldout","ui":"en","note":"daily/2026-10-21.md","text":"# 21 October\n\nWent for a run in the morning. Watched a film in the evening.","expect":{"adds":[]}}
+{"id":"note-mem-h26","cat":"heldout","note":"notes/Yayın.md","text":"# Yayın\n\nMakalemiz konferansa kabul edildi, kamera-hazır sürümü 5 Aralık'a kadar gönderilecek.","expect":{"adds":[{"has":["makale|kabul"]}]}}
+{"id":"note-mem-h27","cat":"heldout","ui":"en","note":"notes/Team.md","text":"# Team\n\nApparently Sam is leaving the company. Priya got promoted.","expect":{"adds":[]}}
+{"id":"note-mem-h28","cat":"heldout","note":"notes/Rust.md","current":[["yazilim-kursu","Rust kursuna başladı."]],"text":"# Rust\n\nRust kursunun yarısını bitirdim, şimdi sahiplik konusundayım.","expect":{"adds":[{"topic":"yazilim-kursu","has":["yari|sahiplik"]}]}}
+{"id":"note-mem-h29","cat":"heldout","ui":"en","note":"notes/Gift ideas.md","text":"# Gift ideas\n\nBook, scarf, headphones, coffee beans.","expect":{"adds":[]}}
+{"id":"note-mem-h30","cat":"heldout","note":"daily/2026-10-24.md","text":"# 24 Ekim\n\nBugün bitirme projesinin raporunu teslim ettim.","expect":{"adds":[{"has":["rapor|teslim"]}]}}
