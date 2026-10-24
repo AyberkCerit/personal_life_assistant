@@ -807,7 +807,7 @@ impl Worker {
         }
         // the lines the user deleted since are rejected first, so they are not written again
         if let Err(e) = pla_core::recall::reconcile(&self.vault, &self.conn) {
-            self.status.last_error = Some(ue(infer::InferError::from(e)));
+            self.status.last_error = Some(ue(e));
             self.publish();
             return;
         }
@@ -831,7 +831,7 @@ impl Worker {
         }
         if written > 0 {
             if let Err(e) = infer::stamp(&self.vault, written, now, lang) {
-                self.status.last_error = Some(ue(infer::InferError::from(e)));
+                self.status.last_error = Some(ue(e));
             }
         }
         self.status.busy = false;
