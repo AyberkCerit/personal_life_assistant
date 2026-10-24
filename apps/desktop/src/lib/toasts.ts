@@ -2,6 +2,13 @@
 // the timers stop while the user hovers or focuses them so Undo stays reachable (WCAG 2.2.1).
 
 import { browserClock, type Clock } from "./triggers";
+import type { Key } from "./i18n";
+
+/** The line above an added item's title: a routine and a memory line say what they are. */
+export function toastLabel(kind: string): Key {
+  if (kind === "memory") return "toast.memory";
+  return kind === "routine" ? "toast.routine" : "toast.added";
+}
 
 export interface Toast<T> {
   key: number;

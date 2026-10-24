@@ -59,9 +59,25 @@ pub fn delete_task(state: State<AppState>, id: String) -> Result<(), String> {
 }
 
 /// Undo of an automatic addition (FR-EXT-015): removed and remembered as rejected (FR-EXT-018).
+/// A memory line goes to the archive as turned down (assistant memory).
 #[tauri::command]
 pub fn undo_item(state: State<AppState>, kind: String, id: String) -> Result<(), String> {
+    if kind == "memory" {
+        let guard = state.session.lock().expect("session lock");
+        let Some(session) = guard.as_ref() else { return Err(crate::commands::NO_VAULT.into()) };
+        let db = session.db.lock().expect("db lock");
+        return undo_memory(&session.vault, &db, &id, &state.self_writes).map_err(ue);
+    }
     with_db(&state, |db| undo(db, &kind, &id))
+}
+
+fn undo_memory(vault: &pla_core::vault::Vault, db: &Connection, id: &str, own: &crate::watcher::SelfWrites) -> Result<(), pla_core::recall::RecallError> {
+    let wrote = |rel: &str| {
+        if let Ok(text) = std::fs::read_to_string(vault.root.join(rel)) {
+            own.record_text(rel, &text);
+        }
+    };
+    pla_core::recall::undo(vault, db, id, now(), crate::notify::ui_language(), &wrote).map(drop)
 }
 
 fn undo(db: &mut Connection, kind: &str, id: &str) -> Result<(), tasks::TaskError> {
@@ -156,5 +172,28 @@ mod tests {
         let routines: i64 = db.query_row("SELECT count(*) FROM routine", [], |r| r.get(0)).unwrap();
         let status: String = db.query_row("SELECT status FROM task WHERE task_id = 'copy'", [], |r| r.get(0)).unwrap();
         assert_eq!((routines, status.as_str()), (0, "open"));
+    }
+
+    #[test]
+    fn undoing_memory_rejects_it() {
+        // assistant memory Task 9: the toast's Undo turns the line down, with its reason
+        use pla_core::recall::{apply, Change, Kind, Proposal, Role};
+        let tmp = tempfile::tempdir().unwrap();
+        let vault = pla_core::vault::open_vault(tmp.path()).unwrap();
+        let db = pla_core::db::open_databases(&tmp.path().join(".data")).unwrap().pla;
+        let lang = crate::notify::ui_language();
+        let said = Proposal { text: "Kahveyi sütsüz içer.".into(), topic: "kahve".into(), role: Role::About, person: None, kind: Kind::Said, source: None };
+        let id = apply(&vault, &db, &[Change::Add(said)], now(), lang, &|_| {}).unwrap()[0].id.clone();
+        let own = crate::watcher::SelfWrites::new();
+        undo_memory(&vault, &db, &id, &own).unwrap();
+        let (state, reason): (String, String) = db.query_row("SELECT state, reason FROM memory_entry WHERE id = ?1", [&id], |r| Ok((r.get(0)?, r.get(1)?))).unwrap();
+        assert_eq!((state.as_str(), reason.as_str()), ("rejected", "undone"));
+        let memory = tmp.path().join("memory");
+        let archive = std::fs::read_to_string(memory.join(Role::Archive.file_name(lang))).unwrap();
+        let rejected = archive.split(&format!("## {}\n", if lang == pla_core::lang::Lang::Tr { "Reddedilenler" } else { "Rejected" })).nth(1).unwrap_or("");
+        assert!(rejected.contains("Kahveyi sütsüz içer."), "{archive}");
+        assert!(!std::fs::read_to_string(memory.join(Role::About.file_name(lang))).unwrap().contains("Kahveyi"));
+        let rel = format!("memory/{}", Role::Archive.file_name(lang));
+        assert!(own.is_own(&rel, &pla_core::util::content_hash(archive.as_bytes())), "the watcher hears PLA's own write");
     }
 }

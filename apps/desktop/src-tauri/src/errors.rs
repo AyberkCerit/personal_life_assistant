@@ -134,6 +134,19 @@ impl From<pla_core::pipeline::PipelineError> for UserError {
     }
 }
 
+impl From<pla_core::recall::RecallError> for UserError {
+    fn from(e: pla_core::recall::RecallError) -> Self {
+        use pla_core::recall::RecallError;
+        match e {
+            // the file the user should look at, with the system's reason to copy
+            RecallError::Unreadable { file, error } => Self { detail: file, ..error.into() },
+            RecallError::Io(e) => e.into(),
+            RecallError::Db(e) => e.into(),
+            RecallError::Busy { file } => Self::unexpected(format!("{file} kept changing while PLA wrote to it")),
+        }
+    }
+}
+
 impl From<pla_core::jobs::JobError> for UserError {
     fn from(e: pla_core::jobs::JobError) -> Self {
         match e {
