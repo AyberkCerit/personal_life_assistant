@@ -324,8 +324,12 @@ function mockTree(cmd: string, args: Record<string, unknown>): unknown {
   return undefined;
 }
 
-// Assistant stand-in: answers in a few tokens; "hatırlat" adds a task the panel can undo.
+// Assistant stand-in: answers in a few tokens; "hatırlat" adds a task the panel can undo. A
+// statement that says "-im"/"I …" about the user is remembered after the answer, as the worker's
+// memory step would, so the "Remembered" toast and its Undo can be tried.
 const mockTurns: unknown[] = [];
+const mockMemory: { id: string; text: string }[] = [];
+const soundsPersonal = (q: string) => !q.includes("?") && (/\b(I|my)\b/i.test(q) || /(im|ım|um|üm)[.!]?$/i.test(q.trim()));
 let mockStop = false;
 function mockQa(cmd: string, args: Record<string, unknown>): unknown {
   switch (cmd) {
@@ -352,6 +356,11 @@ function mockQa(cmd: string, args: Record<string, unknown>): unknown {
         const turn = { turn_id: id, question: q, answer, tools, created_at: new Date().toISOString(), status: mockStop ? "stopped" : "done", new_topic: Boolean(args.newTopic) };
         mockTurns.push(turn);
         emit("qa-event", { kind: "done", turn_id: id, turn, sources: tools.length ? ["Hoş geldin.md"] : [] });
+        if (!mockStop && !tools.length && soundsPersonal(q)) {
+          const line = { id: `mem${nextId++}`, text: q.trim() };
+          mockMemory.push(line);
+          setTimeout(() => emit("items-added", [{ kind: "memory", id: line.id, title: line.text }]), 600);
+        }
       });
       return id;
     }
@@ -456,6 +465,7 @@ export async function mockBackend<T>(cmd: string, args: Record<string, unknown>)
     case "model_remove":
       installed = null;
       emit("model-removed", null);
+      emit("worker-status", mockWorkerStatus());
       return undefined as T;
     case "backup_now":
       setTimeout(() => {
@@ -508,7 +518,7 @@ export async function mockBackend<T>(cmd: string, args: Record<string, unknown>)
     case "vault_info":
       return vaultInfo(vault) as T;
     case "worker_status":
-      return { queued: 0, model: "not_installed", busy: false, last_error: null, added: 0, paused: false } as T;
+      return mockWorkerStatus() as T;
     case "list_tasks":
       return listTasks(String(args.list)) as T;
     case "add_task":
@@ -550,6 +560,11 @@ export async function mockBackend<T>(cmd: string, args: Record<string, unknown>)
       routines = routines.filter((r) => r.routine_id !== args.id);
       return undefined as T;
     case "undo_item":
+      if (args.kind === "memory") {
+        const at = mockMemory.findIndex((m) => m.id === args.id);
+        if (at >= 0) mockMemory.splice(at, 1);
+        return undefined as T;
+      }
       if (args.kind === "routine") {
         routines = routines.filter((r) => r.routine_id !== args.id);
         return undefined as T;
@@ -612,6 +627,7 @@ export async function mockBackend<T>(cmd: string, args: Record<string, unknown>)
           emit("model-download", download);
           installed = { name: RECOMMENDED.name, size: RECOMMENDED.size, path: "C:/…/gemma-4-E2B-it-Q3_K_M.gguf", local: false };
           emit("model-changed", installed);
+          emit("worker-status", mockWorkerStatus());
         }
       }, 300);
       return undefined as T;
@@ -625,11 +641,17 @@ export async function mockBackend<T>(cmd: string, args: Record<string, unknown>)
       if (!path.toLowerCase().endsWith(".gguf")) throw new Error("not_gguf||");
       installed = { name: path.split(/[\\/]/).pop() ?? path, size: 2_536_786_016, path, local: true };
       emit("model-changed", installed);
+      emit("worker-status", mockWorkerStatus());
       return installed as T;
     }
     default:
       throw new Error(`mock: unknown command ${cmd}`);
   }
+}
+
+/** The worker's status as the status bar and the assistant panel read it: a model once one is set up. */
+function mockWorkerStatus() {
+  return { queued: 0, model: installed ? "off" : "not_installed", busy: false, last_error: null, added: 0, paused: false };
 }
 
 // Dev helpers for the browser check: simulate the scheduler.

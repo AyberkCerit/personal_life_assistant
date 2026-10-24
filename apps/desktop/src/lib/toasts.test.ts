@@ -1,5 +1,6 @@
-import { describe, expect, it } from "vitest";
-import { ToastQueue } from "./toasts";
+import { afterEach, describe, expect, it } from "vitest";
+import { ToastQueue, toastLabel } from "./toasts";
+import { setLang, t } from "./i18n";
 import type { Clock } from "./triggers";
 
 class FakeClock implements Clock {
@@ -72,5 +73,19 @@ describe("ToastQueue (Final review I5)", () => {
     q.dismiss(key);
     expect(q.visible()).toEqual([]);
     expect(changes).toBe(2);
+  });
+});
+
+describe("toastLabel", () => {
+  afterEach(() => setLang("tr"));
+
+  it("memory_toasts_say_remembered", () => {
+    // assistant memory Task 9: a line written from the chat is not "added by AI"
+    setLang("tr");
+    expect(t(toastLabel("memory"))).toBe("Hafızaya eklendi");
+    setLang("en");
+    expect(t(toastLabel("memory"))).toBe("Remembered");
+    expect(toastLabel("routine")).toBe("toast.routine");
+    expect(toastLabel("task")).toBe("toast.added");
   });
 });

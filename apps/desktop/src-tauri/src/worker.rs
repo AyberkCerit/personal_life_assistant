@@ -3,7 +3,7 @@
 //! in one model session (FR-EXT-008), keeps work queued when there is no model (FR-EXT-022) and lets
 //! the model host stop an idle model (FR-MDL-013). The UI learns everything through `WorkerStatus`.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::sync::{Arc, Mutex};
@@ -57,8 +57,22 @@ pub enum Command {
         cache_path: std::path::PathBuf,
         lang: String,
     },
+    /// Assistant memory: keep what the user said in this turn (queued after each answer too).
+    Remember(RememberJob),
     Shutdown,
 }
+
+/// One answered turn to remember from: the user's message, and their previous one when the
+/// message points back at it ("bunu hatırla"). Never the assistant's answer.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RememberJob {
+    pub turn_id: String,
+    pub message: String,
+    pub previous: Option<String>,
+}
+
+/// Turns waiting to be remembered beyond this many: the oldest go (the model stayed off for long).
+const REMEMBER_BACKLOG: usize = 20;
 
 /// One question for the assistant. `on` hears the progress; `cancel` is the Stop button.
 pub struct AskJob {
@@ -345,6 +359,10 @@ pub struct Worker {
     /// new topic, so a note written meanwhile does not change the prompt the server has cached.
     /// The vault is fixed for a worker: a vault switch starts a new one, with no snapshot.
     recall: Option<pla_core::recall::Recall>,
+    /// Answered turns whose memory step has not run yet (it runs while the model is up and idle).
+    remember: VecDeque<RememberJob>,
+    /// Memory files PLA writes are its own: the watcher must not take them for the user's edits.
+    self_writes: Option<Arc<crate::watcher::SelfWrites>>,
 }
 
 impl Worker {
@@ -371,6 +389,8 @@ impl Worker {
             on_report: None,
             reader,
             recall: None,
+            remember: VecDeque::new(),
+            self_writes: None,
             status: WorkerStatus { queued: 0, model, busy: false, last_error: None, added: 0, paused: false },
         }
     }
@@ -402,6 +422,11 @@ impl Worker {
 
     pub fn with_clock(mut self, clock: Clock) -> Self {
         self.clock = clock;
+        self
+    }
+
+    pub fn with_self_writes(mut self, own: Arc<crate::watcher::SelfWrites>) -> Self {
+        self.self_writes = Some(own);
         self
     }
 
@@ -481,12 +506,14 @@ impl Worker {
                     }
                     self.process();
                 }
+                Ok(Command::Remember(job)) => self.queue_remember(job),
                 Ok(Command::Shutdown) | Err(RecvTimeoutError::Disconnected) => break,
                 Err(RecvTimeoutError::Timeout) => self.tick(),
             }
             if !self.later.is_empty() {
                 self.flush_quiet_external_changes();
             }
+            self.remember_queued();
         }
     }
 
@@ -789,6 +816,7 @@ impl Worker {
             Err(e) => return fail("db", ue(e)),
         };
         let turns = qa::follow_up(&self.conn, new_topic).unwrap_or_default();
+        let previous = turns.last().map(|t| t.question.clone()).filter(|_| pla_core::recall::extract::points_back(&question));
         // FR-MEM-003: chunks still waiting are embedded first, at most 10 s (the rest later), then
         // the question's own vector joins the keyword search.
         // Busy from here on: the panel shows it and the indexer leaves the CPU to the question.
@@ -844,6 +872,9 @@ impl Worker {
             Err(QaError::Db(e)) => (turn(String::new(), Vec::new(), "failed"), Vec::new(), Some(("db", ue(e)))),
         };
         let _ = qa::save_turn(&self.conn, &saved); // FR-QA-014, also a stopped or failed one
+        if saved.status == "done" {
+            self.queue_remember(RememberJob { turn_id: turn_id.clone(), message: question.clone(), previous });
+        }
         match failure {
             Some((code, detail)) => fail(code, detail),
             None => on(QaEvent::Done { turn_id: turn_id.clone(), turn: Box::new(saved), sources }),
@@ -851,6 +882,60 @@ impl Worker {
         self.status.busy = false;
         self.status.model = self.model_state();
         self.publish();
+    }
+
+    fn queue_remember(&mut self, job: RememberJob) {
+        self.remember.push_back(job);
+        while self.remember.len() > REMEMBER_BACKLOG {
+            self.remember.pop_front();
+        }
+    }
+
+    /// Assistant memory: the turns waiting to be remembered, one model call each, only while the
+    /// model is up and nothing else wants it (a question, a read-ahead, a pause, closing). A call a
+    /// question stops keeps its turn first in line, to run again from the start; any other failure
+    /// lets the turn go. The files are reconciled before each turn, so a line the user deleted
+    /// meanwhile counts as turned down.
+    fn remember_queued(&mut self) {
+        while let Some(job) = self.remember.front().cloned() {
+            let running = self.extractor.as_ref().is_some_and(|x| x.is_running());
+            if !running || self.stops.reason().is_some() || self.stops.warming.load(Ordering::SeqCst) > 0 {
+                return;
+            }
+            self.interrupt.store(false, Ordering::SeqCst);
+            if self.stops.reason().is_some() {
+                return; // a question came between the two checks: its interrupt was just cleared
+            }
+            use pla_core::recall::{self, extract};
+            let _ = recall::reconcile(&self.vault, &self.conn);
+            let topics = extract::known_topics(&recall::load(&self.vault));
+            let rejected = recall::rejected(&self.conn);
+            let lang = crate::notify::ui_language();
+            let body = extract::request(&job.message, job.previous.as_deref(), &topics, &rejected, lang);
+            let Some(model) = self.extractor.as_mut().and_then(|x| x.chat_model()) else { return };
+            let answer = model.complete(&body, &self.interrupt);
+            if matches!(answer, Err(LlmError::Cancelled)) {
+                return; // stopped for a question: first in line, from the start
+            }
+            self.remember.pop_front();
+            let Some(raw) = answer.ok().and_then(|a| extract::parse(&a).ok()) else { continue };
+            let changes = extract::guard(raw, &job.message, job.previous.as_deref(), &topics, &rejected);
+            if changes.is_empty() {
+                continue;
+            }
+            let (own, root) = (self.self_writes.clone(), self.vault.root.clone());
+            let wrote = move |rel: &str| {
+                if let (Some(own), Ok(text)) = (&own, std::fs::read_to_string(root.join(rel))) {
+                    own.record_text(rel, &text);
+                }
+            };
+            let Ok(written) = recall::apply(&self.vault, &self.conn, &changes, (self.clock)(), lang, &wrote) else { continue };
+            let items: Vec<AddedItem> = written.into_iter().map(|e| AddedItem { kind: "memory".into(), id: e.id, title: e.text }).collect();
+            if let (Some(listener), false) = (&self.on_added, items.is_empty()) {
+                self.status.added += items.len();
+                listener(&items);
+            }
+        }
     }
 
     fn model_state(&self) -> ModelState {
@@ -1653,5 +1738,144 @@ mod tests {
         let s = wait_for(&statuses, |s| s.queued >= 1);
         assert_eq!(s.added, 0, "no model, the note waits");
         handle.shutdown();
+    }
+
+    const COFFEE: &str = "Kahveyi sütsüz içerim.";
+    const REMEMBERED: &str = r#"{"memories":[{"evidence":"Kahveyi sütsüz içerim.","file":"about","person":null,"topic":"kahve","text":"Kahveyi sütsüz içer."}],"forget":[]}"#;
+
+    /// A running model that answers every question plainly and every memory request with
+    /// `REMEMBERED`; the first `hold` memory requests think until they are stopped.
+    struct Rememberer {
+        hold: Arc<AtomicUsize>,
+        bodies: Arc<Mutex<Vec<serde_json::Value>>>,
+    }
+    fn is_memory_request(body: &serde_json::Value) -> bool {
+        body["response_format"]["json_schema"]["name"] == "memory"
+    }
+    impl Extractor for Rememberer {
+        fn extract_raw(&mut self, _: NaiveDate, _: &str) -> Result<String, LlmError> {
+            Ok(r#"{"items":[]}"#.to_owned())
+        }
+        fn is_running(&self) -> bool {
+            true
+        }
+        fn chat_model(&mut self) -> Option<&mut dyn pla_core::qa::ChatModel> {
+            Some(self)
+        }
+    }
+    impl pla_core::qa::ChatModel for Rememberer {
+        fn complete(&mut self, body: &serde_json::Value, cancel: &AtomicBool) -> Result<String, LlmError> {
+            self.bodies.lock().unwrap().push(body.clone());
+            if !is_memory_request(body) {
+                return Ok(r#"{"tool":"answer","args":{}}"#.into());
+            }
+            if self.hold.load(Ordering::SeqCst) > 0 {
+                self.hold.fetch_sub(1, Ordering::SeqCst);
+                while !cancel.load(Ordering::SeqCst) {
+                    std::thread::sleep(Duration::from_millis(20));
+                }
+                return Err(LlmError::Cancelled);
+            }
+            Ok(REMEMBERED.into())
+        }
+        fn stream(&mut self, body: &serde_json::Value, _: &AtomicBool, on: &mut dyn FnMut(&str)) -> Result<String, LlmError> {
+            self.bodies.lock().unwrap().push(body.clone());
+            on("Tamam.");
+            Ok("Tamam.".into())
+        }
+    }
+
+    struct Remembering {
+        tmp: tempfile::TempDir,
+        handle: WorkerHandle,
+        data: std::path::PathBuf,
+        added: std::sync::mpsc::Receiver<Vec<AddedItem>>,
+        bodies: Arc<Mutex<Vec<serde_json::Value>>>,
+    }
+
+    fn remembering(hold: usize) -> Remembering {
+        let tmp = tempfile::tempdir().unwrap();
+        let vault = open_vault(tmp.path()).unwrap();
+        let data = tmp.path().join(".data");
+        let conn = open_databases(&data).unwrap().pla;
+        let bodies = Arc::new(Mutex::new(Vec::new()));
+        let model = Rememberer { hold: Arc::new(AtomicUsize::new(hold)), bodies: Arc::clone(&bodies) };
+        let (tx, added) = std::sync::mpsc::channel();
+        let tx = Mutex::new(tx);
+        let handle = Worker::new(vault, conn, Some(Box::new(model)), Box::new(|_| {}))
+            .with_added_listener(Box::new(move |items| {
+                let _ = tx.lock().unwrap().send(items.to_vec());
+            }))
+            .with_self_writes(Arc::new(crate::watcher::SelfWrites::new()))
+            .spawn();
+        Remembering { tmp, handle, data, added, bodies }
+    }
+
+    fn ask_topic(handle: &WorkerHandle, data: &std::path::Path, turn_id: &str, question: &str, new_topic: bool) -> Vec<QaEvent> {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let tx = Mutex::new(tx);
+        handle.ask(AskJob {
+            turn_id: turn_id.into(),
+            question: question.into(),
+            new_topic,
+            cache_path: data.join("cache.db"),
+            memory: Arc::new(Mutex::new(None)),
+            cancel: Arc::new(AtomicBool::new(false)),
+            on: Box::new(move |e| {
+                let _ = tx.lock().unwrap().send(e);
+            }),
+        });
+        until_end(&rx)
+    }
+
+    fn memory_file(tmp: &tempfile::TempDir) -> String {
+        std::fs::read_to_string(tmp.path().join("memory").join(pla_core::recall::Role::About.file_name(crate::notify::ui_language()))).unwrap_or_default()
+    }
+
+    fn wait_until(what: &str, f: impl Fn() -> bool) {
+        let start = Instant::now();
+        while !f() {
+            assert!(start.elapsed() < Duration::from_secs(10), "{what} never happened");
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    }
+
+    #[test]
+    fn a_question_stops_remembering_and_it_runs_again_after() {
+        // assistant memory Task 9: the memory step yields to a question and starts over
+        let r = remembering(1);
+        assert!(matches!(ask_topic(&r.handle, &r.data, "t1", COFFEE, true).last(), Some(QaEvent::Done { .. })));
+        wait_until("the memory step", || r.bodies.lock().unwrap().iter().any(is_memory_request));
+        let events = ask_topic(&r.handle, &r.data, "t2", "Bugün ne var?", false);
+        assert!(matches!(events.last(), Some(QaEvent::Done { .. })), "the question is answered first: {events:?}");
+        assert!(r.added.try_recv().is_err(), "nothing was remembered before the answer");
+        let items = r.added.recv_timeout(Duration::from_secs(10)).expect("remembered after the answer");
+        assert_eq!(items[0].title, "Kahveyi sütsüz içer.");
+        assert!(r.bodies.lock().unwrap().iter().filter(|b| is_memory_request(b)).count() >= 2, "it ran again");
+        assert!(memory_file(&r.tmp).contains("Kahveyi sütsüz içer."));
+    }
+
+    #[test]
+    fn a_memory_written_mid_conversation_waits_for_the_next_one() {
+        // spec: what the chat writes joins the prompt from the next conversation on
+        let r = remembering(0);
+        ask_topic(&r.handle, &r.data, "t1", COFFEE, true);
+        wait_until("the memory line", || memory_file(&r.tmp).contains("Kahveyi sütsüz içer."));
+        let seen = |from: usize| r.bodies.lock().unwrap()[from..].iter().filter(|b| !is_memory_request(b)).any(|b| b.to_string().contains("Kahveyi sütsüz içer."));
+        let before = r.bodies.lock().unwrap().len();
+        ask_topic(&r.handle, &r.data, "t2", "Bugün ne var?", false);
+        assert!(!seen(before), "the same conversation keeps the memory it started with");
+        let before = r.bodies.lock().unwrap().len();
+        ask_topic(&r.handle, &r.data, "t3", "Yarın ne var?", true);
+        assert!(seen(before), "a new conversation reads the new line");
+    }
+
+    #[test]
+    fn remembering_emits_memory_items() {
+        let r = remembering(0);
+        ask_topic(&r.handle, &r.data, "t1", COFFEE, true);
+        let items = r.added.recv_timeout(Duration::from_secs(10)).expect("an item");
+        let id = pla_core::recall::parse(pla_core::recall::Role::About, &memory_file(&r.tmp))[0].id.clone();
+        assert_eq!(items, [AddedItem { kind: "memory".into(), id, title: "Kahveyi sütsüz içer.".into() }]);
     }
 }

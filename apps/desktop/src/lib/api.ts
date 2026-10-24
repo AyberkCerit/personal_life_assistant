@@ -17,7 +17,8 @@ export interface ReviewItem {
   block_text: string | null;
   created_at: string;
 }
-export interface AddedItem { kind: "task" | "metric" | "routine"; id: string; title: string }
+/** `memory`: a line the assistant wrote to the memory files from the chat. */
+export interface AddedItem { kind: "task" | "metric" | "routine" | "memory"; id: string; title: string }
 /** `restore_offer`: a backup to offer before the vault is used (FR-BKP-004/008, FR-LOG-007). */
 export interface VaultInfo { path: string; inbox: string; folders: Folders; restore_offer: RestoreOffer | null }
 export type { Task } from "./tasks";
