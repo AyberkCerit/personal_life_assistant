@@ -96,7 +96,10 @@ fn line(e: &Entry) -> String {
         Kind::Inferred => {
             let path = e.source.as_deref().unwrap_or("").split('#').next().unwrap_or("");
             let file = path.rsplit('/').next().unwrap_or(path);
-            format!("- According to your notes ([[{}]], {date}): {}", file.strip_suffix(".md").unwrap_or(file), e.text)
+            // the hedge again after the colon, in the line's own language: the model copies the
+            // sentence and drops the English label (memory-p5: X8 "öne çıkıyor" with no hedge)
+            let hedge = if crate::qa::lang::answer_language(&e.text, None, "en") == "tr" { "Notlarına göre" } else { "According to your notes" };
+            format!("- According to your notes ([[{}]], {date}): {hedge}, {}", file.strip_suffix(".md").unwrap_or(file), e.text)
         }
     }
 }
@@ -267,7 +270,7 @@ mod tests {
         let b = block(&r);
         assert!(b.starts_with("About the user:\n"), "{b}");
         assert!(b.contains("- Sabah spor. (said by the user, 2026-10-18)"), "{b}");
-        assert!(b.contains("- According to your notes ([[Skywalker X8]], 2026-10-10): X8 önde."), "{b}");
+        assert!(b.contains("- According to your notes ([[Skywalker X8]], 2026-10-10): Notlarına göre, X8 önde."), "{b}");
         assert!(b.ends_with("- Çay sever."), "{b}");
         assert!(!b.contains("arşiv") && !b.contains("yok"));
     }
@@ -282,8 +285,12 @@ mod tests {
         let b = block(&r);
         let hedged: Vec<&str> = b.lines().filter(|l| l.starts_with("- According to your notes (")).collect();
         assert_eq!(hedged.len(), 1, "{b}");
-        assert_eq!(hedged[0], "- According to your notes ([[Skywalker X8]], 2026-10-10): X8 önde.", "{b}");
+        assert_eq!(hedged[0], "- According to your notes ([[Skywalker X8]], 2026-10-10): Notlarına göre, X8 önde.", "{b}");
         assert!(b.contains("- Sabah spor. (said by the user, 2026-10-18)") && b.contains("- Çay sever."), "{b}");
+        // an English line gets the English hedge
+        let md = "- The X8 is ahead. <!-- pla:id=b konu=x tür=çıkarım kaynak=iha/Skywalker X8.md#9f tarih=2026-10-10 -->\n";
+        let b = block(&load(&vault_with(&[("Hakkımda.md", md)]).1));
+        assert!(b.contains("- According to your notes ([[Skywalker X8]], 2026-10-10): According to your notes, The X8 is ahead."), "{b}");
     }
 
     #[test]

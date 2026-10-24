@@ -166,6 +166,11 @@ fn messages(ctx: &Context, question: &str, calls: &[ToolRecord], now: DateTime<F
             {
                 format!("Tool result: {}\nThe user says they did this task: call complete_task with task_id {}.", c.result, c.result["tasks"][0]["task_id"])
             }
+            // an empty search read last made the model say "not in the notes" while the people
+            // section held the answer ("Ali'nin en sevdiği yemek", memory-p5)
+            None if c.tool == "search_notes" && (!ctx.memory.is_empty() || !ctx.people.is_empty()) => {
+                format!("Tool result: {}\nIf these notes do not answer the question, the memory sections above may: answer from them. Memory is not a note: give it no [[link]].", c.result)
+            }
             None => format!("Tool result: {}", c.result),
         };
         m.push(json!({ "role": "user", "content": result }));
@@ -267,6 +272,44 @@ fn trimmed(rec: &ToolRecord, left: &mut usize) -> ToolRecord {
         *left -= cost;
     }
     rec
+}
+
+/// Rule 8 kept in code: an answer that repeats an inferred memory line (cites its note or carries
+/// half of its words) without a hedge gets one. The model copied "Bitirme projesinde Skywalker X8
+/// öne çıkıyor" as a fact although the line was hedged and rule 8 asked for it (memory-p5).
+fn with_hedge(text: String, recall: &Recall, question: &str, lang: &str) -> String {
+    // any "... göre" / "according to ...": the model's own hedge ("Notlara göre") counts too
+    const HEDGES: [&str; 9] = ["göre", "notlarında", "notlarına bakılırsa", "görünüyor", "muhtemelen", "according to", "your notes", "seems", "likely"];
+    let lower = text.to_lowercase();
+    if HEDGES.iter().any(|h| lower.contains(h)) {
+        return text;
+    }
+    let words = |s: &str| -> Vec<String> { s.to_lowercase().split(|c: char| !c.is_alphanumeric()).filter(|w| w.chars().count() >= 4).map(str::to_owned).collect() };
+    let said: Vec<String> = words(&text);
+    let uses = |e: &crate::recall::Entry| {
+        let note = e.source.as_deref().unwrap_or("").split('#').next().unwrap_or("").rsplit('/').next().unwrap_or("").trim_end_matches(".md").to_owned();
+        let own = words(&e.text);
+        (!note.is_empty() && text.contains(&format!("[[{note}]]"))) || (!own.is_empty() && own.iter().filter(|w| said.contains(w)).count() * 2 >= own.len())
+    };
+    let inferred = [&recall.about, &recall.rules, &recall.state, &recall.people].into_iter().flatten().filter(|e| e.kind == crate::recall::Kind::Inferred);
+    if !inferred.into_iter().any(uses) {
+        return text;
+    }
+    // the first word stays capitalized unless the question has it in lower case ("bitirme")
+    let first = text.split_whitespace().next().unwrap_or_default();
+    let mut chars = first.chars();
+    let lowered = match chars.next() {
+        Some('İ') => format!("i{}", chars.as_str()),
+        Some('I') if lang == "tr" => format!("ı{}", chars.as_str()),
+        Some(c) => format!("{}{}", c.to_lowercase(), chars.as_str()),
+        None => String::new(),
+    };
+    let rest = if !lowered.is_empty() && lowered != first && question.split(|c: char| !c.is_alphanumeric()).any(|w| w == lowered) {
+        format!("{lowered}{}", &text[first.len()..])
+    } else {
+        text
+    };
+    format!("{}, {rest}", if lang == "tr" { "Notlarına göre" } else { "According to your notes" })
 }
 
 /// A small model copies the time of an earlier task into a new one ("cuma annemi ara" became a
@@ -783,6 +826,7 @@ pub fn answer(model: &mut dyn ChatModel, env: &ToolEnv<'_>, q: &Question<'_>, ca
         Ok(whole) if text.is_empty() => text = whole,
         Ok(_) => {}
     }
+    let text = with_hedge(text.trim().to_owned(), recall.unwrap_or(&none), question, lang);
     // FR-QA-010: the notes it cites; when it cites none, the notes its context came from.
     let mut sources: Vec<String> = Vec::new();
     for target in cited(&text) {
@@ -802,7 +846,7 @@ pub fn answer(model: &mut dyn ChatModel, env: &ToolEnv<'_>, q: &Question<'_>, ca
             }
         }
     }
-    Ok(Answer { text: text.trim().to_owned(), tools: shown, sources })
+    Ok(Answer { text, tools: shown, sources })
 }
 
 #[cfg(test)]
@@ -1176,6 +1220,55 @@ Tools you may call:"), "{s}");
 Deniz:
 - Kardeşi".into(), ..Default::default() }, now());
         assert!(p.contains("8. The memory section") && p.contains("9. If memory"), "{p}");
+    }
+
+    #[test]
+    fn a_search_result_points_back_to_the_memory() {
+        let search = ToolRecord { tool: "search_notes".into(), args: json!({ "query": "Ali yemek" }), ok: true, result: json!({ "notes": [] }), error: None, undo: None };
+        let result = |ctx: &Context| messages(ctx, "Ali'nin en sevdiği yemek?", std::slice::from_ref(&search), now(), "")[3]["content"].as_str().unwrap().to_owned();
+        let with = result(&Context { people: "About people mentioned:\nAli:\n- En sevdiği yemek mantı".into(), ..Default::default() });
+        assert_eq!(with, "Tool result: {\"notes\":[]}\nIf these notes do not answer the question, the memory sections above may: answer from them. Memory is not a note: give it no [[link]].");
+        // without memory the result is as it was
+        assert_eq!(result(&Context::default()), "Tool result: {\"notes\":[]}");
+    }
+
+    #[test]
+    fn an_inferred_memory_line_is_never_said_as_a_fact() {
+        let mut recall = Recall::default();
+        recall.state.push(crate::recall::Entry {
+            id: "b".into(),
+            text: "Bitirme projesinde Skywalker X8 öne çıkıyor.".into(),
+            kind: crate::recall::Kind::Inferred,
+            topic: "x8".into(),
+            source: Some("projeler/Sabit Kanat İHA Seçimi.md#b1".into()),
+            date: chrono::NaiveDate::from_ymd_opt(2026, 10, 5).unwrap(),
+            person: None,
+            notes: Vec::new(),
+        });
+        let q = "bitirme projesinde hangi gövde önde?";
+        // copied as a fact: hedged, the question's lower-case word kept lower case
+        assert_eq!(
+            with_hedge("Bitirme projesinde Skywalker X8 öne çıkıyor [[Sabit Kanat İHA Seçimi]].".into(), &recall, q, "tr"),
+            "Notlarına göre, bitirme projesinde Skywalker X8 öne çıkıyor [[Sabit Kanat İHA Seçimi]]."
+        );
+        // only the citation: still the inferred line; a name keeps its capital
+        assert_eq!(with_hedge("Skywalker X8 [[Sabit Kanat İHA Seçimi]].".into(), &recall, q, "tr"), "Notlarına göre, Skywalker X8 [[Sabit Kanat İHA Seçimi]].");
+        assert_eq!(with_hedge("Skywalker X8 is ahead [[Sabit Kanat İHA Seçimi]].".into(), &recall, "which body?", "en"), "According to your notes, Skywalker X8 is ahead [[Sabit Kanat İHA Seçimi]].");
+        // hedged already, about something else, or no inferred line: as it was
+        for (text, r) in [
+            ("Notlarına göre Skywalker X8 öne çıkıyor gibi görünüyor.", &recall),
+            ("Notlara göre, Bitirme projesinde Skywalker X8 öne çıkıyor.", &recall),
+            ("Spor saatin sabah 06:30.", &recall),
+            ("Bitirme projesinde Skywalker X8 öne çıkıyor.", &Recall::default()),
+        ] {
+            assert_eq!(with_hedge(text.into(), r, q, "tr"), text);
+        }
+        // the whole answer path
+        let e = env();
+        let tool_env = ToolEnv { vault: &e.vault, pla: &e.pla, cache: &e.cache, now: now(), validation: ValidationSettings::default() };
+        let mut model = scripted(&[], "Bitirme projesinde Skywalker X8 öne çıkıyor.");
+        let a = answer(&mut model, &tool_env, &Question { text: q, turns: &[], memory: None, recall: Some(&recall), ui_lang: "tr", persona: &Persona::default() }, &AtomicBool::new(false), &mut |_| {}).unwrap();
+        assert_eq!(a.text, "Notlarına göre, bitirme projesinde Skywalker X8 öne çıkıyor.");
     }
 
     #[test]
