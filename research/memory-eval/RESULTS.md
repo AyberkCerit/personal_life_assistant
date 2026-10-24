@@ -268,3 +268,81 @@ olabilirdi, mutlak süreler kaba.
 - `nl_eval`'deki 1,6 katlık süre farkı düzenekten: her vaka yeni bir hafıza ile soğuk başlıyor, önceden
   okuma yok.
 - Önceden okuma (panel açılınca) hafızayla 6,6 → 21 s uzadı.
+
+## Notlardan Durum çıkarımı (Aşama 3, Task 10, 2026-10-24)
+
+Soru: bakım penceresindeki not adımı (`recall::infer::request` → model → `changes`) yalnız notun söylediği
+güncel iş durumunu mu yazıyor? Not vakaları `tests/nl/memory.jsonl` içinde, kimlikleri `note-mem-`.
+
+```bash
+cargo run --release -p pla-core --example nl_eval -- <etiket> note-mem      # 40 not vakası
+cargo run --release -p pla-core --example nl_eval -- <etiket> note-mem-d    # yalnız geliştirme
+```
+
+- **Yanlış yazım:** guard'dan geçip beklenen hiçbir satıra uymayan her `Add`, ve vakanın adlandırmadığı
+  her düşürme (`Forget`, "source changed"). `optional` işaretli satır yanlış sayılmaz, beklenen de sayılmaz.
+- **Doğru yazım:** beklenen satırlardan ve düşürmelerden bulunanlar.
+
+### Vakalar ve saklı kümelerin sırası
+
+1. `e9a51cd` (`test(recall): freeze the note inference cases`): 20 geliştirme + 10 saklı (h01–h10), istem ve
+   ölçümden önce. Yazılması gerekenler (proje, karar, başvuru, yapılacaklar listesi, İngilizce), yazılmaması
+   gerekenler (tarif, kitap notu, nasıl-yapılır, varsayım/soru, koşul, başkalarının haberi, günlük), güncelleme,
+   notun artık vermediği satırı düşürme, reddedilen satır.
+2. Ayar yalnız geliştirme kümesinde (aşağıdaki tablo, v1–v3).
+3. Eski saklı küme ilk ve tek kez v3 ile koşuldu (`note-v3-heldout`): **7/10, doğru yazım 3/6, yanlış yazım 3,
+   kapı geçmedi.** h04: model eski satırın konusunu değiştirdi (`dil-kursu` → `almanca`); eski satır düştü,
+   yenisi başka konuda yazıldı (bir yanlış yazım + bir yanlış düşürme). h05: model notta artık olmayan eski
+   bilgiyi ("Bisiklet tamirde") yeni satıra taşıdı. h06 yalnız eksik yazım (reddedilenle birleşik satır atıldı).
+4. h01–h10'a dokunulmadı. Sonuç görüldüğü için bu vakaların `cat`'i `seen` yapıldı; artık kapıya girmezler.
+5. `e64b516` (`test(recall): freeze a second held-out note set`): yeni saklı küme h11–h20, h04/h05'in
+   gösterdiği iki genel düzeltmeden **önce** donduruldu ve commit'lendi.
+6. Düzeltmeler (v4): tek eski satır kaldıysa ve model tek bir satırı yeni konuyla verdiyse, satır eski konuyla
+   güncellenir. Eski satırın notta artık geçmeyen bir sözcüğünü taşıyan satır yazılmaz.
+7. `note-v4`: yeni saklı küme ilk kez koşuldu. **Kapı sonucu bu koşudur.**
+
+### Ayar turları (yalnız geliştirme kümesi)
+
+| Tur | Vaka | Doğru yazım | Yanlış yazım | Değişiklik |
+| --- | --- | --- | --- | --- |
+| v1 | 13/20 | 8/11 | 7 | İstem + 4 örnek. İngilizce notlara Türkçe satır. "bütçe" konusu eski "butce"yi düşürdü. Reddedilen bilgi birleşik satırda geri geldi. Tarif, nasıl-yapılır ve günlük notları yazıldı. |
+| v2 | 17/20 | 11/11 | 3 | Notun dilinde olmayan satır yerine notun kendi sözü. Eski konuyla ASCII katlanmış eşleşme. Kanıt da reddedilenle karşılaştırılır. Günlük, Excel ve bisiklet nasıl-yapılır örnekleri (7 örnek). |
+| v3 | 20/20 | 11/11 | 0 | Başlık satırı kanıt sayılmaz. İkiden çok cümlelik kanıt atılır (bütün bir tarif tek durum değil). Genel geniş zaman edilgen ("sulanır", "düzenlenir") `qa::lang::is_general` ile atılır. |
+
+### Kapı koşusu (`note-v4`, 2026-10-24)
+
+| Küme | Vaka | Doğru yazım | Yanlış yazım |
+| --- | --- | --- | --- |
+| Geliştirme | 20/20 | 11/11 | 0 |
+| Görülen (h01–h10, artık saklı değil) | 9/10 | 5/6 | 0 |
+| **Saklı (h11–h20)** | 6/10 | 3/6 | **5** |
+
+**Kapı: geçmedi** (saklıda yanlış yazım 0 hedefi). Beş yanlış yazımdan:
+- İkisi guard hatası, ikisi de yazmama yönünde ve birer yanlış düşürme sayıldı. h12: "için" gibi kısa
+  sözcükler "eski bilgi" sayıldı ve doğru güncelleme atıldı. h16: kanıt başlık satırıyla başlıyordu.
+  Sonradan düzeltildi: kökler ≥ 5 harfli sözcüklerden alınıyor, kanıtın başındaki başlık atlanıyor.
+- Üçü gerçek yanlış yazım, notta olmayan bir durumu Durum'a koyar:
+  - h15: fiilsiz liste notu ("Passport, charger, two shirts, sunscreen.").
+  - h17: başkalarının haberi, duyulan geçmiş ("taşınacakmış", "artırmış").
+  - h20: günlük notunda o güne ait olay ("kütüphanede çalıştım, makarna yaptım").
+
+`note-v5`, yalnız bilgi için (iki guard hatası düzeltilmiş, saklı küme artık görülmüş): geliştirme 20/20 (0
+yanlış), görülen 9/10 (0), saklı 7/10, doğru yazım 5/5, **yanlış yazım 3** (h15, h17, h20).
+
+Sonraki adım için öneriler (yapılmadı):
+- Guard'lar: fiilsiz liste satırı; `-mış/-miş` duyulan geçmişle biten cümle; `daily/` notlarında
+  yalnız geçmiş zamanlı birinci tekil olay.
+- Ya da ilk sürümde günlük notları çıkarımdan çıkarmak.
+- Her iki yolda da üçüncü bir saklı küme, düzeltmelerden önce dondurulmalı.
+
+### Süre (not başına, `note-v4`, 40 vaka, CPU)
+
+| | s |
+| --- | --- |
+| İlk istek (soğuk, örnekler önbelleğe giriyor) | 30,5 |
+| Sonrakiler, ortalama | 4,6 |
+| Medyan | 4,9 |
+| En uzun (ilk hariç) | 9,3 |
+
+Pencere başına en fazla 10 not: soğuk başlangıçla ~75 s, sıcak ~45 s model süresi. İstem ~1,4K token
+örnek içeriyor; `cache_prompt` ile tekrarlanan baş kısım yeniden okunmuyor.

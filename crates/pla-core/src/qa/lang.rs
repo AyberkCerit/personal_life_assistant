@@ -248,6 +248,17 @@ pub fn is_passing(clause: &str) -> bool {
         || words.iter().any(|w| PASSING_WORDS.contains(&w.as_str()) || FUTURE_ENDINGS.iter().any(|e| w.ends_with(e) && w.len() > e.len() + 1))
 }
 
+/// Passive general-present endings, folded ("sulanır", "düzenlenir", "çekilir"): how a thing is
+/// done or is, not where the user's work stands.
+const GENERAL_ENDINGS: &[&str] = &["lir", "lur", "nir", "nur"];
+
+/// Whether a sentence states how something is in general ("Monstera haftada bir sulanır.") rather
+/// than a state: its last word is a passive general present. Short words ("gelir", "bilir") are
+/// left alone.
+pub fn is_general(sentence: &str) -> bool {
+    crate::index::loose_words(sentence).last().is_some_and(|w| w.chars().count() >= 6 && GENERAL_ENDINGS.iter().any(|e| w.ends_with(e)))
+}
+
 /// The name the model is told.
 pub fn name(code: &str) -> &'static str {
     if code == "en" {
@@ -260,6 +271,16 @@ pub fn name(code: &str) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn general_statements_are_not_states() {
+        for s in ["Monstera haftada bir sulanır.", "git stash ile değişiklik saklanır", "DÜŞEYARA ile değer çekilir."] {
+            assert!(is_general(s), "{s}");
+        }
+        for s in ["Tezin yöntem bölümünü yazıyorum.", "Ayda bir gelir.", "Motor siparişi verildi."] {
+            assert!(!is_general(s), "{s}");
+        }
+    }
 
     #[test]
     fn turkish_and_english_questions() {

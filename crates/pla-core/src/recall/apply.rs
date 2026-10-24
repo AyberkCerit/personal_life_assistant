@@ -20,6 +20,11 @@ use crate::vault::{walk_vault, Vault};
 use super::format::{parse_doc, render, render_doc, topic_key, Block, Doc, Entry, Kind, Role};
 use super::load::PEOPLE_TOKENS;
 
+/// `Forget` reasons of the State inference: the note a line came from changed or went away. Such
+/// a forget drops only inferences, as outdated; the user rejected nothing.
+pub const SOURCE_CHANGED: &str = "source changed";
+pub const SOURCE_DELETED: &str = "source deleted";
+
 /// How often a write is rebuilt because a file changed under it before PLA gives up.
 const ATTEMPTS: usize = 3;
 
@@ -449,13 +454,20 @@ impl Plan<'_> {
     }
 
     fn forget(&mut self, topic: &str, reason: &str) {
-        let mut found: Vec<_> = self.find(&topic_key(topic)).into_iter().filter(|(_, _, e)| e.kind != Kind::Manual && !self.pinned.contains(&e.id)).collect();
+        // A note that changed or went away takes only its inferences with it, and rejects nothing.
+        let from_source = reason == SOURCE_CHANGED || reason == SOURCE_DELETED;
+        let why = if from_source { Why::Outdated } else { Why::Rejected };
+        let mut found: Vec<_> = self
+            .find(&topic_key(topic))
+            .into_iter()
+            .filter(|(_, _, e)| e.kind != Kind::Manual && !self.pinned.contains(&e.id) && (!from_source || e.kind == Kind::Inferred))
+            .collect();
         found.sort_by_key(|x| std::cmp::Reverse((x.0, x.1)));
         for (f, b, old) in found {
             self.files[f].doc.blocks.remove(b);
             self.files[f].dirty = true;
             let role = self.files[f].role;
-            self.retire(role, old, Why::Rejected, reason);
+            self.retire(role, old, why, reason);
         }
     }
 

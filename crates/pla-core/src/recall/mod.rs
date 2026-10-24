@@ -3,8 +3,9 @@
 pub mod apply;
 pub mod extract;
 pub mod format;
+pub mod infer;
 pub mod load;
 
-pub use apply::{apply, reconcile, rejected, Change, Proposal, RecallError};
+pub use apply::{apply, reconcile, rejected, Change, Proposal, RecallError, SOURCE_CHANGED, SOURCE_DELETED};
 pub use format::{parse, parse_doc, render_doc, Block, Doc, render, topic_key, Entry, Kind, Role};
 pub use load::{block, load, people_block, Recall, MEMORY_TOKENS, PEOPLE_TOKENS};

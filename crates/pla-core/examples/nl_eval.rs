@@ -4,6 +4,7 @@
 //!   $env:PLA_LLAMA_SERVER = "C:\dev\PLA\apps\desktop\src-tauri\llama\llama-server.exe"
 //!   $env:PLA_MODEL = "C:\dev\PLA\research\f1-model-eval\models\gemma-4-E2B-it-Q3_K_M.gguf"
 //!   cargo run --release -p pla-core --example nl_eval -- <label> [id-prefix|assistant|extraction|memory] [--no-memory]
+//! (`note-mem` runs the note → State cases alone, `chat-mem` the chat → memory ones.)
 //! `--no-memory` leaves the cases' `memory` unwritten and unloaded (the without-memory run).
 //! Writes research/nl-eval/results/<label>.jsonl and prints the score by category.
 
@@ -415,6 +416,66 @@ fn memory_case(model: &mut ModelHost, case: &Value) -> Result<(Vec<String>, Valu
     Ok((fails, json!({ "raw": raw, "changes": shown, "wanted": adds.len() + forgets.len(), "found": found, "wrong": wrong })))
 }
 
+/// Note → State (plan Task 10): the app's request, the model and `changes`, then the changes
+/// compared with the wanted ones. An optional add is fine but not counted; a drop of an earlier
+/// line the case does not name, like any other write, is a wrong write.
+fn note_case(model: &mut ModelHost, case: &Value) -> Result<(Vec<String>, Value), Box<dyn std::error::Error>> {
+    use pla_core::qa::ChatModel;
+    use pla_core::recall::{infer, Change, Entry, Kind};
+    let note = case["note"].as_str().unwrap();
+    let text = case["text"].as_str().unwrap();
+    let pairs = |k: &str| -> Vec<(String, String)> {
+        case[k].as_array().cloned().unwrap_or_default().iter().map(|r| (r[0].as_str().unwrap_or_default().to_owned(), r[1].as_str().unwrap_or_default().to_owned())).collect()
+    };
+    let current: Vec<Entry> = pairs("current")
+        .into_iter()
+        .map(|(topic, text)| Entry { id: topic.clone(), text, kind: Kind::Inferred, topic, source: Some(format!("{note}#00000000")), date: now().date_naive(), person: None, notes: Vec::new() })
+        .collect();
+    let rejected = pairs("rejected");
+    let lang = if case["ui"] == "en" { pla_core::lang::Lang::En } else { pla_core::lang::Lang::Tr };
+    let raw = model.complete(&infer::request(note, text, &current, &rejected, lang), &AtomicBool::new(false))?;
+    let changes = infer::changes(&raw, note, "11111111", text, &current, &rejected);
+
+    let want = &case["expect"];
+    let adds = want["adds"].as_array().cloned().unwrap_or_default();
+    let drops: Vec<String> = want["drop"].as_array().cloned().unwrap_or_default().iter().filter_map(|t| t.as_str().map(pla_core::recall::topic_key)).collect();
+    let mut taken = vec![false; adds.len()];
+    let mut dropped = vec![false; drops.len()];
+    let mut fails = Vec::new();
+    let mut shown = Vec::new();
+    for c in &changes {
+        match c {
+            Change::Add(p) => {
+                shown.push(json!({ "add": p.text, "topic": stored_topic(p) }));
+                // a wanted add first, so an optional one does not take its place
+                let free = |optional: bool| (0..adds.len()).find(|&i| !taken[i] && adds[i]["optional"].as_bool().unwrap_or(false) == optional && wanted_add(&adds[i], p));
+                match free(false).or_else(|| free(true)) {
+                    Some(i) => taken[i] = true,
+                    None => fails.push(format!("wrong write: {}", p.text)),
+                }
+            }
+            Change::Forget { topic, reason } => {
+                shown.push(json!({ "drop": topic, "reason": reason }));
+                match (0..drops.len()).find(|&i| !dropped[i] && drops[i] == pla_core::recall::topic_key(topic)) {
+                    Some(i) => dropped[i] = true,
+                    None => fails.push(format!("wrong write: drop {topic}")),
+                }
+            }
+        }
+    }
+    let wrong = fails.len();
+    let wanted: Vec<bool> = adds.iter().map(|a| !a["optional"].as_bool().unwrap_or(false)).collect();
+    for (_, w) in adds.iter().enumerate().filter(|(i, _)| wanted[*i] && !taken[*i]) {
+        fails.push(format!("missing {w}"));
+    }
+    for (t, _) in drops.iter().zip(&dropped).filter(|(_, d)| !**d) {
+        fails.push(format!("did not drop {t}"));
+    }
+    let found = (0..adds.len()).filter(|&i| wanted[i] && taken[i]).count() + dropped.iter().filter(|d| **d).count();
+    let want_n = wanted.iter().filter(|w| **w).count() + drops.len();
+    Ok((fails, json!({ "raw": raw, "changes": shown, "wanted": want_n, "found": found, "wrong": wrong })))
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let with_memory = !std::env::args().any(|a| a == "--no-memory");
     let args: Vec<String> = std::env::args().skip(1).filter(|a| a != "--no-memory").collect();
@@ -446,12 +507,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // to an example in the prompt, and no case is an example
     let memory_cases: Vec<Value> =
         std::fs::read_to_string(format!("{CASES}/memory.jsonl"))?.lines().filter(|l| l.starts_with('{')).map(serde_json::from_str).collect::<Result<_, _>>()?;
-    let examples = pla_core::recall::extract::example_messages();
-    let near: Vec<&str> = memory_cases.iter().filter(|c| c["cat"] == "dev").filter_map(|c| c["msg"].as_str()).chain(examples.iter().copied()).collect();
+    // a note case's text counts as its message; the note examples join the chat examples
+    let said = |c: &Value| c["msg"].as_str().or(c["text"].as_str()).unwrap_or_default().to_owned();
+    let mut examples = pla_core::recall::extract::example_messages();
+    examples.extend(pla_core::recall::infer::example_notes());
+    let dev: Vec<String> = memory_cases.iter().filter(|c| c["cat"] == "dev").map(said).collect();
+    let near: Vec<&str> = dev.iter().map(String::as_str).chain(examples.iter().copied()).collect();
     for case in &memory_cases {
-        let msg = case["msg"].as_str().unwrap_or_default();
+        let msg = said(case);
+        let msg = msg.as_str();
         if examples.iter().any(|e| e.to_lowercase() == msg.to_lowercase()) {
-            return Err(format!("case {} is an example in recall::extract", case["id"]).into());
+            return Err(format!("case {} is an example in recall::extract or recall::infer", case["id"]).into());
         }
         if case["cat"] != "heldout" {
             continue;
@@ -479,6 +545,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let outcome = match kind {
                 "assistant" => assistant_case(&mut model, &case, with_memory),
                 "extraction" => extraction_case(&mut model, &case),
+                _ if case["note"].is_string() => note_case(&mut model, &case),
                 _ => memory_case(&mut model, &case),
             };
             let (fails, got) = outcome.unwrap_or_else(|e| (vec![format!("error: {e}")], Value::Null));

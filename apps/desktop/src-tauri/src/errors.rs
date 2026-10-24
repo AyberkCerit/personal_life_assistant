@@ -144,6 +144,18 @@ impl From<pla_core::jobs::JobError> for UserError {
     }
 }
 
+impl From<pla_core::recall::infer::InferError> for UserError {
+    fn from(e: pla_core::recall::infer::InferError) -> Self {
+        use pla_core::recall::{infer::InferError, RecallError};
+        match e {
+            InferError::Model(e) => e.into(),
+            InferError::Db(e) | InferError::Recall(RecallError::Db(e)) => e.into(),
+            InferError::Recall(RecallError::Io(e) | RecallError::Unreadable { error: e, .. }) => e.into(),
+            InferError::Recall(e @ RecallError::Busy { .. }) => Self::unexpected(e),
+        }
+    }
+}
+
 impl From<pla_core::report::ReportError> for UserError {
     fn from(e: pla_core::report::ReportError) -> Self {
         match e {
