@@ -94,13 +94,25 @@
 {"id":"note-mem-h20","cat":"seen","note":"daily/2026-10-20.md","text":"# 20 Ekim\n\nÖğleden sonra kütüphanede çalıştım, akşam yemeği için makarna yaptım.","expect":{"adds":[]}}
 // note-mem-h11..h20 ran once as held-out (note-v4) and are "seen" since. Third held-out note set
 // below, frozen before the list, hearsay and daily-note guards (RESULTS.md, "Notlardan Durum").
-{"id":"note-mem-h21","cat":"heldout","note":"daily/2026-10-23.md","text":"# 23 Ekim\n\nTez taslağını danışmanıma gönderdim. Akşam arkadaşlarla yemeğe çıktık.","expect":{"adds":[{"has":["taslak|danisman"]}]}}
-{"id":"note-mem-h22","cat":"heldout","note":"notes/Market.md","text":"# Market\n\nSüt, yumurta, ekmek, domates.","expect":{"adds":[]}}
-{"id":"note-mem-h23","cat":"heldout","note":"notes/Ofis.md","text":"# Ofis\n\nMüdür yeni bir projeye başlamış. Muhasebe ekibi ikinci kata taşınmış.","expect":{"adds":[]}}
-{"id":"note-mem-h24","cat":"heldout","note":"notes/Taşınma.md","text":"# Taşınma\n\n- [x] Nakliyeci ayarlandı\n- [x] Kutular toplandı\n- [ ] İnternet aboneliği","expect":{"adds":[{"has":["nakliye|kutu"]},{"has":["nakliye|kutu|internet"],"optional":true}]}}
-{"id":"note-mem-h25","cat":"heldout","ui":"en","note":"daily/2026-10-21.md","text":"# 21 October\n\nWent for a run in the morning. Watched a film in the evening.","expect":{"adds":[]}}
-{"id":"note-mem-h26","cat":"heldout","note":"notes/Yayın.md","text":"# Yayın\n\nMakalemiz konferansa kabul edildi, kamera-hazır sürümü 5 Aralık'a kadar gönderilecek.","expect":{"adds":[{"has":["makale|kabul"]}]}}
-{"id":"note-mem-h27","cat":"heldout","ui":"en","note":"notes/Team.md","text":"# Team\n\nApparently Sam is leaving the company. Priya got promoted.","expect":{"adds":[]}}
-{"id":"note-mem-h28","cat":"heldout","note":"notes/Rust.md","current":[["yazilim-kursu","Rust kursuna başladı."]],"text":"# Rust\n\nRust kursunun yarısını bitirdim, şimdi sahiplik konusundayım.","expect":{"adds":[{"topic":"yazilim-kursu","has":["yari|sahiplik"]}]}}
-{"id":"note-mem-h29","cat":"heldout","ui":"en","note":"notes/Gift ideas.md","text":"# Gift ideas\n\nBook, scarf, headphones, coffee beans.","expect":{"adds":[]}}
-{"id":"note-mem-h30","cat":"heldout","note":"daily/2026-10-24.md","text":"# 24 Ekim\n\nBugün bitirme projesinin raporunu teslim ettim.","expect":{"adds":[{"has":["rapor|teslim"]}]}}
+{"id":"note-mem-h21","cat":"seen","note":"daily/2026-10-23.md","text":"# 23 Ekim\n\nTez taslağını danışmanıma gönderdim. Akşam arkadaşlarla yemeğe çıktık.","expect":{"adds":[{"has":["taslak|danisman"]}]}}
+{"id":"note-mem-h22","cat":"seen","note":"notes/Market.md","text":"# Market\n\nSüt, yumurta, ekmek, domates.","expect":{"adds":[]}}
+{"id":"note-mem-h23","cat":"seen","note":"notes/Ofis.md","text":"# Ofis\n\nMüdür yeni bir projeye başlamış. Muhasebe ekibi ikinci kata taşınmış.","expect":{"adds":[]}}
+{"id":"note-mem-h24","cat":"seen","note":"notes/Taşınma.md","text":"# Taşınma\n\n- [x] Nakliyeci ayarlandı\n- [x] Kutular toplandı\n- [ ] İnternet aboneliği","expect":{"adds":[{"has":["nakliye|kutu"]},{"has":["nakliye|kutu|internet"],"optional":true}]}}
+{"id":"note-mem-h25","cat":"seen","ui":"en","note":"daily/2026-10-21.md","text":"# 21 October\n\nWent for a run in the morning. Watched a film in the evening.","expect":{"adds":[]}}
+{"id":"note-mem-h26","cat":"seen","note":"notes/Yayın.md","text":"# Yayın\n\nMakalemiz konferansa kabul edildi, kamera-hazır sürümü 5 Aralık'a kadar gönderilecek.","expect":{"adds":[{"has":["makale|kabul"]}]}}
+{"id":"note-mem-h27","cat":"seen","ui":"en","note":"notes/Team.md","text":"# Team\n\nApparently Sam is leaving the company. Priya got promoted.","expect":{"adds":[]}}
+{"id":"note-mem-h28","cat":"seen","note":"notes/Rust.md","current":[["yazilim-kursu","Rust kursuna başladı."]],"text":"# Rust\n\nRust kursunun yarısını bitirdim, şimdi sahiplik konusundayım.","expect":{"adds":[{"topic":"yazilim-kursu","has":["yari|sahiplik"]}]}}
+{"id":"note-mem-h29","cat":"seen","ui":"en","note":"notes/Gift ideas.md","text":"# Gift ideas\n\nBook, scarf, headphones, coffee beans.","expect":{"adds":[]}}
+{"id":"note-mem-h30","cat":"seen","note":"daily/2026-10-24.md","text":"# 24 Ekim\n\nBugün bitirme projesinin raporunu teslim ettim.","expect":{"adds":[{"has":["rapor|teslim"]}]}}
+// note-mem-h21..h30 ran once as held-out (note-v6-heldout) and are "seen" since. Fourth held-out note
+// set below, frozen before the English hearsay guard (RESULTS.md, "Dördüncü tur").
+{"id":"note-mem-h31","cat":"heldout","ui":"en","note":"notes/Neighbourhood.md","text":"# Neighbourhood\n\nI heard the bakery on the corner is closing next month.","expect":{"adds":[]}}
+{"id":"note-mem-h32","cat":"heldout","ui":"en","note":"notes/Side project.md","text":"# Side project\n\nI'm building the backend for Sam's startup; the API is about half done.","expect":{"adds":[{"has":["api|backend"]}]}}
+{"id":"note-mem-h33","cat":"heldout","note":"notes/Kampüs.md","text":"# Kampüs\n\nDuyduğuma göre kütüphane sınav haftası 24 saat açık olacak.","expect":{"adds":[]}}
+{"id":"note-mem-h34","cat":"heldout","note":"notes/Proje ekibi.md","text":"# Proje ekibi\n\nAyşe ile birlikte sensör kartını tasarladık, PCB siparişini ben verdim.","expect":{"adds":[{"has":["sensor|pcb"]}]}}
+{"id":"note-mem-h35","cat":"heldout","note":"notes/Kamp malzemeleri.md","text":"# Kamp malzemeleri\n\nÇadır, uyku tulumu, kafa lambası. Çadırı aldım, tulum hâlâ eksik.","expect":{"adds":[{"has":["aldi|eksik"],"optional":true}]}}
+{"id":"note-mem-h36","cat":"heldout","note":"daily/2026-10-26.md","text":"# 26 Ekim\n\nSabah dişçiye gittim. Bitirme tezinin sunumu 9 Aralık'a kesinleşti.","expect":{"adds":[{"has":["sunum|9 aralik"]}]}}
+{"id":"note-mem-h37","cat":"heldout","ui":"en","note":"daily/2026-10-25.md","text":"# 25 October\n\nCalled mum in the evening. Finally merged the login refactor at work.","expect":{"adds":[{"has":["login|refactor|merged"]}]}}
+{"id":"note-mem-h38","cat":"heldout","ui":"en","note":"notes/Company news.md","text":"# Company news\n\nReportedly the Berlin office will close in March. My team is moving to the Munich office.","expect":{"adds":[{"has":["munich"],"not":["berlin"],"optional":true}]}}
+{"id":"note-mem-h39","cat":"heldout","note":"notes/Aile.md","text":"# Aile\n\nKardeşim Ankara'da yeni bir işe başladı. Babam emekli oluyor.","expect":{"adds":[]}}
+{"id":"note-mem-h40","cat":"heldout","ui":"en","note":"notes/Club.md","text":"# Club\n\nWord is the chess club will move to Thursdays. I'm still preparing for the regional tournament in January.","expect":{"adds":[{"has":["tournament|regional"],"not":["thursday"]}]}}
