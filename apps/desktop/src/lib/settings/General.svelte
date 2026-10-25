@@ -5,6 +5,7 @@
   import { api, type SettingsView } from "../api";
   import { lang, t, type Lang } from "../i18n";
   import { describeError } from "../settings";
+  import type { ThemePref } from "../../theme/mode";
   import Checkbox from "../ui/Checkbox.svelte";
   import Row from "./Row.svelte";
 
@@ -12,7 +13,7 @@
     onLanguage,
     onTheme,
     focusLanguage = false,
-  }: { onLanguage: (l: Lang) => Promise<void>; onTheme: (theme: "dark" | "light") => Promise<void>; focusLanguage?: boolean } = $props();
+  }: { onLanguage: (l: Lang) => Promise<void>; onTheme: (theme: ThemePref) => Promise<void>; focusLanguage?: boolean } = $props();
   let languageSelect: HTMLSelectElement | undefined = $state();
 
   let view = $state<SettingsView | null>(null);
@@ -50,7 +51,8 @@
     </select>
   </Row>
   <Row label={t("settings.theme")} forId="set-theme">
-    <select id="set-theme" value={view.theme} onchange={(e) => void run(() => onTheme(e.currentTarget.value as "dark" | "light"))}>
+    <select id="set-theme" value={view.theme} onchange={(e) => void run(() => onTheme(e.currentTarget.value as ThemePref))}>
+      <option value="system">{t("settings.theme.system")}</option>
       <option value="dark">{t("settings.theme.dark")}</option>
       <option value="light">{t("settings.theme.light")}</option>
     </select>

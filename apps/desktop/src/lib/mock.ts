@@ -8,6 +8,7 @@ import type { Task } from "./tasks";
 import type { Routine } from "./routines";
 import { todayIso } from "./tasks";
 import { noteName } from "./links";
+import type { ThemePref } from "../theme/mode";
 
 /** The vault's own folders and no restore offer, as the Rust commands answer them. */
 const FOLDERS = { daily: "daily", inbox: "inbox", notes: "notes", reports: "reports", attachments: "attachments", templates: "templates", memory: "memory" };
@@ -75,7 +76,7 @@ function addMockTask(input: MockInput, origin: Task["origin"]): Task {
 let vault: string | null = null;
 let setupDone = false;
 let mockLang: "tr" | "en" | null = null;
-let mockTheme: "dark" | "light" = "dark";
+let mockTheme: ThemePref = "system";
 let mockAutostart = false;
 const mockPersona: { name: string; address: string; formality: "informal" | "formal" } = { name: "", address: "", formality: "informal" };
 let lastBackup: string | null = null;
@@ -384,7 +385,7 @@ export async function mockBackend<T>(cmd: string, args: Record<string, unknown>)
   const path = String(args.path ?? "");
   switch (cmd) {
     case "startup":
-      return { vault_path: vault, first_run: vault === null, show_wizard: !setupDone, language: mockLang, settings_recovered: false, theme: "dark", error: null, inbox: vault ? "inbox" : null, folders: vault ? FOLDERS : null, vault_in_app_data: false, restore_offer: null } as T;
+      return { vault_path: vault, first_run: vault === null, show_wizard: !setupDone, language: mockLang, settings_recovered: false, theme: mockTheme, error: null, inbox: vault ? "inbox" : null, folders: vault ? FOLDERS : null, vault_in_app_data: false, restore_offer: null } as T;
     case "wizard_defaults":
       return { suggested_vault: String.raw`C:\Users\ayse\OneDrive\Belgeler\PLA Vault` } as T;
     case "inspect_vault_folder": {
@@ -449,7 +450,7 @@ export async function mockBackend<T>(cmd: string, args: Record<string, unknown>)
       return { language: mockLang, theme: mockTheme, autostart: mockAutostart, paused: false, vault_path: vault, persona: { ...mockPersona } } as T;
     case "settings_set":
       if (args.key === "language") mockLang = args.value as "tr" | "en" | null;
-      else if (args.key === "theme") mockTheme = args.value as "dark" | "light";
+      else if (args.key === "theme") mockTheme = args.value as ThemePref;
       else if (args.key === "assistant_name") mockPersona.name = String(args.value).trim().slice(0, 40);
       else if (args.key === "user_address") mockPersona.address = String(args.value).trim().slice(0, 40);
       else if (args.key === "formality") mockPersona.formality = args.value as "informal" | "formal";

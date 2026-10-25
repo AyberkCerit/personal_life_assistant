@@ -13,7 +13,9 @@ const BROKEN: &str = "settings.broken.json";
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Theme {
+    /// Follow the Windows light/dark mode.
     #[default]
+    System,
     Dark,
     Light,
 }
@@ -154,7 +156,7 @@ mod tests {
         let loaded = load_settings(tmp.path()).unwrap();
         assert!(loaded.first_run && !loaded.recovered_from_broken);
         assert_eq!(loaded.settings, AppSettings::default());
-        assert_eq!(loaded.settings.theme, Theme::Dark);
+        assert_eq!(loaded.settings.theme, Theme::System);
     }
 
     #[test]

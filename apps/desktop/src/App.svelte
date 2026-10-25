@@ -39,6 +39,7 @@
   import { DEFAULT_WIDTHS, LIMITS, clampWidth, loadWidths, saveWidths } from "./lib/panes";
   import type { MetricKind } from "./lib/metrics";
   import type { MetricRecord } from "./lib/api";
+  import { applyTheme, type ThemePref } from "./theme/mode";
   import { describeError, type Section } from "./lib/settings";
   import type { Progress } from "./lib/wizard";
   import { failure, sayAgain, splitError, t, tf, lang, setLang, type Failure, type Lang } from "./lib/i18n";
@@ -210,9 +211,9 @@
     switchLanguage(l);
   }
 
-  async function settingsTheme(theme: "dark" | "light") {
+  async function settingsTheme(theme: ThemePref) {
     await api.settingsSet("theme", theme);
-    document.documentElement.dataset.theme = theme;
+    applyTheme(theme);
   }
 
   // FR-SET-014: the note is saved into the old vault before it closes.
@@ -398,7 +399,7 @@
       const info = await api.startup();
       if (info.language) switchLanguage(info.language);
       wizard = info.show_wizard;
-      document.documentElement.dataset.theme = info.theme;
+      applyTheme(info.theme);
       error = info.error ? failure(info.error) : null;
       vaultInAppData = info.vault_in_app_data;
       restoreOffer = info.restore_offer;

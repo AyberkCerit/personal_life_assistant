@@ -3,6 +3,7 @@
   import { fade } from "svelte/transition";
   import X from "@lucide/svelte/icons/x";
   import type { Lang } from "./i18n";
+  import type { ThemePref } from "../theme/mode";
   import { t, type Key } from "./i18n";
   import { SECTIONS, trapIndex, type Section } from "./settings";
   import { BASE, motion } from "./ui/motion";
@@ -30,7 +31,7 @@
     refocus: string | null;
     onClose: () => void;
     onLanguage: (l: Lang) => Promise<void>;
-    onTheme: (theme: "dark" | "light") => Promise<void>;
+    onTheme: (theme: ThemePref) => Promise<void>;
     onSwitchVault: (path: string) => Promise<void>;
     /** The open note is saved before a restore reloads the page (final review). */
     onBeforeRestore: () => Promise<void>;

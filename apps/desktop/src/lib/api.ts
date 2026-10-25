@@ -25,6 +25,7 @@ export type { Task } from "./tasks";
 export type { Routine, RoutineDay, RoutineInput } from "./routines";
 import type { Routine, RoutineInput } from "./routines";
 import type { Task, TaskList } from "./tasks";
+import type { ThemePref } from "../theme/mode";
 
 export interface TreeEntry { path: string; name: string; is_dir: boolean; depth: number }
 export interface NoteFile { text: string; hash: string; read_only: boolean }
@@ -37,7 +38,7 @@ export interface StartupInfo {
   /** The language chosen in the wizard; null = follow the OS. */
   language: "tr" | "en" | null;
   settings_recovered: boolean;
-  theme: "dark" | "light";
+  theme: ThemePref;
   error: string | null;
   inbox: string | null;
   folders: Folders | null;
@@ -69,7 +70,7 @@ export interface WizardDefaults { suggested_vault: string | null }
 /** The assistant's name ("" = PLA), what it calls the user ("" = nothing particular), sen or siz. */
 export interface Persona { name: string; address: string; formality: "informal" | "formal" }
 export type PersonaKey = "assistant_name" | "user_address" | "formality";
-export interface SettingsView { language: "tr" | "en" | null; theme: "dark" | "light"; autostart: boolean; paused: boolean; vault_path: string | null; persona: Persona }
+export interface SettingsView { language: "tr" | "en" | null; theme: ThemePref; autostart: boolean; paused: boolean; vault_path: string | null; persona: Persona }
 export interface BackupStatus { job: JobStatus; backups: string[] }
 /** FR-SCH-016: 0 = Monday … 6 = Sunday; time "HH:MM". */
 export interface WeeklySchedule { enabled: boolean; weekday: number; time: string }

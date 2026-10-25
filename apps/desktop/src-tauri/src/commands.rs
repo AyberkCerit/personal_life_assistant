@@ -310,6 +310,7 @@ pub fn begin(app: &AppHandle, state: &AppState) -> Result<StartupInfo, String> {
     let _settings_guard = state.settings_lock.lock().expect("settings lock");
     let loaded = load_settings(&root).map_err(ue)?;
     let theme = match loaded.settings.theme {
+        Theme::System => "system",
         Theme::Dark => "dark",
         Theme::Light => "light",
     };
@@ -513,6 +514,7 @@ pub fn apply_setting(s: &mut AppSettings, key: &str, value: &serde_json::Value) 
     match (key, value) {
         ("language", Value::Null) => s.language = None,
         ("language", Value::String(l)) if l == "tr" || l == "en" => s.language = Some(l.clone()),
+        ("theme", Value::String(t)) if t == "system" => s.theme = Theme::System,
         ("theme", Value::String(t)) if t == "dark" => s.theme = Theme::Dark,
         ("theme", Value::String(t)) if t == "light" => s.theme = Theme::Light,
         ("assistant_name", Value::String(n)) => s.persona.name = Persona::clean(n),
@@ -768,6 +770,8 @@ mod tests {
         assert_eq!(s.language, None, "null = follow Windows again");
         apply_setting(&mut s, "theme", &serde_json::json!("light")).unwrap();
         assert_eq!(s.theme, Theme::Light);
+        apply_setting(&mut s, "theme", &serde_json::json!("system")).unwrap();
+        assert_eq!(s.theme, Theme::System);
         let before = s.clone();
         for (key, value) in [
             ("language", serde_json::json!("de")),
