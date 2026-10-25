@@ -1,0 +1,1 @@
+{"id":"note-mem-d21","pass":true,"fails":[],"got":{"raw":"{\"memories\":[{\"evidence\":\"Staj başvurumu Roketsan'a gönderdim\",\"topic\":\"staj-basvurusu\",\"text\":\"Staj başvurumu Roketsan'a gönderdim.\"}]}","changes":[{"add":"Staj başvurumu Roketsan'a gönderdim.","topic":"staj-basvurusu"}],"wanted":1,"found":1,"wrong":0}}

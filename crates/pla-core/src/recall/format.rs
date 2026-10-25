@@ -247,7 +247,7 @@ pub fn parse(role: Role, text: &str) -> Vec<Entry> {
     parse_doc(role, text).entries()
 }
 
-fn visible_date(date: NaiveDate, lang: Lang) -> String {
+pub(crate) fn visible_date(date: NaiveDate, lang: Lang) -> String {
     const TR: [&str; 12] = ["Oca", "Şub", "Mar", "Nis", "May", "Haz", "Tem", "Ağu", "Eyl", "Eki", "Kas", "Ara"];
     const EN: [&str; 12] = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
     let months = if lang == Lang::Tr { TR } else { EN };

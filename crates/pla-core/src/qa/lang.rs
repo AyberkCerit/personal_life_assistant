@@ -248,6 +248,79 @@ pub fn is_passing(clause: &str) -> bool {
         || words.iter().any(|w| PASSING_WORDS.contains(&w.as_str()) || FUTURE_ENDINGS.iter().any(|e| w.ends_with(e) && w.len() > e.len() + 1))
 }
 
+/// Passive general-present endings, folded ("sulanır", "düzenlenir", "çekilir"): how a thing is
+/// done or is, not where the user's work stands.
+const GENERAL_ENDINGS: &[&str] = &["lir", "lur", "nir", "nur"];
+
+/// Whether a sentence states how something is in general ("Monstera haftada bir sulanır.") rather
+/// than a state: its last word is a passive general present. Short words ("gelir", "bilir") are
+/// left alone.
+pub fn is_general(sentence: &str) -> bool {
+    crate::index::loose_words(sentence).last().is_some_and(|w| w.chars().count() >= 6 && GENERAL_ENDINGS.iter().any(|e| w.ends_with(e)))
+}
+
+/// Whether a sentence passes on what the user heard: some clause ends in the reported past
+/// ("taşınacakmış", "artırmış"), or an English marker says so ("apparently", "I heard", "word
+/// is"; "I heard back" is the user's own news). Someone else's news is not the user's state.
+pub fn is_hearsay(sentence: &str) -> bool {
+    let words = crate::index::loose_words(sentence);
+    let heard = words.windows(2).enumerate().any(|(i, p)| p[0] == "i" && p[1] == "heard" && words.get(i + 2).is_none_or(|w| w != "back"));
+    if heard || words.iter().any(|w| EN_HEARSAY.contains(&w.as_str())) || words.windows(2).any(|p| EN_HEARSAY_PAIRS.iter().any(|q| p[0] == q[0] && p[1] == q[1])) {
+        return true;
+    }
+    sentence.split([',', ';', '.', '!', '\n']).any(|clause| {
+        crate::index::loose_words(clause)
+            .last()
+            .is_some_and(|w| w.chars().count() >= 5 && !NOT_HEARSAY.contains(&w.as_str()) && HEARSAY_ENDINGS.iter().any(|e| w.ends_with(e)))
+    })
+}
+
+/// Whether an English sentence is news of someone else ("Priya got promoted."): it opens with a
+/// name and a verb, and the user is not in it.
+pub fn is_person_news(sentence: &str) -> bool {
+    let tokens: Vec<&str> = sentence.split_whitespace().map(|t| t.trim_matches(|c: char| !c.is_alphanumeric())).filter(|t| !t.is_empty()).collect();
+    let [first, second, ..] = tokens.as_slice() else { return false };
+    let name = first.chars().next().is_some_and(char::is_uppercase) && !first.contains(['\'', '’']) && !NOT_NAMES.contains(&first.to_lowercase().as_str());
+    let me = crate::index::loose_words(sentence).iter().any(|w| FIRST_PERSON.contains(&w.as_str()));
+    name && PEOPLE_VERBS.contains(&second.to_lowercase().as_str()) && !me
+}
+
+/// English hearsay markers, folded.
+const EN_HEARSAY: &[&str] = &["apparently", "reportedly", "supposedly", "allegedly", "rumor", "rumour", "rumors", "rumours"];
+/// Two-word hearsay markers ("word is", "they say").
+const EN_HEARSAY_PAIRS: &[[&str; 2]] = &[["word", "is"], ["they", "say"], ["heard", "that"]];
+/// Words that open an English sentence without naming anyone.
+const NOT_NAMES: &[&str] = &["the", "this", "that", "these", "those", "it", "a", "an", "there", "here", "next", "now", "today", "everything", "nothing", "all", "my", "our", "we", "i"];
+/// Verbs a piece of news about someone follows their name with ("Mia is moving", "Jack got").
+const PEOPLE_VERBS: &[&str] = &["is", "was", "got", "gets", "has", "had", "left", "quit", "joined", "moved", "married", "retired", "started", "became", "will"];
+/// The user in an English sentence.
+const FIRST_PERSON: &[&str] = &["i", "me", "my", "mine", "myself", "we", "us", "our", "ours"];
+
+/// The reported past, folded ("-mış", "-mişler").
+const HEARSAY_ENDINGS: &[&str] = &["mis", "mus", "misler", "mislar", "muslar", "musler"];
+/// Words with that ending that are not a verb.
+const NOT_HEARSAY: &[&str] = &["gecmis", "yetmis", "doksanmis"];
+
+/// Endings a list item has once it is a clause ("tutuldu", "geliyor", "installed"), folded.
+const VERB_ENDINGS: &[&str] = &["di", "du", "ti", "tu", "yor", "yoruz", "dir", "tir", "mis", "mus", "cak", "cek", "ed"];
+
+/// Whether a sentence is a bare list ("Süt, yumurta, ekmek, domates."): three or more short items
+/// and no verb among them.
+pub fn is_list(sentence: &str) -> bool {
+    let items: Vec<Vec<String>> = sentence.trim().trim_end_matches(['.', '!']).split(',').map(crate::index::loose_words).collect();
+    let verb = |w: &String| (w.chars().count() >= 5 && VERB_ENDINGS.iter().any(|e| w.ends_with(e))) || ["is", "are", "was", "were"].contains(&w.as_str());
+    items.len() >= 3 && items.iter().all(|i| !i.is_empty() && i.len() <= 3 && !i.iter().any(verb))
+}
+
+/// Parts of a day, folded: a sentence that names one tells what happened then.
+const DAY_PARTS: &[&str] = &["sabah", "sabahleyin", "ogle", "ogleden", "oglen", "aksam", "aksamleyin", "gece", "geceleyin", "morning", "afternoon", "evening", "tonight"];
+
+/// Whether a sentence tells what happened at one part of a day ("Akşam yemeğe çıktık", "in the
+/// morning"): a diary line, not where the user's work stands.
+pub fn is_day_event(sentence: &str) -> bool {
+    crate::index::loose_words(sentence).iter().any(|w| DAY_PARTS.contains(&w.as_str()))
+}
+
 /// The name the model is told.
 pub fn name(code: &str) -> &'static str {
     if code == "en" {
@@ -260,6 +333,50 @@ pub fn name(code: &str) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn general_statements_are_not_states() {
+        for s in ["Monstera haftada bir sulanır.", "git stash ile değişiklik saklanır", "DÜŞEYARA ile değer çekilir."] {
+            assert!(is_general(s), "{s}");
+        }
+        for s in ["Tezin yöntem bölümünü yazıyorum.", "Ayda bir gelir.", "Motor siparişi verildi."] {
+            assert!(!is_general(s), "{s}");
+        }
+    }
+
+    #[test]
+    fn heard_news_lists_and_day_events_are_not_states() {
+        for s in ["Alt kattaki aile yaz sonunda taşınacakmış.", "Yönetici aidatı artırmış", "Komşular gitmişler."] {
+            assert!(is_hearsay(s), "{s}");
+        }
+        for s in ["Geçmiş projeler arşivde.", "Motor siparişi verildi.", "Raporu teslim ettim."] {
+            assert!(!is_hearsay(s), "{s}");
+        }
+        for s in ["Apparently Sam is leaving the company.", "I heard the gym is closing.", "Word is the club moves to Fridays.", "Rumour has it the fees go up."] {
+            assert!(is_hearsay(s), "{s}");
+        }
+        for s in ["I'm helping Sam with his thesis.", "I heard back from the university and got in.", "Our word count is at 4000."] {
+            assert!(!is_hearsay(s), "{s}");
+        }
+        for s in ["Priya got promoted.", "Jack got engaged last week.", "Mia is moving to Lisbon."] {
+            assert!(is_person_news(s), "{s}");
+        }
+        for s in ["Bike rack is installed.", "Our team is moving offices.", "I got the job.", "Cabinets arrived and are installed.", "The website is live now.", "Tom's wedding is in May and I wrote the speech."] {
+            assert!(!is_person_news(s), "{s}");
+        }
+        for s in ["Passport, charger, two shirts, sunscreen.", "Süt, yumurta, ekmek, domates."] {
+            assert!(is_list(s), "{s}");
+        }
+        for s in ["Salon tutuldu, davetiyeler basıldı, pasta seçildi.", "X8 seçildi, motor kargoda.", "Cabinets arrived, installed, painted and checked."] {
+            assert!(!is_list(s), "{s}");
+        }
+        for s in ["Öğleden sonra kütüphanede çalıştım.", "Akşam arkadaşlarla yemeğe çıktık.", "Went for a run in the morning."] {
+            assert!(is_day_event(s), "{s}");
+        }
+        for s in ["Bugün bitirme projesinin raporunu teslim ettim.", "Tez taslağını danışmanıma gönderdim."] {
+            assert!(!is_day_event(s), "{s}");
+        }
+    }
 
     #[test]
     fn turkish_and_english_questions() {

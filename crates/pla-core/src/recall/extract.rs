@@ -15,7 +15,7 @@ use super::apply::{Change, Proposal};
 use super::format::{topic_key, Kind, Role};
 
 /// A proposal this close (word-stem Jaccard) to a rejected line is not written. Measured in Task 8.
-const REJECTED_SIMILARITY: f64 = 0.5;
+pub(super) const REJECTED_SIMILARITY: f64 = 0.5;
 
 const SYSTEM: &str = "You keep the user's long-term memory. From the user's message, list only what the user states as true and lasting: their preferences, habits, health, work and routines (file about), how the assistant should answer them (file rules), where their projects and open work stand (file state), and facts about a person the user names (file people). Write nothing that is hedged, negated, asked, wished, planned or conditional, nothing only true today, and nothing the assistant said. For each memory: evidence is the user's exact words; person is the person's name as the user wrote it for file people, otherwise null (the user is never a person); topic is a short kebab-case key for the subject, the same known topic when the memory updates it; text is one short sentence in the language the turn names, without a subject (\"Kahveyi sütsüz içer.\", not \"Kullanıcı kahveyi sütsüz içer.\"). When the user asks to forget or correct something, put its known topic in forget with their words as evidence. Never write a rejected memory again. Answer with empty lists when there is nothing to keep.";
 
@@ -272,7 +272,7 @@ pub fn guard(raw: Vec<Raw>, message: &str, previous: Option<&str>, topics: &[Str
 
 /// A line in Turkish for an English message, or the other way round (the model sometimes answers
 /// in its examples' language).
-fn same_language(text: &str, source: &str) -> bool {
+pub(super) fn same_language(text: &str, source: &str) -> bool {
     let turkish_letters = |s: &str| s.chars().any(|c| "çğıöşüÇĞİÖŞÜ".contains(c));
     match (language_of(text), language_of(source)) {
         (Some(a), Some(b)) => a == b,
@@ -362,7 +362,7 @@ fn asks_to_forget(sentence: &str) -> bool {
 }
 
 /// Shared word stems (five letters, digits as one sign), Jaccard: the nl-eval measure.
-fn closeness(a: &str, b: &str) -> f64 {
+pub(super) fn closeness(a: &str, b: &str) -> f64 {
     let stems = |s: &str| -> BTreeSet<String> {
         index::key(s)
             .split(|c: char| !c.is_alphanumeric())

@@ -51,6 +51,11 @@ pub enum Command {
         only: Option<chrono::NaiveDate>,
         cache_path: std::path::PathBuf,
     },
+    /// Memory plan Task 10 (maintenance, after `Summarize`): the notes changed since their last
+    /// read update the memory's State file, at most `NOTES_PER_WINDOW` of them.
+    Infer {
+        cache_path: std::path::PathBuf,
+    },
     /// FR-SCH-007…011: write `week`'s report in `lang` (the week's missing summaries first).
     WeeklyReport {
         week: pla_core::report::Week,
@@ -493,6 +498,10 @@ impl Worker {
                     self.summarize(only, &cache_path);
                     self.process(); // what the summaries waited for
                 }
+                Ok(Command::Infer { cache_path }) => {
+                    self.infer(&cache_path);
+                    self.process(); // what the inference waited for
+                }
                 Ok(Command::WeeklyReport { week, cache_path, lang }) => {
                     let outcome = self.weekly_report(week, &cache_path, &lang);
                     if let Some(listener) = &self.on_report {
@@ -780,6 +789,56 @@ impl Worker {
         self.publish();
     }
 
+    /// Memory plan Task 10: one changed note at a time into the memory's State file, as the day
+    /// summaries go: a question, a pause or closing stops it between two notes (the rest waits for
+    /// the next maintenance, as the notes stay unread).
+    fn infer(&mut self, cache_path: &std::path::Path) {
+        use pla_core::recall::infer;
+        if self.status.paused {
+            return; // background AI paused (FR-SCH-014)
+        }
+        self.interrupt.store(false, Ordering::SeqCst);
+        let Some(model) = self.extractor.as_mut().and_then(|x| x.chat_model()) else { return };
+        let Ok(cache) = pla_core::db::connect(cache_path) else { return };
+        let now = (self.clock)();
+        let notes = infer::changed_notes(&cache, &self.conn, &self.vault.config.folders, now, infer::NOTES_PER_WINDOW);
+        if notes.is_empty() {
+            return;
+        }
+        // the lines the user deleted since are rejected first, so they are not written again
+        if let Err(e) = pla_core::recall::reconcile(&self.vault, &self.conn) {
+            self.status.last_error = Some(ue(e));
+            self.publish();
+            return;
+        }
+        let lang = crate::notify::ui_language();
+        let mut written = 0;
+        for note in &notes {
+            if self.stops.any(true) {
+                break;
+            }
+            self.status.busy = true;
+            (self.notify)(&self.status);
+            match infer::infer_note(&self.vault, &self.conn, model, note, now, lang, &self.interrupt) {
+                Ok(n) => written += n,
+                Err(infer::InferError::Model(LlmError::Cancelled)) => break,
+                Err(e) => {
+                    // the model or a memory file failed: the next maintenance tries again, and it shows
+                    self.status.last_error = Some(ue(e));
+                    break;
+                }
+            }
+        }
+        if written > 0 {
+            if let Err(e) = infer::stamp(&self.vault, written, now, lang) {
+                self.status.last_error = Some(ue(e));
+            }
+        }
+        self.status.busy = false;
+        self.status.model = self.model_state();
+        self.publish();
+    }
+
     /// Starts the model and lets it read the shared start of the prompt. Not while paused (it is
     /// work nobody asked for yet); a failure is left to the question, which reports it.
     fn warm(&mut self, cache_path: &std::path::Path) {
@@ -1023,6 +1082,59 @@ mod tests {
 
     fn task_count(data: &std::path::Path) -> i64 {
         rusqlite::Connection::open(data.join("pla.db")).unwrap().query_row("SELECT COUNT(*) FROM task", [], |r| r.get(0)).unwrap()
+    }
+
+    /// Gives the same State lines for every note and counts the requests.
+    struct States(Arc<Mutex<usize>>);
+    impl Extractor for States {
+        fn extract_raw(&mut self, _: NaiveDate, _: &str) -> Result<String, LlmError> {
+            Ok(r#"{"items": []}"#.into())
+        }
+        fn chat_model(&mut self) -> Option<&mut dyn pla_core::qa::ChatModel> {
+            Some(self)
+        }
+    }
+    impl pla_core::qa::ChatModel for States {
+        fn complete(&mut self, _: &serde_json::Value, _: &AtomicBool) -> Result<String, LlmError> {
+            *self.0.lock().unwrap() += 1;
+            Ok(r#"{"memories":[{"evidence":"Tezin ikinci bölümünü yazıyorum","topic":"tez","text":"Tezin ikinci bölümünü yazıyor."},{"evidence":"Proje bütçesi onaylandı","topic":"butce","text":"Proje bütçesi onaylandı."}]}"#.into())
+        }
+        fn stream(&mut self, _: &serde_json::Value, _: &AtomicBool, _: &mut dyn FnMut(&str)) -> Result<String, LlmError> {
+            Err(LlmError::Cancelled)
+        }
+    }
+
+    #[test]
+    fn changed_notes_go_into_the_state_file_once() {
+        // memory plan Task 10: each note's own words, read again only when it changes
+        let tmp = tempfile::tempdir().unwrap();
+        let vault = open_vault(tmp.path()).unwrap();
+        let data = tmp.path().join(".data");
+        let dbs = open_databases(&data).unwrap();
+        let recent = Local::now().timestamp_millis() - 86_400_000;
+        for (rel, text) in [("notes/tez.md", "# Tez\n\nTezin ikinci bölümünü yazıyorum."), ("notes/butce.md", "# Bütçe\n\nProje bütçesi onaylandı.")] {
+            std::fs::write(vault.root.join(rel), text).unwrap();
+            pla_core::index::index_note(&dbs.cache, rel, text, recent, text.len() as i64).unwrap();
+        }
+        let state = vault.root.join("memory").join(pla_core::recall::Role::State.file_name(crate::notify::ui_language()));
+        let calls = Arc::new(Mutex::new(0));
+        let handle = Worker::new(vault, dbs.pla, Some(Box::new(States(Arc::clone(&calls)))), Box::new(|_| {})).spawn();
+        let settled = |handle: &WorkerHandle| {
+            let (tx, rx) = mpsc::channel();
+            handle.send(Command::DropModel(tx)); // the commands before it are done
+            rx.recv_timeout(Duration::from_secs(10)).unwrap();
+        };
+        handle.send(Command::Infer { cache_path: data.join("cache.db") });
+        handle.send(Command::Infer { cache_path: data.join("cache.db") });
+        settled(&handle);
+        assert_eq!(*calls.lock().unwrap(), 2, "two notes, each read once");
+        let lines = pla_core::recall::parse(pla_core::recall::Role::State, &std::fs::read_to_string(&state).unwrap());
+        let mut sources: Vec<String> = lines.iter().map(|e| e.source.clone().unwrap_or_default().split('#').next().unwrap().to_owned()).collect();
+        sources.sort();
+        assert_eq!(sources, ["notes/butce.md", "notes/tez.md"], "a line only from the note that says it");
+        assert!(lines.iter().all(|e| e.kind == pla_core::recall::Kind::Inferred));
+        assert_eq!(task_count(&data), 0, "the inference never writes records");
+        handle.shutdown();
     }
 
     /// Extracts slowly (one second a note) and answers questions from a script.

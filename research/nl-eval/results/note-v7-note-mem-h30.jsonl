@@ -1,0 +1,1 @@
+{"id":"note-mem-h30","pass":true,"fails":[],"got":{"raw":"{\"memories\":[{\"evidence\":\"Bugün bitirme projesinin raporunu teslim ettim\",\"topic\":\"bitirme-projesi\",\"text\":\"Bitirme projesinin raporunu teslim ettim.\"}]}","changes":[{"add":"Bitirme projesinin raporunu teslim ettim.","topic":"bitirme-projesi"}],"wanted":1,"found":1,"wrong":0}}

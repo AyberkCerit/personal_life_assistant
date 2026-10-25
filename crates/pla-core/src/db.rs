@@ -14,6 +14,7 @@ const PLA_MIGRATIONS: &[&str] = &[
     include_str!("../migrations/pla/007_routines.sql"),
     include_str!("../migrations/pla/008_requeue_repeated_items.sql"),
     include_str!("../migrations/pla/009_memory_entry.sql"),
+    include_str!("../migrations/pla/010_memory_source.sql"),
 ];
 const CACHE_MIGRATIONS: &[&str] = &[
     include_str!("../migrations/cache/001_init.sql"),
@@ -164,7 +165,7 @@ mod tests {
         let dir = tmp.path().join("vaults").join("0123456789abcdef0123456789abcdef");
         let dbs = open_databases(&dir).unwrap();
         let pla = tables(&dbs.pla);
-        for t in ["block", "task", "metric_record", "rejection", "review_item", "job_run", "qa_turn", "memory_entry", "schema_version"] {
+        for t in ["block", "task", "metric_record", "rejection", "review_item", "job_run", "qa_turn", "memory_entry", "memory_source", "schema_version"] {
             assert!(pla.contains(&t.to_string()), "pla.db missing {t}");
         }
         let cache = tables(&dbs.cache);
