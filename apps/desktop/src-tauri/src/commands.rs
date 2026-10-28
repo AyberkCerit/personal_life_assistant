@@ -151,8 +151,9 @@ pub(crate) fn app_root() -> Result<PathBuf, String> {
 /// The llama-server shipped next to PLA (tauri.conf.json resources), if present.
 pub fn bundled_server(app: &AppHandle) -> Option<PathBuf> {
     use tauri::Manager;
-    let from_resources = app.path().resource_dir().ok().map(|d| d.join("llama").join("llama-server.exe"));
-    let next_to_exe = std::env::current_exe().ok().and_then(|e| e.parent().map(|d| d.join("llama").join("llama-server.exe")));
+    let name = format!("llama-server{}", std::env::consts::EXE_SUFFIX);
+    let from_resources = app.path().resource_dir().ok().map(|d| d.join("llama").join(&name));
+    let next_to_exe = std::env::current_exe().ok().and_then(|e| e.parent().map(|d| d.join("llama").join(&name)));
     crate::model_paths::first_existing([from_resources, next_to_exe])
 }
 
