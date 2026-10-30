@@ -6,6 +6,7 @@ use std::time::{Duration, Instant};
 
 use chrono::Local;
 use pla_core::media::{self, FrontMatter, MediaError};
+use pla_core::pdf::{self, Imported, PdfError};
 use pla_core::vault::Vault;
 use serde::Serialize;
 use tauri::ipc::{InvokeBody, Request, Response};
@@ -81,6 +82,39 @@ pub fn save_image(app: AppHandle, state: State<'_, AppState>, request: Request<'
     Ok(saved)
 }
 
+fn pdf_code(e: PdfError) -> String {
+    match e {
+        PdfError::LibraryMissing(_) | PdfError::Library(_) => own_code("no_pdfium", "", e),
+        PdfError::NotPdf => own_code("not_pdf", "", ""),
+        PdfError::Encrypted => own_code("encrypted", "", ""),
+        PdfError::Damaged => own_code("damaged", "", ""),
+        PdfError::TooBig => own_code("too_big", pdf::MAX_PDF / 1024 / 1024, ""),
+        PdfError::NoText => own_code("no_text", "", ""),
+        PdfError::File(e) => code(e),
+        PdfError::Io(e) => ue(e),
+    }
+}
+
+/// PDFium, shipped next to PLA (tauri.conf.json resources) like llama-server.
+fn pdfium_dir(app: &AppHandle) -> PathBuf {
+    use tauri::Manager;
+    let from_resources = app.path().resource_dir().ok().map(|d| d.join("pdfium"));
+    let next_to_exe = std::env::current_exe().ok().and_then(|e| e.parent().map(|d| d.join("pdfium")));
+    crate::model_paths::first_existing([from_resources.clone(), next_to_exe]).or(from_resources).unwrap_or_else(|| PathBuf::from("pdfium"))
+}
+
+/// A PDF dropped on (or picked in) the assistant: into `attachments/`, its text into `sources/`. Sent
+/// as the raw body with its name in `x-name`, like `save_image`.
+#[tauri::command(async)]
+pub fn import_pdf(app: AppHandle, state: State<'_, AppState>, request: Request<'_>) -> Result<Imported, String> {
+    let InvokeBody::Raw(bytes) = request.body() else { return Err(own_code("not_pdf", "", "")) };
+    let name = request.headers().get("x-name").and_then(|v| v.to_str().ok()).map(percent_decode).filter(|n| !n.trim().is_empty());
+    let vault = vault_of(&state)?;
+    let imported = pdf::import(&vault, &pdfium_dir(&app), bytes, name.as_deref().unwrap_or("PDF.pdf")).map_err(pdf_code)?;
+    let _ = app.emit("tree-changed", ());
+    Ok(imported)
+}
+
 /// `encodeURIComponent` undone (a header carries only ASCII).
 fn percent_decode(s: &str) -> String {
     let bytes = s.as_bytes();
@@ -109,5 +143,7 @@ mod tests {
         assert_eq!(percent_decode("Ekran%20g%C3%B6r%C3%BCnt%C3%BCs%C3%BC.png"), "Ekran görüntüsü.png");
         assert_eq!(percent_decode("a%2"), "a%2", "a broken escape stays as it is");
         assert_eq!(media_code(MediaError::TooBig), "too_big|20|");
+        assert_eq!(pdf_code(PdfError::TooBig), "too_big|100|");
+        assert_eq!(pdf_code(PdfError::NoText), "no_text||");
     }
 }

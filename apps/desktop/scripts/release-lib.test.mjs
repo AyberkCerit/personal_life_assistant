@@ -1,5 +1,17 @@
 import { describe, expect, it } from "vitest";
-import { LLAMA_FILES, LLAMA_REQUIRED, installerName, llamaProblems, signConfig, strayFiles, versionProblems } from "./release-lib.mjs";
+import {
+  LLAMA_FILES,
+  LLAMA_REQUIRED,
+  PDFIUM_ASSETS,
+  PDFIUM_BUILD,
+  PDFIUM_REQUIRED,
+  installerName,
+  llamaProblems,
+  pdfiumProblems,
+  signConfig,
+  strayFiles,
+  versionProblems,
+} from "./release-lib.mjs";
 
 describe("release checks", () => {
   it("names the llama-server files that are missing", () => {
@@ -16,6 +28,21 @@ describe("release checks", () => {
     // final review M6: the whole llama/ folder is bundled
     expect(strayFiles([...LLAMA_REQUIRED, "ggml-cpu-haswell.dll", "README.md"])).toEqual([]);
     expect(strayFiles(["llama.dll", "gemma.gguf", "notlar.txt"])).toEqual(["gemma.gguf", "notlar.txt"]);
+  });
+
+  it("names the PDFium files that are missing", () => {
+    // without the library PDF import cannot read a PDF; without the licences it may not ship
+    expect(pdfiumProblems(["pdfium.dll", "LICENSE", "licenses", "VERSION"])).toEqual([]);
+    expect(pdfiumProblems(["pdfium.dll"])).toEqual(["LICENSE", "licenses"]);
+    expect(pdfiumProblems([])).toEqual(PDFIUM_REQUIRED);
+  });
+
+  it("pins one PDFium build with a digest per platform", () => {
+    expect(PDFIUM_BUILD).toMatch(/^\d+$/);
+    for (const { lib, sha256 } of Object.values(PDFIUM_ASSETS)) {
+      expect(lib).toMatch(/pdfium\.(dll|so)$/);
+      expect(sha256).toMatch(/^[0-9a-f]{64}$/);
+    }
   });
 
   it("wants one version in every manifest", () => {

@@ -136,6 +136,8 @@ export interface DaySummary { date: string; text: string; sources: string[]; gen
 export interface DayInfo { date: string; past: boolean; summary: DaySummary | null }
 export interface SummaryChanged { date: string; error: "no_model" | "busy" | "no_notes" | "model" | null }
 import type { QaEvent, QaTurn } from "./qa";
+/** Where an imported PDF went (vault-relative). */
+export interface ImportedPdf { pdf: string; note: string; pages: number; chars: number }
 export interface PendingReminders { due: DueReminder[]; missed: DueReminder[] }
 
 /** Inside the Tauri window; false in a plain browser (Vite dev server), where a mock backend answers. */
@@ -187,6 +189,11 @@ export const api = {
     inTauri
       ? invoke<SavedImage>("save_image", bytes, { headers: name ? { "x-name": encodeURIComponent(name) } : {} })
       : mockBackend<SavedImage>("save_image", { name }),
+  /** A PDF for the notes: into attachments/, its text into sources/ (same raw-body form as `saveImage`). */
+  importPdf: (bytes: Uint8Array, name: string) =>
+    inTauri
+      ? invoke<ImportedPdf>("import_pdf", bytes, { headers: { "x-name": encodeURIComponent(name) } })
+      : mockBackend<ImportedPdf>("import_pdf", { name }),
   linkCount: (path: string) => call<number>("link_count", { path }),
   renameNote: (path: string, name: string, updateLinks: boolean) => call<string>("rename_note", { path, name, updateLinks }),
   moveEntry: (path: string, folder: string) => call<string>("move_entry", { path, folder }),

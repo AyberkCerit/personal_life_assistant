@@ -118,6 +118,7 @@ pub fn run() {
             media_cmds::note_meta,
             media_cmds::image_bytes,
             media_cmds::save_image,
+            media_cmds::import_pdf,
             qa_cmds::qa_ask,
             qa_cmds::qa_warm,
             qa_cmds::qa_stop,
