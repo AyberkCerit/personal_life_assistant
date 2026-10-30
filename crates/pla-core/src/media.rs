@@ -194,13 +194,18 @@ pub fn read_image(vault: &Vault, rel: &str) -> Result<Vec<u8>, MediaError> {
 
 /// A dropped file's name as a safe file stem: forbidden characters become `-`, no leading dot.
 fn clean_stem(name: &str) -> String {
+    clean_stem_or(name, "image")
+}
+
+/// `clean_stem`, with `fallback` for a name that leaves nothing usable.
+pub(crate) fn clean_stem_or(name: &str, fallback: &str) -> String {
     let stem = Path::new(name).file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
     let cleaned: String = stem.chars().map(|c| if FORBIDDEN.contains(&c) || FORBIDDEN_EXTRA.contains(&c) || c.is_control() { '-' } else { c }).collect();
     let cleaned: String = cleaned.trim().trim_start_matches('.').chars().take(100).collect();
     let cleaned = cleaned.trim_end_matches(['.', ' ']).to_owned();
     // a Windows device name (`con.png` dragged from a browser) would not be a file
     if cleaned.is_empty() || crate::fileops::check_name(&cleaned).is_err() {
-        "image".to_owned()
+        fallback.to_owned()
     } else {
         cleaned
     }

@@ -1,0 +1,56 @@
+<!doctype html><html lang="tr"><head><meta charset="utf-8"><style>
+body{font-family:"DejaVu Serif",serif;font-size:11pt;line-height:1.4;margin:0}
+h1{font-size:24pt;font-family:"DejaVu Sans"} h2{font-size:17pt;font-family:"DejaVu Sans";margin-top:22pt} h3{font-size:13pt;font-family:"DejaVu Sans"}
+pre{font-family:"DejaVu Sans Mono";font-size:9.5pt;background:#f3f3f3;padding:6pt}
+p{text-align:justify}
+</style></head><body>
+<h1>Nesne Yönelimli Programlama</h1>
+<p>Bu ders notu, nesne yönelimli programlamanın (OOP) temel kavramlarını Java örnekleriyle anlatır. Nesne yönelimli yaklaşımda program, birbirine mesaj gönderen nesnelerden oluşur. Her nesne kendi durumunu (alanlarını) ve davranışını (metotlarını) bir arada tutar; böylece büyük programlar daha küçük ve anlaşılır parçalara bölünebilir.</p>
+<h2>1. Sınıflar ve Nesneler</h2>
+<p>Sınıf, nesnelerin şablonudur. Bir sınıftan istediğimiz kadar nesne üretebiliriz; her nesnenin alanları kendine aittir. Örneğin bir <b>BankaHesabi</b> sınıfı, hesap numarası ve bakiye gibi alanlar ile para yatırma ve çekme gibi metotlar tanımlar. Yapıcı metot (constructor), nesne oluşturulurken alanlara başlangıç değerlerini atayan özel bir metottur ve sınıf ile aynı adı taşır.</p>
+<pre>public class BankaHesabi {
+    private String hesapNo;
+    private double bakiye;
+
+    public BankaHesabi(String hesapNo) {
+        this.hesapNo = hesapNo;
+        this.bakiye = 0;
+    }
+
+    public void yatir(double tutar) {
+        if (tutar &lt;= 0) {
+            throw new IllegalArgumentException("Tutar pozitif olmalı");
+        }
+        bakiye += tutar;
+    }
+}</pre>
+<p>Yukarıdaki örnekte <code>new BankaHesabi("TR01")</code> ifadesi bellekte yeni bir nesne oluşturur. Nesnenin alanlarına dışarıdan doğrudan erişilemez; bunun nedeni bir sonraki bölümde anlatılan kapsüllemedir.</p>
+<h2>2. Kapsülleme</h2>
+<p>Kapsülleme, bir nesnenin iç durumunu dış dünyadan gizleyip yalnızca tanımlı metotlar üzerinden erişime izin vermektir. Böylece nesnenin tutarlılığı korunur: bakiyenin negatif olmaması gibi kurallar tek bir yerde denetlenir. Kapsüllemenin sağladığı başlıca yararlar şunlardır:</p>
+<ul>
+<li>Veri gizleme: alanlar <code>private</code> tanımlanır ve yalnızca sınıfın kendi metotları onlara dokunabilir.</li>
+<li>Değişime dayanıklılık: sınıfın içi değişse bile onu kullanan kod etkilenmez, çünkü dışarıya açık arayüz aynı kalır ve çağıran taraf iç ayrıntıları hiç görmez.</li>
+<li>Denetim noktası:
+  <ul><li>getter metotları okumayı,</li><li>setter metotları yazmayı denetler.</li></ul>
+</li>
+</ul>
+<h3>2.1 Erişim Belirleyiciler</h3>
+<p>Java'da dört erişim düzeyi vardır: public, protected, paket düzeyi (belirleyici yazılmaz) ve private. Genel kural, bir üyeyi gerektiği kadar açık, mümkün olduğu kadar kapalı tutmaktır. Özellikle alanları her zaman private yapmak, sınıfın içindeki ayrıntıların dışarı sız&shy;masını engeller ve sınıfı bakım&shy;yapılabilir kılar.</p>
+<h2>3. Kalıtım</h2>
+<p>Kalıtım, bir sınıfın başka bir sınıfın alanlarını ve metotlarını devralmasıdır. Devralan sınıfa alt sınıf, devredilen sınıfa üst sınıf denir. Java'da bir sınıf yalnızca tek bir sınıftan kalıtım alabilir; birden fazla davranış kazandırmak için arayüzler (interface) kullanılır. Kalıtım "bir türüdür" (is-a) ilişkisini modeller: her <b>VadeliHesap</b> bir <b>BankaHesabi</b>dır.</p>
+<pre>public class VadeliHesap extends BankaHesabi {
+    private double faizOrani;
+
+    @Override
+    public void yatir(double tutar) {
+        super.yatir(tutar);
+        System.out.println("Vadeli hesaba yatırıldı");
+    }
+}</pre>
+<ol><li>Alt sınıf, üst sınıfın public ve protected üyelerini kullanabilir.</li><li>super anahtar sözcüğü üst sınıfın metodunu çağırır.</li><li>@Override, metodun üst sınıftakini ezdiğini belirtir.</li></ol>
+<h2>4. Çok Biçimlilik</h2>
+<p>Çok biçimlilik (polimorfizm), aynı arayüz üzerinden farklı nesnelerin farklı davranabilmesidir. Bir <code>List&lt;BankaHesabi&gt;</code> içinde hem normal hem vadeli hesaplar bulunabilir; her birinde <code>yatir</code> çağrıldığında nesnenin gerçek türüne ait metot çalışır. Buna dinamik bağlama denir ve çalışma zamanında gerçekleşir. #include gibi C önişlemci yönergeleri Java'da yoktur.</p>
+<p>Aşırı yükleme (overloading) ise aynı adlı fakat farklı parametreli metotlar tanımlamaktır ve derleme zamanında çözülür. Sınavlarda bu iki kavram sıkça karıştırılır: ezme (overriding) çalışma zamanında, aşırı yükleme derleme zamanında belirlenir.</p>
+<h2>5. Soyut Sınıflar ve Arayüzler</h2>
+<p>Soyut sınıf, kendisinden doğrudan nesne üretilemeyen ve alt sınıfların ortak davranışını tanımlayan sınıftır. Arayüz ise yalnızca bir sözleşme tanımlar: onu uygulayan her sınıf, arayüzdeki metotları gerçeklemek zorundadır. Hangi durumda hangisinin seçileceği tasarımın ihtiyacına bağlıdır; ortak kod paylaşılacaksa soyut sınıf, yalnızca yetenek tanımlanacaksa arayüz tercih edilir.</p>
+</body></html>

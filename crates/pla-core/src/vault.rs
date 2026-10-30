@@ -33,6 +33,8 @@ pub struct Folders {
     pub attachments: String,
     pub templates: String,
     pub memory: String,
+    /// Imported PDFs as Markdown (PDF import); made on the first import.
+    pub sources: String,
 }
 
 impl Default for Folders {
@@ -45,6 +47,7 @@ impl Default for Folders {
             attachments: "attachments".into(),
             templates: "templates".into(),
             memory: "memory".into(),
+            sources: "sources".into(),
         }
     }
 }
@@ -96,7 +99,7 @@ pub fn open_vault(root: &Path) -> Result<Vault, VaultError> {
     }
 
     let f = &config.folders;
-    for dir in [&f.inbox, &f.daily, &f.notes, &f.reports, &f.attachments, &f.templates, &f.memory] {
+    for dir in [&f.inbox, &f.daily, &f.notes, &f.reports, &f.attachments, &f.templates, &f.memory, &f.sources] {
         if !is_valid_folder(dir) {
             return Err(VaultError::InvalidFolder(dir.clone()));
         }

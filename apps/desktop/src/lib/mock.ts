@@ -11,7 +11,7 @@ import { noteName } from "./links";
 import type { ThemePref } from "../theme/mode";
 
 /** The vault's own folders and no restore offer, as the Rust commands answer them. */
-const FOLDERS = { daily: "daily", inbox: "inbox", notes: "notes", reports: "reports", attachments: "attachments", templates: "templates", memory: "memory" };
+const FOLDERS = { daily: "daily", inbox: "inbox", notes: "notes", reports: "reports", attachments: "attachments", templates: "templates", memory: "memory", sources: "sources" };
 const vaultInfo = (path: string | null) => ({ path, inbox: "inbox", folders: FOLDERS, restore_offer: null });
 
 export const mockListeners = new Map<string, Array<(payload: unknown) => void>>();

@@ -1,13 +1,13 @@
-// Builds PLA's Windows installer (packaging plan § 5): checks the bundled llama-server and the
-// versions, runs `tauri build`, and leaves the installer and its SHA-256 in <repo>/dist-release/.
+// Builds PLA's Windows installer (packaging plan § 5): checks the bundled llama-server, PDFium and
+// the versions, runs `tauri build`, and leaves the installer and its SHA-256 in <repo>/dist-release/.
 // Usage: npm run release   (PLA_SIGN_COMMAND="signtool sign ... %1" signs it, NFR-SEC-009)
 import { createHash } from "node:crypto";
-import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { LLAMA_BUILD, installerName, llamaProblems, signConfig, strayFiles, versionProblems } from "./release-lib.mjs";
+import { LLAMA_BUILD, installerName, llamaProblems, pdfiumProblems, signConfig, strayFiles, versionProblems } from "./release-lib.mjs";
 
 const desktop = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const repo = resolve(desktop, "../..");
@@ -26,6 +26,11 @@ const stray = strayFiles(readdirSync(llama));
 if (stray.length) fail(`src-tauri/llama/ holds files that would ship in the installer: ${stray.join(", ")}`);
 const run = spawnSync(join(llama, "llama-server.exe"), ["--version"], { encoding: "utf8" });
 if (!`${run.stdout ?? ""}${run.stderr ?? ""}`.includes(`build ${LLAMA_BUILD}`)) fail(`src-tauri/llama/ is not llama.cpp b${LLAMA_BUILD}. Run npm run fetch-llama again.`);
+
+// 1b. PDFium for PDF import, with its licences.
+const pdfium = join(tauri, "pdfium");
+const pdfiumMissing = pdfiumProblems(existsSync(pdfium) ? readdirSync(pdfium) : []);
+if (pdfiumMissing.length) fail(`src-tauri/pdfium/ is missing ${pdfiumMissing.join(", ")}. Run: npm run fetch-pdfium`);
 
 // 2. One version everywhere.
 const version = JSON.parse(readFileSync(join(tauri, "tauri.conf.json"), "utf8")).version;
