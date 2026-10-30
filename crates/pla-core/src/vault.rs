@@ -278,15 +278,39 @@ pub fn data_dir(app_root: &Path, vault_id: &str) -> Result<PathBuf, VaultError> 
     Ok(app_root.join("vaults").join(vault_id))
 }
 
-/// `%APPDATA%/PLA` on Windows.
+/// `%APPDATA%/PLA` on Windows (settings, databases); elsewhere the XDG data folder unless
+/// `APPDATA` is set (tests and the examples point it at a scratch folder).
 pub fn default_app_root() -> Option<PathBuf> {
-    std::env::var_os("APPDATA").map(|p| PathBuf::from(p).join("PLA"))
+    data_base("APPDATA").map(|p| p.join("PLA"))
+}
+
+/// `%LOCALAPPDATA%/PLA` on Windows (models: never roams); elsewhere the same XDG data folder.
+pub fn local_app_root() -> Option<PathBuf> {
+    data_base("LOCALAPPDATA").map(|p| p.join("PLA"))
+}
+
+fn data_base(var: &str) -> Option<PathBuf> {
+    std::env::var_os(var).filter(|v| !v.is_empty()).map(PathBuf::from).or_else(xdg_data_home)
+}
+
+#[cfg(windows)]
+fn xdg_data_home() -> Option<PathBuf> {
+    None
+}
+
+/// `$XDG_DATA_HOME`, else `~/.local/share` (the XDG base directory spec ignores a relative one).
+#[cfg(not(windows))]
+fn xdg_data_home() -> Option<PathBuf> {
+    let set = std::env::var_os("XDG_DATA_HOME").map(PathBuf::from).filter(|p| p.is_absolute());
+    set.or_else(|| std::env::var_os("HOME").filter(|h| !h.is_empty()).map(|h| PathBuf::from(h).join(".local").join("share")))
 }
 
 /// PLA's own folders: `%APPDATA%\PLA` (settings, databases) and `%LOCALAPPDATA%\PLA` (models). The
 /// uninstaller may delete both (NFR-SEC-010), so neither may hold the vault.
 pub fn app_data_roots() -> Vec<PathBuf> {
-    ["APPDATA", "LOCALAPPDATA"].iter().filter_map(std::env::var_os).map(|p| PathBuf::from(p).join("PLA")).collect()
+    let mut roots: Vec<PathBuf> = [default_app_root(), local_app_root()].into_iter().flatten().collect();
+    roots.dedup();
+    roots
 }
 
 /// Whether `path` is one of `roots` or inside one, compared as Windows does (case-insensitively),
@@ -541,7 +565,8 @@ mod tests {
 
     #[test]
     fn folders_must_stay_inside_the_vault() {
-        for bad in ["../outside", "C:/Users/x/Desktop", "/abs", ".obsidian", ".pla", "", "notes/../../x"] {
+        let drive = if cfg!(windows) { "C:/Users/x/Desktop" } else { "/home/x/Desktop" };
+        for bad in ["../outside", drive, "/abs", ".obsidian", ".pla", "", "notes/../../x"] {
             let tmp = tempfile::tempdir().unwrap();
             std::fs::create_dir(tmp.path().join(".pla")).unwrap();
             let config = format!(
@@ -584,6 +609,7 @@ notes = \"Notlar/Arşiv\"
         assert!(matches!(data_dir(Path::new("C:/app"), "../x"), Err(VaultError::InvalidVaultId(_))));
     }
 
+    #[cfg(windows)]
     #[test]
     fn a_folder_inside_plas_own_data_cannot_be_the_vault() {
         // NFR-SEC-010: the uninstaller may delete these folders; a vault there would go with them
@@ -600,6 +626,26 @@ notes = \"Notlar/Arşiv\"
         for p in [r"C:\Users\a\AppData\Roaming\PLA Notlar", r"C:\Users\a\AppData\Roaming", r"D:\PLA", r"C:\Users\a\Documents\PLA Vault"] {
             assert!(!inside_app_data(Path::new(p), &roots), "{p}");
         }
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn a_folder_inside_plas_xdg_data_cannot_be_the_vault() {
+        let roots = [PathBuf::from("/home/a/.local/share/PLA")];
+        for p in ["/home/a/.local/share/PLA", "/home/a/.local/share/PLA/Notlar", "/home/a/.local/share/PLA/models/x", "/home/a/.local/share/x/../PLA/Notlar"] {
+            assert!(inside_app_data(Path::new(p), &roots), "{p}");
+        }
+        for p in ["/home/a/.local/share/PLA Notlar", "/home/a/.local/share", "/home/a/Notlar"] {
+            assert!(!inside_app_data(Path::new(p), &roots), "{p}");
+        }
+    }
+
+    #[test]
+    fn plas_data_has_a_home_on_every_system() {
+        // Linux has no %APPDATA%: without a fallback the window opened empty (no_app_data)
+        assert!(default_app_root().is_some_and(|r| r.ends_with("PLA")));
+        assert!(crate::models::models_dir().is_some_and(|d| d.ends_with("PLA/models")));
+        assert!(!app_data_roots().is_empty());
     }
 
     #[cfg(windows)]
@@ -661,6 +707,7 @@ notes = \"Notlar/Arşiv\"
         assert_eq!(inspect_folder(Path::new(r"\\sunucu\paylasim\Kasa")).state, FolderState::Network);
     }
 
+    #[cfg(windows)]
     #[test]
     fn network_paths_are_recognised_in_every_spelling() {
         // final review I1: the wizard's text field accepts whatever the user types

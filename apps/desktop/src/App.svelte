@@ -396,21 +396,26 @@
   onMount(() => {
     document.documentElement.lang = lang;
     const started = (async () => {
-      const info = await api.startup();
-      if (info.language) switchLanguage(info.language);
-      wizard = info.show_wizard;
-      applyTheme(info.theme);
-      error = info.error ? failure(info.error) : null;
-      vaultInAppData = info.vault_in_app_data;
-      restoreOffer = info.restore_offer;
-      vaultPath = info.vault_path;
-      inbox = info.inbox ?? "inbox";
-      folders = info.folders;
-      if (vaultPath) {
-        await refresh();
-        status = await api.workerStatus(); // F4a M2: do not miss the first status
+      try {
+        const info = await api.startup();
+        if (info.language) switchLanguage(info.language);
+        wizard = info.show_wizard;
+        applyTheme(info.theme);
+        error = info.error ? failure(info.error) : null;
+        vaultInAppData = info.vault_in_app_data;
+        restoreOffer = info.restore_offer;
+        vaultPath = info.vault_path;
+        inbox = info.inbox ?? "inbox";
+        folders = info.folders;
+        if (vaultPath) {
+          await refresh();
+          status = await api.workerStatus(); // F4a M2: do not miss the first status
+        }
+      } catch (e) {
+        error = failure(e); // a failed start says why instead of leaving an empty window
+      } finally {
+        loaded = true;
       }
-      loaded = true;
     })();
     const unStatus = api.onStatus((s) => {
       const finished = status.busy && !s.busy;

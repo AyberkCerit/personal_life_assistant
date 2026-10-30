@@ -10,5 +10,5 @@ use std::path::PathBuf;
 
 /// `%LOCALAPPDATA%\PLA\models`: stays on this PC, never roams and never syncs with the vault.
 pub fn models_dir() -> Option<PathBuf> {
-    std::env::var_os("LOCALAPPDATA").map(|p| PathBuf::from(p).join("PLA").join("models"))
+    crate::vault::local_app_root().map(|p| p.join("models"))
 }
