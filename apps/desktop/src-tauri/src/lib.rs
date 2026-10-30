@@ -92,6 +92,7 @@ pub fn run() {
             model_cmds::model_download_start,
             model_cmds::model_download_pause,
             model_cmds::model_use_local,
+            model_cmds::model_scan,
             model_cmds::model_remove,
             commands::wizard_defaults,
             commands::inspect_vault_folder,

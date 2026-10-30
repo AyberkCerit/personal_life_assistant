@@ -5,7 +5,7 @@
   import FolderOpen from "@lucide/svelte/icons/folder-open";
   import Pause from "@lucide/svelte/icons/pause";
   import Play from "@lucide/svelte/icons/play";
-  import { api, inTauri, type DownloadState, type ModelStatus } from "./api";
+  import { api, inTauri, type DownloadState, type FoundModel, type ModelStatus } from "./api";
   import { failure, lang, say, t, type Key } from "./i18n";
   import { downloadFailureText, formatBytes, progressLine } from "./modelText";
   import { describeError } from "./settings";
@@ -16,7 +16,11 @@
   // Starts from the status the banner fetched; later changes arrive as events.
   let download = $state<DownloadState | null>(untrack(() => status.download));
   let localError = $state<string | null>(null);
+  // FR-MDL-008: models other tools already downloaded, so nobody has to download twice
+  let found = $state<FoundModel[]>([]);
   const m = $derived(status.recommended);
+  const hasRecommended = $derived(found.some((f) => f.recommended));
+  const SOURCES: Record<FoundModel["source"], string> = { pla: "PLA", ollama: "Ollama", lm_studio: "LM Studio", hugging_face: "Hugging Face", gpt4_all: "GPT4All", jan: "Jan", llama_cpp: "llama.cpp" };
 
   const failureText = $derived(download?.state === "failed" ? downloadFailureText(download.failure, lang) : "");
 
@@ -33,7 +37,11 @@
   async function chooseFile() {
     localError = null;
     const picked = inTauri ? await open({ filters: [{ name: "GGUF", extensions: ["gguf"] }] }) : "C:/Modeller/gemma.gguf";
-    if (typeof picked !== "string") return;
+    if (typeof picked === "string") await useFile(picked);
+  }
+
+  async function useFile(picked: string) {
+    localError = null;
     try {
       await api.modelUseLocal(picked);
       onDone();
@@ -45,6 +53,7 @@
   }
 
   onMount(() => {
+    api.modelScan().then((f) => (found = f)).catch(() => {}); // a failed scan only hides the list
     const un = api.onModelDownload((s) => {
       download = s;
       if (s.state === "done") setTimeout(onDone, 3000);
@@ -85,12 +94,29 @@
     {:else if download?.state === "failed"}
       <p class="error" role="alert">{failureText}</p>
     {/if}
+    {#if found.length}
+      <section class="found" aria-labelledby="found-title">
+        <p id="found-title" class="label">{t("model.found")}</p>
+        <ul>
+          {#each found as f (f.path)}
+            <li>
+              <span class="what">
+                <span class="name">{f.name}{#if f.recommended}<span class="badge">{t("model.recommended")}</span>{/if}</span>
+                <span class="meta" title={f.path}>{SOURCES[f.source]} · {formatBytes(f.size, lang)}{f.size_label ? ` · ${f.size_label}` : ""}</span>
+              </span>
+              <Button variant={f.recommended ? "primary" : "secondary"} onclick={() => void useFile(f.path)}>{t("model.use")}</Button>
+            </li>
+          {/each}
+        </ul>
+        {#if found.some((f) => !f.recommended)}<p class="line">{t("model.untested")}</p>{/if}
+      </section>
+    {/if}
     {#if localError}<p class="error" role="alert">{localError}</p>{/if}
     <div class="actions">
       {#if download?.state === "paused" || download?.state === "failed"}
         <Button variant="primary" icon={Play} onclick={() => void start()}>{t("model.resume")}</Button>
       {:else}
-        <Button variant="primary" icon={Download} onclick={() => (confirming = true)}>{t("model.download")}</Button>
+        <Button variant={hasRecommended ? "secondary" : "primary"} icon={Download} onclick={() => (confirming = true)}>{t(found.length && !hasRecommended ? "model.downloadRecommended" : "model.download")}</Button>
       {/if}
       <Button icon={FolderOpen} onclick={() => void chooseFile()}>{t("model.chooseFile")}</Button>
     </div>
@@ -102,6 +128,15 @@
   p { margin: 0; }
   .line { color: var(--color-text-muted); font-size: var(--text-sm); }
   .error { color: var(--color-danger); }
+  .found { display: flex; flex-direction: column; gap: var(--space-1); }
+  .label { font-size: var(--text-sm); font-weight: 600; }
+  ul { list-style: none; margin: 0; padding: 0; border: 1px solid var(--color-border); border-radius: var(--radius-md); }
+  li { display: flex; align-items: center; gap: var(--space-3); padding: var(--space-2) var(--space-3); }
+  li + li { border-top: 1px solid var(--color-border); }
+  .what { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+  .name { display: flex; align-items: center; gap: var(--space-2); overflow-wrap: anywhere; }
+  .meta { color: var(--color-text-muted); font-size: var(--text-xs); }
+  .badge { font-size: var(--text-xs); color: var(--color-accent); background: var(--color-accent-subtle); border-radius: var(--radius-full); padding: 0 var(--space-2); }
   .actions { display: flex; gap: var(--space-2); flex-wrap: wrap; }
   dl { display: grid; grid-template-columns: max-content 1fr; gap: var(--space-1) var(--space-3); margin: 0; font-size: var(--text-sm); }
   dt { color: var(--color-text-muted); }
