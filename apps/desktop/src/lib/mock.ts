@@ -434,6 +434,10 @@ export async function mockBackend<T>(cmd: string, args: Record<string, unknown>)
     }
     case "image_bytes":
       throw `missing|${args.target}|`;
+    case "import_pdf": {
+      const base = String(args.name ?? "PDF").replace(/\.pdf$/i, "");
+      return { pdf: `attachments/${base}.pdf`, note: `sources/${base}.md`, pages: 3, chars: 4200 } as T;
+    }
     case "save_image":
       return { path: `attachments/${args.name ?? "Pasted image"}`, embed: String(args.name ?? "Pasted image.png") } as T;
     case "link_count":

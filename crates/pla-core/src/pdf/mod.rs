@@ -44,7 +44,7 @@ pub enum PdfError {
 }
 
 /// Where an import put things, as vault-relative paths.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
 pub struct Imported {
     pub pdf: String,
     pub note: String,

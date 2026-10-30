@@ -3,10 +3,11 @@
   import Bot from "@lucide/svelte/icons/bot";
   import CircleAlert from "@lucide/svelte/icons/circle-alert";
   import FileText from "@lucide/svelte/icons/file-text";
+  import Paperclip from "@lucide/svelte/icons/paperclip";
   import Send from "@lucide/svelte/icons/send-horizontal";
   import Square from "@lucide/svelte/icons/square";
   import Trash from "@lucide/svelte/icons/trash-2";
-  import { api } from "./api";
+  import { api, type ImportedPdf } from "./api";
   import { noteName } from "./links";
   import { failure, say, t, tf, type Key } from "./i18n";
   import { answerParts, apply, qaError, shown, started, toolLine, warmDue, type QaEvent, type ShownTurn } from "./qa";
@@ -127,11 +128,67 @@
     }
   }
 
+  // PDF import: a PDF dropped on the panel (or picked with the paperclip) becomes a note in sources/.
+  // Its line shows after the turn it came after; it is not kept across restarts (the note is).
+  type PdfItem = { id: number; after: number; name: string; status: "reading" | "done" | "failed"; result?: ImportedPdf; error?: string };
+  let pdfs = $state<PdfItem[]>([]);
+  let pdfId = 0;
+  let picker: HTMLInputElement | undefined = $state();
+  let dragging = $state(false);
+
+  const isPdf = (f: File) => f.type === "application/pdf" || /\.pdf$/i.test(f.name);
+
+  async function addPdfs(files: File[]) {
+    notice = null;
+    for (const file of files) {
+      if (!isPdf(file)) {
+        notice = tf("qa.error.import", { name: file.name, reason: t("pdf.error.not_pdf") });
+        continue;
+      }
+      const id = ++pdfId;
+      pdfs = [...pdfs, { id, after: turns.length, name: file.name, status: "reading" }];
+      void scrollDown();
+      try {
+        const result = await api.importPdf(new Uint8Array(await file.arrayBuffer()), file.name);
+        pdfs = pdfs.map((p) => (p.id === id ? { ...p, status: "done", result } : p));
+      } catch (e) {
+        pdfs = pdfs.map((p) => (p.id === id ? { ...p, status: "failed", error: say(failure(e, "pdf")) } : p));
+      }
+      void scrollDown();
+    }
+  }
+
+  function picked(e: Event) {
+    const el = e.currentTarget as HTMLInputElement;
+    const files = [...(el.files ?? [])];
+    el.value = ""; // the same file can be picked again
+    void addPdfs(files);
+  }
+
+  function dragover(e: DragEvent) {
+    if (!e.dataTransfer?.types.includes("Files")) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "copy";
+    dragging = true;
+  }
+
+  function dragleave(e: DragEvent) {
+    if (!(e.currentTarget as Node).contains(e.relatedTarget as Node | null)) dragging = false;
+  }
+
+  function dropped(e: DragEvent) {
+    dragging = false;
+    if (!e.dataTransfer?.files.length) return;
+    e.preventDefault();
+    void addPdfs([...e.dataTransfer.files]);
+  }
+
   async function clear() {
     confirmClear = false;
     try {
       await api.qaClear();
       turns = [];
+      pdfs = [];
     } catch (e) {
       notice = say(failure(e, "qa")); // its own codes (no model, busy) or a general one (M6)
     }
@@ -165,7 +222,17 @@
 </script>
 
 <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-<div class="assistant" role="region" aria-label={assistantName || t("qa.title")} onkeydown={panelKey}>
+<div
+  class="assistant"
+  class:dragging
+  role="region"
+  aria-label={assistantName || t("qa.title")}
+  onkeydown={panelKey}
+  ondragover={dragover}
+  ondragleave={dragleave}
+  ondrop={dropped}
+>
+    {#if dragging}<div class="dropzone" aria-hidden="true"><Paperclip size={22} strokeWidth={1.75} />{t("qa.dropPdf")}</div>{/if}
     <header>
       <Button variant="quiet" onclick={startTopic} disabled={newTopic} title={t("qa.newTopicHint")}>{t("qa.newTopic")}</Button>
       <IconButton icon={Trash} label={t("qa.clear")} onclick={() => (confirmClear = true)} disabled={turns.length === 0 || live !== null} />
@@ -179,13 +246,30 @@
     {/if}
 
     <div class="turns" bind:this={list} aria-live="polite">
-      {#if turns.length === 0}
+      {#snippet pdfRows(after: number)}
+        {#each pdfs.filter((p) => p.after === after) as item (item.id)}
+          <div class="tool" class:failed={item.status === "failed"}>
+            {#if item.status === "done" && item.result}
+              <span class="imported">
+                <button class="link" onclick={() => onOpenNote(item.result!.note)}>{tf("qa.imported", { name: name(item.result.note), pages: item.result.pages })}</button>
+                <small>{t("qa.importedHint")}</small>
+              </span>
+            {:else if item.status === "failed"}
+              <span>{tf("qa.error.import", { name: item.name, reason: item.error ?? "" })}</span>
+            {:else}
+              <span class="working">{tf("qa.importing", { name: item.name })}</span>
+            {/if}
+          </div>
+        {/each}
+      {/snippet}
+      {#if turns.length === 0 && pdfs.length === 0}
         <div class="empty">
           <Bot size={28} strokeWidth={1.5} aria-hidden="true" />
           <h3>{t("qa.emptyTitle")}</h3>
           <p>{t("qa.emptyBody")}</p>
         </div>
       {/if}
+      {@render pdfRows(0)}
       {#each turns as turn, n (turn.turn_id)}
         {#if turn.new_topic && n > 0}<div class="topic" role="separator">{t("qa.topicStart")}</div>{/if}
         <article class="turn">
@@ -228,6 +312,7 @@
             </div>
           {/if}
         </article>
+        {@render pdfRows(n + 1)}
       {/each}
       {#if newTopic && turns.length}<div class="topic" role="separator">{t("qa.topicStart")}</div>{/if}
     </div>
@@ -241,6 +326,8 @@
       {/if}
       {#if notice}<p class="error" role="alert"><CircleAlert size={14} strokeWidth={2} aria-hidden="true" />{notice}</p>{/if}
       <div class="ask">
+        <input bind:this={picker} type="file" accept=".pdf,application/pdf" multiple hidden onchange={picked} />
+        <IconButton icon={Paperclip} label={t("qa.attach")} onclick={() => picker?.click()} />
         <textarea
           bind:this={input}
           bind:value={question}
@@ -263,7 +350,14 @@
 </div>
 
 <style>
-  .assistant { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+  .assistant { position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; }
+  .dropzone {
+    position: absolute; inset: 0; z-index: 5; pointer-events: none; display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: var(--space-2); border: 2px dashed var(--color-accent); border-radius: var(--radius-lg); background: var(--color-accent-subtle);
+    color: var(--color-text); font-size: var(--text-md);
+  }
+  .imported { display: flex; flex-direction: column; gap: 2px; }
+  .imported small { color: var(--color-text-muted); font-size: var(--text-xs); }
   header { display: flex; align-items: center; justify-content: flex-end; gap: var(--space-1); padding: var(--space-1) 0; }
   .confirm {
     display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); padding: var(--space-2) var(--space-4);
