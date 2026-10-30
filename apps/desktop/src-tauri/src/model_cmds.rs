@@ -33,11 +33,20 @@ pub(crate) fn describe_model(path: &Path, id: Option<&str>) -> Option<InstalledM
     let size = std::fs::metadata(path).ok().filter(|m| m.is_file())?.len();
     let entry = id.and_then(catalog::by_id);
     Some(InstalledModel {
-        name: entry.map_or_else(|| path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(), |e| e.name.to_owned()),
+        name: entry.map_or_else(|| local_name(path), |e| e.name.to_owned()),
         size,
         path: path.to_string_lossy().into_owned(),
         local: entry.is_none(),
     })
+}
+
+/// A local file by its name; a nameless one (an Ollama blob, `sha256-…`) by the model's own name.
+fn local_name(path: &Path) -> String {
+    let file = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    if path.extension().is_some_and(|x| x.eq_ignore_ascii_case("gguf")) {
+        return file;
+    }
+    models::scan::read_header(path).ok().and_then(|h| h.name).unwrap_or(file)
 }
 
 /// FR-MDL-008: a checked GGUF file becomes the active model, used where it is.
@@ -190,10 +199,32 @@ pub fn model_download_pause(state: State<AppState>) {
 pub fn model_use_local(app: AppHandle, path: String) -> Result<InstalledModel, String> {
     // Checked first, so a wrong file changes nothing (Review Focus 5).
     let mut checked = AppSettings::default();
-    let installed = apply_local_model(&mut checked, Path::new(&path))?;
+    let mut installed = apply_local_model(&mut checked, Path::new(&path))?;
     let model_path = checked.model_path.expect("set by apply_local_model");
-    install_model(&app, &model_path, None, &installed)?;
+    // the catalogue model already in PLA's folder (a reinstall, a download from before) is PLA's own
+    let id = catalogue_id(&model_path, models::models_dir().as_deref());
+    if let Some(id) = id {
+        installed = describe_model(&model_path, Some(id)).ok_or_else(|| own_code("not_found", "", ""))?;
+    }
+    install_model(&app, &model_path, id, &installed)?;
     Ok(installed)
+}
+
+/// The catalogue id of a whole catalogue file inside PLA's models folder (its size is checked by
+/// `validate_gguf`); anything else is the user's own file.
+fn catalogue_id(path: &Path, models_dir: Option<&Path>) -> Option<&'static str> {
+    let entry = catalog::recommended();
+    let name = path.file_name()?.to_string_lossy();
+    let inside = models_dir.zip(path.parent()).is_some_and(|(dir, parent)| crate::model_paths::same_dir(dir, parent));
+    (inside && name.eq_ignore_ascii_case(entry.file_name)).then_some(entry.id)
+}
+
+/// FR-MDL-008: language models other tools (or an earlier PLA) left on this PC, from their known
+/// folders only; the one in use is left out.
+#[tauri::command(async)]
+pub fn model_scan() -> Result<Vec<models::scan::FoundModel>, String> {
+    let current = load_settings(&app_root()?).map_err(ue)?.settings.model_path;
+    Ok(models::scan::scan(&models::scan::this_pc()).into_iter().filter(|m| Some(&m.path) != current.as_ref()).collect())
 }
 
 #[cfg(test)]
@@ -223,6 +254,38 @@ mod tests {
         assert_eq!((settings.model_path.as_deref(), settings.model_id.as_deref()), (Some(p.as_path()), None));
         assert!(installed.local);
         assert_eq!(installed.size, 8);
+    }
+
+    #[test]
+    fn a_nameless_blob_is_shown_by_the_models_own_name() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut bytes = b"GGUF".to_vec();
+        bytes.extend_from_slice(&3u32.to_le_bytes());
+        bytes.extend_from_slice(&0u64.to_le_bytes());
+        bytes.extend_from_slice(&1u64.to_le_bytes()); // one key: general.name = "Gemma 3 4b It"
+        bytes.extend_from_slice(&12u64.to_le_bytes());
+        bytes.extend_from_slice(b"general.name");
+        bytes.extend_from_slice(&8u32.to_le_bytes());
+        bytes.extend_from_slice(&13u64.to_le_bytes());
+        bytes.extend_from_slice(b"Gemma 3 4b It");
+        let blob = tmp.path().join(format!("sha256-{}", "a".repeat(64)));
+        std::fs::write(&blob, &bytes).unwrap();
+        assert_eq!(describe_model(&blob, None).unwrap().name, "Gemma 3 4b It");
+        let named = tmp.path().join("mine.gguf");
+        std::fs::write(&named, &bytes).unwrap();
+        assert_eq!(describe_model(&named, None).unwrap().name, "mine.gguf", "a file the user named keeps its name");
+    }
+
+    #[test]
+    fn only_the_catalogue_file_in_plas_folder_is_plas_own() {
+        let tmp = tempfile::tempdir().unwrap();
+        let ours = tmp.path().join("models");
+        std::fs::create_dir(&ours).unwrap();
+        let name = catalog::recommended().file_name;
+        assert_eq!(catalogue_id(&ours.join(name), Some(&ours)), Some(catalog::recommended().id));
+        assert_eq!(catalogue_id(&tmp.path().join(name), Some(&ours)), None, "a copy elsewhere is the user's");
+        assert_eq!(catalogue_id(&ours.join("other.gguf"), Some(&ours)), None);
+        assert_eq!(catalogue_id(&ours.join(name), None), None);
     }
 
     #[test]
