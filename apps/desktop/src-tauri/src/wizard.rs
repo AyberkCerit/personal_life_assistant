@@ -239,6 +239,7 @@ mod tests {
         assert_eq!(std::fs::read_dir(tmp.path()).unwrap().count(), 2);
     }
 
+    #[cfg(windows)]
     #[test]
     fn a_folder_with_only_system_files_still_gets_a_welcome() {
         // final review M7: desktop.ini does not make a folder "used"
@@ -261,6 +262,7 @@ mod tests {
         assert_eq!(welcome_note("de").0, "Welcome", "unknown languages fall back to English");
     }
 
+    #[cfg(windows)]
     #[test]
     fn knows_when_a_folder_syncs_with_onedrive() {
         let env = |k: &str| match k {

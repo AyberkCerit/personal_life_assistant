@@ -225,6 +225,10 @@ fn write_instruction(lang: &str, calls: &[ToolRecord], persona: &Persona) -> Str
     } else {
         String::new()
     };
+    // user test 2026-10-25: a refused complete_task was answered "hallettiniz". Only after a refusal:
+    // said after every answer with no write, the model read it out ("Nothing was added…")
+    let refused = calls.iter().filter(|c| !c.ok && WRITES.contains(&c.tool.as_str())).map(|c| c.tool.as_str()).find(|t| !calls.iter().any(|c| c.ok && c.tool == *t));
+    let unchanged = refused.map(|t| format!(" Your {t} call failed, so it was not done: do not say it was.")).unwrap_or_default();
     // the voice again where a small model reads last; "sen" is how it speaks anyway
     let mut voice = String::new();
     if !persona.address.is_empty() {
@@ -234,7 +238,7 @@ fn write_instruction(lang: &str, calls: &[ToolRecord], persona: &Persona) -> Str
     if lang == "tr" && persona.formality == Formality::Formal {
         voice.push_str(" Speak to me as \"siz\", never as \"sen\".");
     }
-    format!("Now write your answer to my last message.{offered} Write it in {}.{voice}", super::lang::name(lang))
+    format!("Now write your answer to my last message.{offered}{unchanged} Write it in {}.{voice}", super::lang::name(lang))
 }
 
 fn decide_body(ctx: &Context, question: &str, calls: &[ToolRecord], now: DateTime<FixedOffset>) -> Value {
@@ -587,6 +591,29 @@ fn fallback(question: &str, turns: &[Turn], done: &[ToolRecord]) -> Option<(Stri
     None
 }
 
+/// A follow-up that moves something to another time or day ("saati 5e çek", "yarına ertele", "move
+/// it to 6pm"): the assistant has no tool for that. Narrow: a short report after an earlier message,
+/// with a number or a day and a word of moving.
+fn asks_to_move(question: &str, turns: &[Turn]) -> bool {
+    let w = words(question);
+    let when = question.chars().any(|c| c.is_ascii_digit())
+        || w.iter().any(|x| ["yarın", "yarin", "bugün", "bugun", "akşam", "aksam", "sabah", "tomorrow", "today", "tonight", "morning", "evening"].iter().any(|d| x.starts_with(d)));
+    let moving = w.iter().any(|x| {
+        ["çek", "cek", "kaydır", "kaydir", "ertele", "değiştir", "degistir", "taşı", "tasi", "move", "reschedule", "postpone", "push"].iter().any(|v| x.starts_with(v))
+            || ["olsun", "yap", "change"].contains(&x.as_str())
+    });
+    !turns.is_empty() && !asks(question) && w.len() <= 6 && when && moving
+}
+
+/// What is said instead of the model's answer when it was asked to move a task and wrote nothing.
+fn cannot_move(lang: &str, persona: &Persona) -> String {
+    if lang == "en" {
+        return "I can't change the day or time of a task from here, so nothing was changed. You can change it with the task's Edit button in the Tasks panel.".into();
+    }
+    let can = if persona.formality == Formality::Formal { "değiştirebilirsiniz" } else { "değiştirebilirsin" };
+    format!("Bir görevin gününü ya da saatini buradan değiştiremiyorum, bu yüzden hiçbir şey değişmedi. Görevler panelinde görevin Düzenle düğmesiyle {can}.")
+}
+
 /// The assistant's writes (what the fallback must not add to).
 const WRITES: [&str; 4] = ["add_task", "complete_task", "log_metric", "create_note"];
 
@@ -770,6 +797,17 @@ pub fn answer(model: &mut dyn ChatModel, env: &ToolEnv<'_>, q: &Question<'_>, ca
             }
         }
         let args = with_referred_body(&tool, without_made_up_time(&tool, args, question), question, turns);
+        // a task_id no query of this question gave (made up: "task_id_from_query_tasks_result"): the
+        // tasks are looked up first, then the model or the fallback completes the one the user did
+        // (user test 2026-10-25: refused, and the answer said "hallettiniz")
+        let (tool, args) = if tool == "complete_task"
+            && found_task(&shown, args["task_id"].as_str().unwrap_or_default()).is_none()
+            && !shown.iter().any(|r| r.ok && r.tool == "query_tasks")
+        {
+            ("query_tasks".to_owned(), json!({ "list": "all" }))
+        } else {
+            (tool, args)
+        };
         if cancel.load(std::sync::atomic::Ordering::SeqCst) {
             return Err(stopped(&shown, String::new())); // no write after Stop
         }
@@ -814,6 +852,13 @@ pub fn answer(model: &mut dyn ChatModel, env: &ToolEnv<'_>, q: &Question<'_>, ca
         if tool_left == 0 {
             break;
         }
+    }
+    // the model said "Saat 5'e çekildi" though the instruction told it nothing changed (user test
+    // 2026-10-25): this answer is not left to it
+    if asks_to_move(question, turns) && !shown.iter().any(|r| r.ok && WRITES.contains(&r.tool.as_str())) {
+        let text = cannot_move(lang, persona);
+        on(Progress::Token(text.clone()));
+        return Ok(Answer { text, tools: shown, sources: Vec::new() });
     }
     let mut text = String::new();
     let streamed = model.stream(&answer_body(&ctx, question, &calls, env.now, lang), cancel, &mut |t: &str| {
@@ -1516,6 +1561,87 @@ Deniz:
         )
         .unwrap();
         assert!(a.tools.iter().any(|t| t.tool == "complete_task" && t.ok), "{:?}", a.tools);
+    }
+
+    #[test]
+    fn a_made_up_task_id_looks_the_tasks_up_first() {
+        // user test 2026-10-25: "ilaçları eczaneden aldım, hallettim" → complete_task with an id the
+        // model made up, refused, and the answer said "hallettiniz" with the task still open
+        let e = env();
+        for title in ["Eczaneden ilaç al", "Annemi ara"] {
+            crate::tasks::add_task_as(
+                &e.pla,
+                &crate::tasks::TaskInput { title: title.into(), details: None, date: Some("2026-10-06".into()), time: None, remind: Some(false) },
+                "manual",
+                now(),
+            )
+            .unwrap();
+        }
+        let tool_env = ToolEnv { vault: &e.vault, pla: &e.pla, cache: &e.cache, now: now(), validation: ValidationSettings::default() };
+        let mut model = scripted(&["{\"tool\":\"complete_task\",\"args\":{\"task_id\":\"task_id_from_query_tasks_result\"}}"], "Tamamladım.");
+        let a = answer(
+            &mut model,
+            &tool_env,
+            &Question { text: "ilaçları eczaneden aldım, hallettim", turns: &[], memory: None, recall: None, ui_lang: "tr", persona: &Persona::default() },
+            &AtomicBool::new(false),
+            &mut |_| {},
+        )
+        .unwrap();
+        assert_eq!(a.tools.first().map(|t| t.tool.as_str()), Some("query_tasks"), "{:?}", a.tools);
+        let done = a.tools.iter().find(|t| t.tool == "complete_task" && t.ok).expect("completed");
+        assert_eq!(done.result["title"], "Eczaneden ilaç al");
+        assert!(a.tools.iter().all(|t| t.ok), "no refusal shown: {:?}", a.tools);
+    }
+
+    #[test]
+    fn a_refused_write_is_not_said_to_be_done() {
+        // user test 2026-10-25: a refused complete_task was answered "hallettiniz"; an answer with no
+        // write attempted hears nothing of it (the model read such a line out to the user)
+        let e = env();
+        crate::tasks::add_task_as(
+            &e.pla,
+            &crate::tasks::TaskInput { title: "Annemi ara".into(), details: None, date: Some("2026-10-07".into()), time: None, remind: Some(false) },
+            "manual",
+            now(),
+        )
+        .unwrap();
+        let tool_env = ToolEnv { vault: &e.vault, pla: &e.pla, cache: &e.cache, now: now(), validation: ValidationSettings::default() };
+        let last_instruction = |model: &Scripted| model.bodies.last().unwrap()["messages"].as_array().unwrap().last().unwrap()["content"].as_str().unwrap().to_owned();
+        let ask = |model: &mut Scripted, text: &str| {
+            answer(model, &tool_env, &Question { text, turns: &[], memory: None, recall: None, ui_lang: "tr", persona: &Persona::default() }, &AtomicBool::new(false), &mut |_| {}).unwrap()
+        };
+        let query = "{\"tool\":\"query_tasks\",\"args\":{\"list\":\"upcoming\"}}";
+        let task_id: String = e.pla.query_row("SELECT task_id FROM task", [], |r| r.get(0)).unwrap();
+        let complete = format!("{{\"tool\":\"complete_task\",\"args\":{{\"task_id\":\"{task_id}\"}}}}");
+        let mut model = scripted(&[query, &complete], "Tamamladım.");
+        ask(&mut model, "yarın annemi arayacağım");
+        assert!(last_instruction(&model).contains("Your complete_task call failed"), "{}", last_instruction(&model));
+        let mut model = scripted(&["{\"tool\":\"answer\"}"], "Merhaba!");
+        ask(&mut model, "merhaba");
+        assert!(!last_instruction(&model).contains("failed"), "{}", last_instruction(&model));
+    }
+
+    #[test]
+    fn moving_a_task_is_not_said_to_be_done() {
+        // user test 2026-10-25: the assistant has no tool to change a task, and still answered
+        // "Saat 5'e çekildi"
+        let e = env();
+        let tool_env = ToolEnv { vault: &e.vault, pla: &e.pla, cache: &e.cache, now: now(), validation: ValidationSettings::default() };
+        let earlier = [turn("yarın kuaföre gideceğim")];
+        let ask = |model: &mut Scripted, text: &str, turns: &[Turn], persona: &Persona| {
+            answer(model, &tool_env, &Question { text, turns, memory: None, recall: None, ui_lang: "tr", persona }, &AtomicBool::new(false), &mut |_| {}).unwrap()
+        };
+        let a = ask(&mut scripted(&[], "Saat 5'e çekildi."), "saati 5e çek", &earlier, &Persona::default());
+        assert!(!a.text.contains("çekildi") && a.text.contains("Düzenle"), "{}", a.text);
+        let formal = Persona { formality: Formality::Formal, ..Persona::default() };
+        assert!(ask(&mut scripted(&[], "Tamam."), "yarına ertele", &earlier, &formal).text.contains("değiştirebilirsiniz"));
+        let en = ask(&mut scripted(&[], "Moved."), "move it to 6pm", &[turn("I have a haircut tomorrow")], &Persona::default());
+        assert!(en.text.contains("Edit"), "{}", en.text);
+        // the model's own answer when it did write, or when nothing is to be moved
+        let added = "{\"tool\":\"add_task\",\"args\":{\"title\":\"Kuaför\",\"date\":\"2026-10-07\",\"time\":\"15:00\"}}";
+        assert_eq!(ask(&mut scripted(&[added], "15:00 için ekledim."), "saat 3'te olsun", &earlier, &Persona::default()).text, "15:00 için ekledim.");
+        assert_eq!(ask(&mut scripted(&[], "Tamam."), "saati 5e çek", &[], &Persona::default()).text, "Tamam.", "no earlier message");
+        assert_eq!(ask(&mut scripted(&[], "Yarın 5'te."), "kuaför saat kaçta", &earlier, &Persona::default()).text, "Yarın 5'te.", "a question");
     }
 
     #[test]

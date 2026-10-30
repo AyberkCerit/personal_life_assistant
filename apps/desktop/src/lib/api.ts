@@ -65,6 +65,8 @@ export type DownloadState =
   | { state: "paused"; received: number; total: number }
   | { state: "failed"; failure: Failure; received: number; total: number }
   | { state: "done"; path: string };
+/** FR-MDL-008: a language model another tool (or an earlier PLA) left on this PC. */
+export interface FoundModel { path: string; name: string; source: "pla" | "ollama" | "lm_studio" | "hugging_face" | "gpt4_all" | "jan" | "llama_cpp"; size: number; architecture: string | null; size_label: string | null; recommended: boolean }
 export interface ModelStatus { installed: InstalledModel | null; recommended: CatalogEntry; download: DownloadState | null; models_dir: string | null }
 export interface WizardDefaults { suggested_vault: string | null }
 /** The assistant's name ("" = PLA), what it calls the user ("" = nothing particular), sen or siz. */
@@ -273,6 +275,7 @@ export const api = {
   modelDownloadStart: () => call<void>("model_download_start"),
   modelDownloadPause: () => call<void>("model_download_pause"),
   modelUseLocal: (path: string) => call<InstalledModel>("model_use_local", { path }),
+  modelScan: () => call<FoundModel[]>("model_scan"),
   onModelDownload: (cb: (s: DownloadState) => void) => on<DownloadState>("model-download", cb),
   onModelChanged: (cb: (m: InstalledModel) => void) => on<InstalledModel>("model-changed", cb),
   dismissMissed: () => call<void>("dismiss_missed"),

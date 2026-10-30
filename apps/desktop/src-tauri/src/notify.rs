@@ -161,6 +161,7 @@ pub fn ui_lang() -> &'static str {
 /// AppUserModelID: Windows shows a release build's notifications under that name (build.rs).
 pub(crate) const IDENTIFIER: &str = env!("PLA_IDENTIFIER");
 
+#[cfg(windows)]
 pub(crate) fn app_id() -> &'static str {
     // Decision 8: an unpackaged dev build has no registered app id.
     if cfg!(debug_assertions) {

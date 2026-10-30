@@ -637,10 +637,17 @@ export async function mockBackend<T>(cmd: string, args: Record<string, unknown>)
       download = { state: "paused", received, total: RECOMMENDED.size };
       emit("model-download", download);
       return undefined as T;
+    case "model_scan":
+      // Browser check: what the wizard lists when Ollama and LM Studio already have models
+      return (installed ? [] : [
+        { path: String.raw`C:\Users\ayse\.ollama\models\blobs\sha256-${"a".repeat(64)}`, name: "gemma3:4b", source: "ollama", size: 3_338_801_804, architecture: "gemma3", size_label: "4.3B", recommended: false },
+        { path: String.raw`C:\Users\ayse\.lmstudio\models\lmstudio-community\Qwen2.5-7B-Instruct-GGUF\Qwen2.5-7B-Instruct-Q4_K_M.gguf`, name: "Qwen2.5 7B Instruct", source: "lm_studio", size: 4_683_073_184, architecture: "qwen2", size_label: "7.6B", recommended: false },
+      ]) as T;
     case "model_use_local": {
       const path = String(args.path);
-      if (!path.toLowerCase().endsWith(".gguf")) throw new Error("not_gguf||");
-      installed = { name: path.split(/[\\/]/).pop() ?? path, size: 2_536_786_016, path, local: true };
+      if (!/\.gguf$|[\\/]blobs[\\/]sha256-/i.test(path)) throw new Error("not_gguf||");
+      const scanned = (await mockBackend<{ path: string; name: string }[]>("model_scan", {})).find((f) => f.path === path);
+      installed = { name: scanned?.name ?? path.split(/[\\/]/).pop() ?? path, size: 2_536_786_016, path, local: true };
       emit("model-changed", installed);
       emit("worker-status", mockWorkerStatus());
       return installed as T;

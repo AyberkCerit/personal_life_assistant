@@ -189,7 +189,7 @@ pub fn open_place(state: State<AppState>, kind: PlaceKind) -> Result<(), String>
     let places = Places {
         vault: state.session.lock().expect("session lock").as_ref().map(|s| s.vault.root.clone()),
         app_root: app_root().ok(),
-        local_root: std::env::var_os("LOCALAPPDATA").map(|p| PathBuf::from(p).join("PLA")),
+        local_root: pla_core::vault::local_app_root(),
         model: settings.model_path,
     };
     let target = place(kind, &places).ok_or_else(|| own_code("not_found", "", ""))?;
@@ -248,6 +248,7 @@ mod tests {
         assert!(!notifications_on(None, Some(0)), "PLA off");
     }
 
+    #[cfg(windows)]
     #[test]
     fn only_plas_own_places_can_be_opened() {
         let places = Places {

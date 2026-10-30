@@ -40,7 +40,7 @@ pub fn removal(settings: &AppSettings, models_dir: Option<&Path>) -> Option<Remo
     Some(if ours { Removal::Delete(path.clone()) } else { Removal::Unlink })
 }
 
-fn same_dir(a: &Path, b: &Path) -> bool {
+pub(crate) fn same_dir(a: &Path, b: &Path) -> bool {
     match (a.canonicalize(), b.canonicalize()) {
         (Ok(a), Ok(b)) => a == b,
         _ => a.to_string_lossy().trim_end_matches(['/', '\\']).eq_ignore_ascii_case(b.to_string_lossy().trim_end_matches(['/', '\\'])),
