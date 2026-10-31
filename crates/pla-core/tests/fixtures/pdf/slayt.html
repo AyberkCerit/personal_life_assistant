@@ -1,0 +1,19 @@
+<!doctype html><html lang="tr"><head><meta charset="utf-8"><style>
+@page{size:254mm 190.5mm;margin:0}
+body{margin:0;font-family:"DejaVu Sans"}
+.s{width:254mm;height:190.5mm;box-sizing:border-box;padding:18mm 20mm;page-break-after:always;position:relative}
+.s h1{font-size:30pt;margin:0 0 12mm} .t h1{font-size:40pt;margin-top:50mm}
+.s li{font-size:18pt;margin:4mm 0} pre{font-family:"DejaVu Sans Mono";font-size:14pt}
+.f{position:absolute;bottom:8mm;left:20mm;font-size:10pt;color:#888} .n{position:absolute;bottom:8mm;right:20mm;font-size:10pt;color:#888}
+</style></head><body>
+<div class="s t"><h1>OOP – Hafta 3</h1><p style="font-size:20pt">Kalıtım ve Çok Biçimlilik</p><div class="f">BLM201 Nesne Yönelimli Programlama</div><div class="n">1</div></div>
+<div class="s"><h1>Kalıtım nedir?</h1><ul><li>Bir sınıfın başka bir sınıfın üyelerini devralması</li><li>"is-a" ilişkisi: Kedi bir Hayvan'dır</li><li>Java'da tekli kalıtım: extends</li></ul><div class="f">BLM201 Nesne Yönelimli Programlama</div><div class="n">2</div></div>
+<div class="s"><h1>Örnek</h1><pre>class Hayvan {
+    void sesCikar() { }
+}
+class Kedi extends Hayvan {
+    @Override
+    void sesCikar() { System.out.println("Miyav"); }
+}</pre><div class="f">BLM201 Nesne Yönelimli Programlama</div><div class="n">3</div></div>
+<div class="s"><h1>Çok biçimlilik</h1><ul><li>Aynı çağrı, farklı davranış</li><li>Dinamik bağlama: çalışma zamanında karar</li><li>Overloading ≠ Overriding</li></ul><div class="f">BLM201 Nesne Yönelimli Programlama</div><div class="n">4</div></div>
+</body></html>

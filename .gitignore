@@ -25,6 +25,8 @@ models/
 !crates/pla-core/src/models/
 apps/desktop/src-tauri/llama/*
 !apps/desktop/src-tauri/llama/README.md
+apps/desktop/src-tauri/pdfium/*
+!apps/desktop/src-tauri/pdfium/README.md
 
 # Local databases and test vaults
 *.db

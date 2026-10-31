@@ -62,7 +62,7 @@ describe("tree helpers", () => {
   // FR-I18N-004 (M6 acceptance): system folders keep English names on disk, the tree says them in
   // the interface language
   it("knows the vault's own folders by their configured names, at the top only", () => {
-    const folders = { daily: "daily", inbox: "Gelen", notes: "notes", reports: "reports", attachments: "attachments", templates: "templates", memory: "memory" };
+    const folders = { daily: "daily", inbox: "Gelen", notes: "notes", reports: "reports", attachments: "attachments", templates: "templates", memory: "memory", sources: "sources" };
     expect(systemFolder("daily", folders)).toBe("daily");
     expect(systemFolder("Gelen", folders)).toBe("inbox");
     expect(systemFolder("daily/2026", folders)).toBeNull();
@@ -70,7 +70,7 @@ describe("tree helpers", () => {
   });
 
   it("shows the memory folder as Hafıza in the Turkish interface", () => {
-    const folders = { daily: "daily", inbox: "inbox", notes: "notes", reports: "reports", attachments: "attachments", templates: "templates", memory: "memory" };
+    const folders = { daily: "daily", inbox: "inbox", notes: "notes", reports: "reports", attachments: "attachments", templates: "templates", memory: "memory", sources: "sources" };
     const kind = systemFolder("memory", folders);
     expect(kind).toBe("memory");
     expect(tIn("tr", `folder.${kind}` as Key)).toBe("Hafıza");

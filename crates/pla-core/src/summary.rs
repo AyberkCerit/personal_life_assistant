@@ -25,8 +25,8 @@ pub const PER_RUN: usize = 20;
 /// What the model reads for one day (its window is 8 192 tokens).
 const INPUT_TOKENS: usize = 5000;
 
-/// A day's notes: its daily note and the other notes last changed that day (reports and
-/// templates and memory left out, FR-MEM-011), with a signature that changes when any of them does.
+/// A day's notes: its daily note and the other notes last changed that day (reports, templates,
+/// memory and imported PDFs left out, FR-MEM-011), with a signature that changes when any of them does.
 #[derive(Debug, Clone, PartialEq)]
 pub struct DaySources {
     pub date: NaiveDate,
@@ -35,7 +35,7 @@ pub struct DaySources {
 }
 
 fn excluded(rel: &str, folders: &Folders) -> bool {
-    [&folders.reports, &folders.templates, &folders.memory].iter().any(|f| crate::vault::is_under(rel, f))
+    [&folders.reports, &folders.templates, &folders.memory, &folders.sources].iter().any(|f| crate::vault::is_under(rel, f))
 }
 
 /// The local day a modification time falls on.

@@ -17,7 +17,7 @@ export function parentOf(path: string): string {
 }
 
 /** The vault's own folders as `.pla/config` names them (pla-core `Folders`). */
-export interface Folders { daily: string; inbox: string; notes: string; reports: string; attachments: string; templates: string; memory: string }
+export interface Folders { daily: string; inbox: string; notes: string; reports: string; attachments: string; templates: string; memory: string; sources: string }
 
 /** Which of the vault's own folders `path` is, at the vault's top (FR-I18N-004: the tree says it in
  *  the interface language; on disk it keeps its name). */

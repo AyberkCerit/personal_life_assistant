@@ -16,6 +16,7 @@ pub mod memory;
 pub mod metrics;
 pub mod models;
 pub mod notes;
+pub mod pdf;
 pub mod pipeline;
 pub mod qa;
 pub mod recall;

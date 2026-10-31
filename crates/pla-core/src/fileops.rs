@@ -16,7 +16,9 @@ pub fn same_ignoring_case(a: &str, b: &str) -> bool {
 /// The system folders PLA keeps its own things in: they stay where `.pla/config` says, and so does
 /// any folder that holds one (a configured `journal/daily` keeps `journal` in place).
 pub fn is_system_folder(folders: &Folders, rel: &str) -> bool {
-    [&folders.daily, &folders.inbox, &folders.notes, &folders.reports, &folders.attachments, &folders.templates, &folders.memory].iter().any(|f| crate::vault::is_under(f, rel))
+    [&folders.daily, &folders.inbox, &folders.notes, &folders.reports, &folders.attachments, &folders.templates, &folders.memory, &folders.sources]
+        .iter()
+        .any(|f| crate::vault::is_under(f, rel))
 }
 
 /// Puts `from` at `to` on disk: refuses an existing target (unless only the letter case differs,
