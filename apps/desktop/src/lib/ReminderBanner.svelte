@@ -1,7 +1,8 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { api, type DueReminder } from "./api";
-  import { t } from "./i18n";
+  import { lang, t } from "./i18n";
+  import { reminderWhen, todayIso } from "./tasks";
   import AlarmClock from "@lucide/svelte/icons/alarm-clock";
   import Check from "@lucide/svelte/icons/check";
   import Clock from "@lucide/svelte/icons/clock";
@@ -15,6 +16,7 @@
   let { version, onChanged }: { version: number; onChanged: () => void } = $props();
   let due = $state<DueReminder[]>([]);
   let missed = $state<DueReminder[]>([]);
+  const labels = $derived({ today: t("tasks.today"), tomorrow: t("tasks.tomorrow"), noDate: t("tasks.noDate"), overdue: t("tasks.overdue") });
 
   // The list lives in the app, not only in events: the scheduler's first tick may come before this
   // banner listens (final review C1), and a reminder answered elsewhere must go (M2).
@@ -49,7 +51,7 @@
 
 {#snippet item(r: DueReminder)}
   <li>
-    <span class="what"><strong>{r.title}</strong> <span class="time">{r.notify_at.slice(11, 16)}</span></span>
+    <span class="what"><strong>{r.title}</strong> <span class="time">{reminderWhen(r.notify_at, todayIso(), labels, lang)}</span></span>
     <span class="acts">
       <Button variant="primary" icon={Check} aria-label={`${t("reminder.done")}: ${r.title}`} onclick={() => void act(r.task_id, "done")}>{t("reminder.done")}</Button>
       <Button icon={Clock} aria-label={`${t("reminder.snooze")}: ${r.title}`} onclick={() => void act(r.task_id, "snooze")}>{t("reminder.snooze")}</Button>

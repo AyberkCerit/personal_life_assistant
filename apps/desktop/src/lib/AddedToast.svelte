@@ -60,7 +60,8 @@
 </div>
 
 <style>
-  .toasts { position: fixed; right: var(--space-4); bottom: 2.5rem; display: flex; flex-direction: column; gap: var(--space-2); z-index: 10; max-width: 22rem; }
+  /* Over the middle pane's corner, not the side panel, so the assistant's Send button stays clear. */
+  .toasts { position: fixed; right: calc(var(--right-w, 0px) + var(--space-4)); bottom: 2.5rem; display: flex; flex-direction: column; gap: var(--space-2); z-index: 10; max-width: 22rem; }
   .toast {
     display: flex; gap: var(--space-3); align-items: center;
     padding: var(--space-2) var(--space-2) var(--space-2) var(--space-3);

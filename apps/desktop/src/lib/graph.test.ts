@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { degrees, nearest, neighbours, radius } from "./graph";
+import { degrees, nearest, neighbours, overlaps, radius, shortLabel } from "./graph";
 
 describe("graph geometry", () => {
   it("counts the links of every note, isolated ones as 0", () => {
@@ -26,5 +26,19 @@ describe("graph geometry", () => {
     expect([...n[0]]).toEqual([2]);
     expect([...n[2]]).toEqual([0]);
     expect(n[1].size).toBe(0);
+  });
+
+  it("tells label boxes that cover each other from ones that only touch", () => {
+    expect(overlaps([0, 0, 10, 4], [5, 2, 10, 4])).toBe(true);
+    expect(overlaps([0, 0, 10, 4], [10, 0, 10, 4])).toBe(false);
+    expect(overlaps([0, 0, 10, 4], [0, 4, 10, 4])).toBe(false);
+  });
+
+  it("cuts long titles, Turkish letters intact", () => {
+    expect(shortLabel("PLA")).toBe("PLA");
+    const long = shortLabel("Çok Uzun Bir Başlığı Olan Ve Grafta Etiketi Taşabilecek Bir Not");
+    expect([...long].length).toBe(28);
+    expect(long.endsWith("…")).toBe(true);
+    expect(long.startsWith("Çok Uzun Bir Başlığı")).toBe(true);
   });
 });

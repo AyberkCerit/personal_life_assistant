@@ -236,12 +236,12 @@
 
 <style>
   .panel { display: flex; flex-direction: column; gap: var(--space-2); min-width: 0; }
-  /* Five tabs fit the 20rem side panel; a narrower one shortens the labels (full text in the title) instead of scrolling. */
+  /* Five tabs fit the 20rem side panel at the small size (the Turkish labels did not at --text-md); a narrower panel shortens the labels (full text in the title) instead of scrolling. */
   .tabs { position: relative; display: flex; border-bottom: 1px solid var(--color-border); }
   .tabs button {
     flex: 0 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     background: none; border: 0; padding: var(--space-2) var(--space-1); cursor: pointer;
-    color: var(--color-text-muted); font-size: var(--text-md);
+    color: var(--color-text-muted); font-size: var(--text-sm);
     transition: color var(--duration-fast) var(--ease-standard);
   }
   .tabs button:hover, .tabs button[aria-selected="true"] { color: var(--color-text); }

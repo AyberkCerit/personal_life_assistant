@@ -3,9 +3,11 @@
   import { forceCollide, forceLink, forceManyBody, forceSimulation, forceX, forceY, type Simulation, type SimulationNodeDatum } from "d3-force";
   import Network from "@lucide/svelte/icons/network";
   import { api, type NoteGraph } from "./api";
-  import { degrees, nearest, neighbours, radius } from "./graph";
+  import Maximize from "@lucide/svelte/icons/maximize";
+  import { degrees, nearest, neighbours, overlaps, radius, shortLabel, type Box } from "./graph";
   import { t, tf } from "./i18n";
   import EmptyState from "./ui/EmptyState.svelte";
+  import IconButton from "./ui/IconButton.svelte";
 
   // The middle pane's graph of the vault: a dot per note, a line per link (like Obsidian's graph view).
   // Drawn on a canvas and laid out by d3-force; it only runs while the view is open and rests once the
@@ -94,9 +96,32 @@
     ctx.font = `${12 / view.k}px ${css.fontFamily}`;
     ctx.textAlign = "center";
     ctx.textBaseline = "top";
-    dots.forEach((d, i) => {
-      if (view.k >= 1.8 || i === open || (focus && related(i))) ctx.fillText(d.title, d.x, d.y + d.r + 3 / view.k);
-    });
+    // The hovered and open notes' labels first, then the bigger dots'; a label that would cover one
+    // already drawn is left out (hovering its dot shows it).
+    const rank = (i: number) => (i === hover ? 2 : i === open ? 1 : 0);
+    const order = dots.map((_, i) => i).filter((i) => view.k >= 1.8 || i === open || (focus && related(i)));
+    order.sort((a, b) => rank(b) - rank(a) || dots[b].r - dots[a].r);
+    const placed: Box[] = [];
+    ctx.strokeStyle = color("--color-surface-reading"); // a halo keeps a label readable over a dot or line
+    ctx.lineWidth = 3 / view.k;
+    ctx.lineJoin = "round";
+    for (const i of order) {
+      const d = dots[i];
+      const text = rank(i) ? d.title : shortLabel(d.title);
+      const w = ctx.measureText(text).width;
+      const box: Box = [d.x - w / 2, d.y + d.r + 3 / view.k, w, 14 / view.k];
+      if (!rank(i) && placed.some((p) => overlaps(p, box))) continue;
+      placed.push(box);
+      ctx.strokeText(text, d.x, box[1]);
+      ctx.fillText(text, d.x, box[1]);
+    }
+  }
+
+  /** Back to the whole graph in view, after the user panned or zoomed away. */
+  function refit() {
+    touched = false;
+    fit();
+    draw();
   }
 
   function resize() {
@@ -250,6 +275,7 @@
   <div class="graph" bind:this={wrap}>
     <canvas bind:this={canvas} aria-label="{t('graph.label')} ({label})" onpointerdown={down} onpointermove={move} onpointerup={up} onpointercancel={up} onpointerleave={leave}></canvas>
     <p class="hint">{t("graph.hint")} · {label}</p>
+    <div class="tools"><IconButton icon={Maximize} label={t("graph.fit")} onclick={refit} /></div>
   </div>
 {:else if graph || failed}
   <EmptyState icon={Network} title={t("graph.empty")} />
@@ -261,5 +287,6 @@
   .graph { position: relative; flex: 1; min-height: 0; overflow: hidden; background: var(--color-surface-reading); }
   canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; cursor: grab; touch-action: none; }
   .hint { position: absolute; left: var(--space-3); bottom: var(--space-2); margin: 0; font-size: var(--text-sm); color: var(--color-text-muted); pointer-events: none; }
+  .tools { position: absolute; top: var(--space-2); right: var(--space-2); }
   .loading { margin: auto; color: var(--color-text-muted); }
 </style>
