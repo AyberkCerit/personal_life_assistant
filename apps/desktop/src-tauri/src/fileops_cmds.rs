@@ -48,9 +48,10 @@ pub fn link_count(state: State<AppState>, path: String) -> Result<usize, String>
 }
 
 /// Points the links in `sources` from `old` to `new`, as PLA's own writes. Returns how many changed.
-fn relink(state: &State<AppState>, vault: &Vault, sources: &[String], old: &str, new: &str, by_name: bool) -> usize {
+/// `by_name[i]`: in `sources[i]`, a link by the note's name leads to it (not to a namesake).
+fn relink(state: &State<AppState>, vault: &Vault, sources: &[String], by_name: &[bool], old: &str, new: &str) -> usize {
     let mut changed = 0;
-    for source in sources {
+    for (source, &by_name) in sources.iter().zip(by_name) {
         let Ok(path) = files::resolve(vault, source) else { continue };
         let Ok(text) = std::fs::read_to_string(&path) else { continue };
         if let Some(updated) = fileops::rewrite_links(&text, old, new, by_name) {
@@ -66,9 +67,13 @@ fn relink(state: &State<AppState>, vault: &Vault, sources: &[String], old: &str,
 /// Moves a note and keeps everything around it: records, index, and (when asked) the links to it.
 fn move_note_with_links(state: &State<AppState>, session: &Session, from: &str, to: &str, update_links: bool) -> Result<(), String> {
     let sources = if update_links { linking_notes(session, from)? } else { Vec::new() };
-    // A link by name is this note's only when the name leads here, not to a namesake (final review I2).
+    // A link by name is this note's only when, from the linking note, the name leads here and not to
+    // a namesake (final review I2; a name resolves from the note it is in).
     let stem = index::strip_md(from.rsplit('/').next().unwrap_or_default()).to_owned();
-    let by_name = index::resolve_link(&session.cache.lock().expect("cache lock"), &stem).ok().flatten().as_deref() == Some(from);
+    let by_name: Vec<bool> = {
+        let cache = session.cache.lock().expect("cache lock");
+        sources.iter().map(|s| index::resolve_link(&cache, &stem, Some(s)).ok().flatten().as_deref() == Some(from)).collect()
+    };
     let case_only = fileops::same_ignoring_case(from, to);
     if let Ok(text) = std::fs::read_to_string(files::resolve(&session.vault, from).map_err(code)?) {
         state.self_writes.record_text(to, &text); // the note itself is not an outside change
@@ -82,7 +87,7 @@ fn move_note_with_links(state: &State<AppState>, session: &Session, from: &str, 
         // watcher stays quiet about PLA's own move, so the worker is told here
         session.worker.send(crate::worker::Command::Enqueue(to.to_owned()));
     }
-    relink(state, &session.vault, &sources, from, to, by_name);
+    relink(state, &session.vault, &sources, &by_name, from, to);
     if case_only {
         // the old name still opens the file, so a touch would keep it in the index: walk the disk
         session.indexer.send(IndexCommand::Rescan);

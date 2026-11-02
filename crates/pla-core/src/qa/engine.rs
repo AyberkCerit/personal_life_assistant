@@ -875,7 +875,7 @@ pub fn answer(model: &mut dyn ChatModel, env: &ToolEnv<'_>, q: &Question<'_>, ca
     // FR-QA-010: the notes it cites; when it cites none, the notes its context came from.
     let mut sources: Vec<String> = Vec::new();
     for target in cited(&text) {
-        if let Ok(Some(path)) = crate::index::resolve_link(env.cache, &target) {
+        if let Ok(Some(path)) = crate::index::resolve_link(env.cache, &target, None) {
             if !sources.contains(&path) {
                 sources.push(path);
             }

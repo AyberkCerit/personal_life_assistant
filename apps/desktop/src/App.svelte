@@ -164,10 +164,10 @@
     quickOpen = true;
   }
 
-  /** FR-EDT-008/009: follow a wikilink; a missing target note is created in the inbox. */
+  /** FR-EDT-008/009: follow a wikilink in the open note; a missing target note is created in the inbox. */
   async function followLink(target: string) {
     try {
-      const opened = await api.openLink(target);
+      const opened = await api.openLink(target, current);
       if (opened.created) await refresh();
       await openNote(opened.path);
     } catch (e) {

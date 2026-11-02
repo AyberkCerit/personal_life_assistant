@@ -140,9 +140,10 @@ fn links_in(line: &str, number: usize, original: &str, out: &mut Vec<Link>) {
     let original: Vec<char> = original.trim_end().chars().collect();
     for link in crate::markdown::wikilinks(line) {
         let inner = link.inner.replace("\\|", "|"); // a pipe escaped in a table
-        let embed = line[..link.start].ends_with('!');
         let target = normalize_name(inner.split('|').next().unwrap_or_default());
-        if !embed && !target.is_empty() {
+        // `![[Not]]` counts as a link too (Obsidian's backlinks list embeds); an image embed
+        // resolves to no note, so it never draws an edge or a backlink
+        if !target.is_empty() {
             // `line` and `original` have the same characters (code spans are blanked one for one)
             let at = line[..link.start].chars().count();
             let end = at + line[link.start..link.end].chars().count();
@@ -518,15 +519,27 @@ fn names(conn: &Connection) -> rusqlite::Result<Vec<Name>> {
         .collect()
 }
 
+/// The folder part of a vault path, `""` at the root.
+fn folder_of(path: &str) -> &str {
+    path.rsplit_once('/').map_or("", |(dir, _)| dir)
+}
+
+/// Among several notes of one name: the one in the linking note's folder (Obsidian resolves a link
+/// from the note it is in), else the shortest path, then the first by path.
+fn closest<'a>(paths: impl IntoIterator<Item = &'a str>, from: Option<&str>) -> Option<&'a str> {
+    let here = from.map(folder_of);
+    paths.into_iter().min_by_key(|p| (here != Some(folder_of(p)), p.len(), *p))
+}
+
 /// FR-EDT-008: like Obsidian, the exact vault path first, then the file name, then an alias; among
-/// several notes of one name the shortest path wins.
-pub fn resolve_link(conn: &Connection, target: &str) -> rusqlite::Result<Option<String>> {
+/// several notes of one name the one next to `from` (the linking note), else the shortest path.
+pub fn resolve_link(conn: &Connection, target: &str, from: Option<&str>) -> rusqlite::Result<Option<String>> {
     let target = normalize_name(target);
     if target.is_empty() {
         return Ok(None);
     }
     let all = names(conn)?;
-    let pick = |hits: Vec<&String>| hits.into_iter().min_by_key(|p| (p.len(), (*p).clone())).cloned();
+    let pick = |hits: Vec<&String>| closest(hits.into_iter().map(String::as_str), from).map(str::to_owned);
     if let Some(p) = pick(all.iter().map(|n| &n.0).filter(|p| normalize_name(p) == target).collect()) {
         return Ok(Some(p));
     }
@@ -550,7 +563,8 @@ pub fn backlinks(conn: &Connection, rel: &str) -> rusqlite::Result<Vec<Backlink>
     let mut candidates = vec![normalize_name(rel), key(&title)];
     candidates.extend(aliases.iter().map(|a| key(a)));
     let mut out = Vec::new();
-    let mut resolved: std::collections::HashMap<String, Option<String>> = std::collections::HashMap::new();
+    // a name resolves the same from every note of one folder
+    let mut resolved: std::collections::HashMap<(String, String), Option<String>> = std::collections::HashMap::new();
     let mut stmt = conn.prepare(
         "SELECT l.source_path, COALESCE(n.title, ''), l.line, COALESCE(l.line_text, ''), l.target_path
          FROM link l LEFT JOIN note_index n ON n.note_path = l.source_path
@@ -562,11 +576,12 @@ pub fn backlinks(conn: &Connection, rel: &str) -> rusqlite::Result<Vec<Backlink>
         })?;
         for row in rows {
             let (source_path, source_title, line, line_text, target) = row?;
-            let goes_to = match resolved.get(&target) {
+            let at = (target, folder_of(&source_path).to_owned());
+            let goes_to = match resolved.get(&at) {
                 Some(p) => p.clone(),
                 None => {
-                    let p = resolve_link(conn, &target)?;
-                    resolved.insert(target, p.clone());
+                    let p = resolve_link(conn, &at.0, Some(&source_path))?;
+                    resolved.insert(at, p.clone());
                     p
                 }
             };
@@ -595,13 +610,14 @@ pub struct Graph {
 }
 
 /// Resolves many links from one read of the names, the way `resolve_link` does one: path, then
-/// title, then alias; the shortest path wins a tie.
+/// title, then alias; a tie goes to the linking note's folder, then the shortest path.
 struct Resolver {
     /// Sorted by path; the indexes below point into it.
     names: Vec<Name>,
-    by_path: std::collections::HashMap<String, usize>,
-    by_title: std::collections::HashMap<String, usize>,
-    by_alias: std::collections::HashMap<String, usize>,
+    /// Every note of each name; `resolve` picks among them for the linking note.
+    by_path: std::collections::HashMap<String, Vec<usize>>,
+    by_title: std::collections::HashMap<String, Vec<usize>>,
+    by_alias: std::collections::HashMap<String, Vec<usize>>,
     index_of: std::collections::HashMap<String, usize>,
 }
 
@@ -610,13 +626,13 @@ impl Resolver {
         use std::collections::HashMap;
         let mut names = names(conn)?;
         names.sort_by(|a, b| a.0.cmp(&b.0));
-        let mut by_path: HashMap<String, usize> = HashMap::new();
-        let mut by_title: HashMap<String, usize> = HashMap::new();
-        let mut by_alias: HashMap<String, usize> = HashMap::new();
-        let put = |map: &mut HashMap<String, usize>, k: String, i: usize| {
-            let wins = map.get(&k).is_none_or(|&current| (names[i].0.len(), &names[i].0) < (names[current].0.len(), &names[current].0));
-            if wins {
-                map.insert(k, i);
+        let mut by_path: HashMap<String, Vec<usize>> = HashMap::new();
+        let mut by_title: HashMap<String, Vec<usize>> = HashMap::new();
+        let mut by_alias: HashMap<String, Vec<usize>> = HashMap::new();
+        let put = |map: &mut HashMap<String, Vec<usize>>, k: String, i: usize| {
+            let hits = map.entry(k).or_default();
+            if !hits.contains(&i) {
+                hits.push(i);
             }
         };
         for (i, (path, title, aliases, _)) in names.iter().enumerate() {
@@ -630,9 +646,11 @@ impl Resolver {
         Ok(Self { names, by_path, by_title, by_alias, index_of })
     }
 
-    /// The note a stored (already normalised) link target goes to.
-    fn resolve(&self, target: &str) -> Option<usize> {
-        self.by_path.get(target).or_else(|| self.by_title.get(target)).or_else(|| self.by_alias.get(target)).copied()
+    /// The note a stored (already normalised) link target in note `from` goes to.
+    fn resolve(&self, target: &str, from: Option<&str>) -> Option<usize> {
+        let hits = self.by_path.get(target).or_else(|| self.by_title.get(target)).or_else(|| self.by_alias.get(target))?;
+        let best = closest(hits.iter().map(|&i| self.names[i].0.as_str()), from)?;
+        self.index_of.get(best).copied()
     }
 
     /// The notes `i` links to and, with `incoming`, the notes linking to it; each once, without `i`.
@@ -640,17 +658,17 @@ impl Resolver {
         let (path, title, aliases, _) = &self.names[i];
         let mut out = std::collections::BTreeSet::new();
         let targets: Vec<String> = conn.prepare("SELECT DISTINCT target_path FROM link WHERE source_path = ?1")?.query_map([path], |r| r.get(0))?.collect::<Result<_, _>>()?;
-        out.extend(targets.iter().filter_map(|t| self.resolve(t)));
+        out.extend(targets.iter().filter_map(|t| self.resolve(t, Some(path))));
         // a link to this note is written as its path, title or an alias
         let mut written: std::collections::BTreeSet<String> = [normalize_name(path), key(title)].into();
         written.extend(aliases.iter().map(|a| key(a)));
         let mut stmt = conn.prepare("SELECT DISTINCT source_path FROM link WHERE target_path = ?1")?;
         for name in written.iter().filter(|_| incoming) {
-            if self.resolve(name) != Some(i) {
-                continue; // another note owns this name
-            }
             for source in stmt.query_map([name], |r| r.get::<_, String>(0))? {
-                out.extend(self.index_of.get(&source?).copied());
+                let source = source?;
+                if self.resolve(name, Some(&source)) == Some(i) {
+                    out.extend(self.index_of.get(&source).copied()); // not when the name leads that note to a namesake
+                }
             }
         }
         out.remove(&i);
@@ -667,7 +685,7 @@ pub fn graph(conn: &Connection) -> rusqlite::Result<Graph> {
     for row in stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))? {
         let (source, target) = row?;
         let Some(&from) = r.index_of.get(&source) else { continue };
-        let Some(to) = r.resolve(&target) else { continue };
+        let Some(to) = r.resolve(&target, Some(&source)) else { continue };
         if from != to {
             edges.insert((from.min(to), from.max(to)));
         }
@@ -794,12 +812,13 @@ mod tests {
     }
 
     #[test]
-    fn wikilinks_are_found_with_their_line_and_embeds_are_not_links() {
+    fn wikilinks_and_embeds_are_found_with_their_line() {
         // FR-EDT-008
-        let text = "İlk satır [[Proje Planı]] ve [[notes/Fikirler|fikirler]].\n\n![[resim.png]]\nBaşlığa [[Günlük#Sabah]] ve [[ boş ]] ile [[]].\n";
+        let text =
+            "İlk satır [[Proje Planı]] ve [[notes/Fikirler|fikirler]].\n\n![[resim.png]] ![[Toplantı]]\nBaşlığa [[Günlük#Sabah]] ve [[ boş ]] ile [[]].\n";
         let n = parse_note("a.md", text);
         let found: Vec<(&str, usize)> = n.links.iter().map(|l| (l.target.as_str(), l.line)).collect();
-        assert_eq!(found, vec![("proje plani", 1), ("notes/fikirler", 1), ("günlük", 4), ("boş", 4)]);
+        assert_eq!(found, vec![("proje plani", 1), ("notes/fikirler", 1), ("resim.png", 3), ("toplanti", 3), ("günlük", 4), ("boş", 4)]);
         assert_eq!(n.links[0].line_text, "İlk satır [[Proje Planı]] ve [[notes/Fikirler|fikirler]].");
     }
 
@@ -915,10 +934,10 @@ mod tests {
         put(&conn, "daily/a.md", "Bugün [[PLA]] üzerinde çalıştım.\nSonra [[Asistan|asistana]] baktım.");
         put(&conn, "daily/b.md", "[[projeler/eski/PLA]] arşivde.\n[[Yok Böyle Not]]");
         put(&conn, "notes/PLA2.md", "Kendine bağlantı [[PLA2]].");
-        assert_eq!(resolve_link(&conn, "pla").unwrap().as_deref(), Some("notes/PLA.md"), "the shortest path wins a tie");
-        assert_eq!(resolve_link(&conn, "Projeler/Eski/PLA.md").unwrap().as_deref(), Some("projeler/eski/PLA.md"));
-        assert_eq!(resolve_link(&conn, "asistan").unwrap().as_deref(), Some("notes/PLA.md"), "by alias");
-        assert_eq!(resolve_link(&conn, "Yok Böyle Not").unwrap(), None);
+        assert_eq!(resolve_link(&conn, "pla", None).unwrap().as_deref(), Some("notes/PLA.md"), "the shortest path wins a tie");
+        assert_eq!(resolve_link(&conn, "Projeler/Eski/PLA.md", None).unwrap().as_deref(), Some("projeler/eski/PLA.md"));
+        assert_eq!(resolve_link(&conn, "asistan", None).unwrap().as_deref(), Some("notes/PLA.md"), "by alias");
+        assert_eq!(resolve_link(&conn, "Yok Böyle Not", None).unwrap(), None);
         let back = backlinks(&conn, "notes/PLA.md").unwrap();
         assert_eq!(back.iter().map(|b| (b.source_path.as_str(), b.line)).collect::<Vec<_>>(), vec![("daily/a.md", 1), ("daily/a.md", 2)]);
         assert_eq!(back[1].line_text, "Sonra [[Asistan|asistana]] baktım.");
@@ -950,6 +969,40 @@ mod tests {
             "both directions are one edge; a missing note and a self link draw nothing"
         );
         assert!(graph(&db().1).unwrap().nodes.is_empty());
+    }
+
+    #[test]
+    fn a_shared_name_leads_to_the_note_next_to_the_link() {
+        // FR-EDT-008: like Obsidian, which resolves a link from the note it is in
+        let (_t, conn) = db();
+        put(&conn, "inbox/OpenCV.md", "gelen kutusundaki");
+        put(&conn, "notes/OpenCV.md", "notlardaki");
+        put(&conn, "notes/Görüntü.md", "[[OpenCV]]");
+        put(&conn, "inbox/Taslak.md", "[[OpenCV]]");
+        put(&conn, "daily/a.md", "[[OpenCV]]");
+        let to = |from: Option<&str>| resolve_link(&conn, "OpenCV", from).unwrap();
+        assert_eq!(to(Some("notes/Görüntü.md")).as_deref(), Some("notes/OpenCV.md"));
+        assert_eq!(to(Some("inbox/Taslak.md")).as_deref(), Some("inbox/OpenCV.md"));
+        assert_eq!(to(Some("daily/a.md")).as_deref(), Some("inbox/OpenCV.md"), "elsewhere: shortest path, then by path");
+        assert_eq!(to(None).as_deref(), Some("inbox/OpenCV.md"));
+        let from = |rel: &str| backlinks(&conn, rel).unwrap().into_iter().map(|b| b.source_path).collect::<Vec<_>>();
+        assert_eq!(from("notes/OpenCV.md"), vec!["notes/Görüntü.md"]);
+        assert_eq!(from("inbox/OpenCV.md"), vec!["daily/a.md", "inbox/Taslak.md"]);
+        let g = graph(&conn).unwrap();
+        let mut pairs: Vec<(&str, &str)> = g.edges.iter().map(|&(a, b)| (g.nodes[a].path.as_str(), g.nodes[b].path.as_str())).collect();
+        pairs.sort();
+        assert_eq!(pairs, vec![("daily/a.md", "inbox/OpenCV.md"), ("inbox/OpenCV.md", "inbox/Taslak.md"), ("notes/Görüntü.md", "notes/OpenCV.md")]);
+        assert_eq!(linked_notes(&conn, &["notes/OpenCV.md"], true).unwrap(), vec![vec!["notes/Görüntü.md".to_owned()]]);
+    }
+
+    #[test]
+    fn an_embedded_note_is_linked_and_an_embedded_image_is_not() {
+        let (_t, conn) = db();
+        put(&conn, "notes/Toplantı.md", "gündem");
+        put(&conn, "daily/a.md", "![[Toplantı]] ve ![[resim.png]]");
+        assert_eq!(backlinks(&conn, "notes/Toplantı.md").unwrap().iter().map(|b| b.source_path.as_str()).collect::<Vec<_>>(), vec!["daily/a.md"]);
+        let g = graph(&conn).unwrap();
+        assert_eq!(g.edges.len(), 1, "the image is no note: no edge to it");
     }
 
     #[test]
@@ -994,7 +1047,7 @@ mod tests {
         assert_eq!(tags.len(), 1, "#Işık and #ışık are one tag: {tags:?}");
         assert_eq!(tags[0].count, 2);
         assert_eq!(search(&conn, "", None, Some("IŞIK"), 20).unwrap().len(), 2);
-        assert_eq!(resolve_link(&conn, "ışık").unwrap().as_deref(), Some("notes/Işık.md"));
+        assert_eq!(resolve_link(&conn, "ışık", None).unwrap().as_deref(), Some("notes/Işık.md"));
         assert_eq!(backlinks(&conn, "notes/Işık.md").unwrap().len(), 1);
     }
 
