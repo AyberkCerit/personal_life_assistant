@@ -9,6 +9,7 @@ use pla_core::files::{self, FileError};
 use pla_core::fs_atomic::write_atomic;
 use pla_core::index;
 use pla_core::vault::Vault;
+use rusqlite::Connection;
 use tauri::{AppHandle, Emitter, State};
 
 use crate::commands::{with_session, AppState, Session};
@@ -47,6 +48,13 @@ pub fn link_count(state: State<AppState>, path: String) -> Result<usize, String>
     with_session(&state, |s| Ok(linking_notes(s, &path)?.len()))
 }
 
+/// For each of `sources`, whether a link by `rel`'s file name leads there and not to a namesake
+/// (final review I2; a name resolves from the note it is in).
+fn links_by_name(cache: &Connection, sources: &[String], rel: &str) -> Vec<bool> {
+    let stem = index::strip_md(rel.rsplit('/').next().unwrap_or_default());
+    sources.iter().map(|s| index::resolve_link(cache, stem, Some(s)).ok().flatten().as_deref() == Some(rel)).collect()
+}
+
 /// Points the links in `sources` from `old` to `new`, as PLA's own writes. Returns how many changed.
 /// `by_name[i]`: in `sources[i]`, a link by the note's name leads to it (not to a namesake).
 fn relink(state: &State<AppState>, vault: &Vault, sources: &[String], by_name: &[bool], old: &str, new: &str) -> usize {
@@ -67,13 +75,7 @@ fn relink(state: &State<AppState>, vault: &Vault, sources: &[String], by_name: &
 /// Moves a note and keeps everything around it: records, index, and (when asked) the links to it.
 fn move_note_with_links(state: &State<AppState>, session: &Session, from: &str, to: &str, update_links: bool) -> Result<(), String> {
     let sources = if update_links { linking_notes(session, from)? } else { Vec::new() };
-    // A link by name is this note's only when, from the linking note, the name leads here and not to
-    // a namesake (final review I2; a name resolves from the note it is in).
-    let stem = index::strip_md(from.rsplit('/').next().unwrap_or_default()).to_owned();
-    let by_name: Vec<bool> = {
-        let cache = session.cache.lock().expect("cache lock");
-        sources.iter().map(|s| index::resolve_link(&cache, &stem, Some(s)).ok().flatten().as_deref() == Some(from)).collect()
-    };
+    let by_name = links_by_name(&session.cache.lock().expect("cache lock"), &sources, from);
     let case_only = fileops::same_ignoring_case(from, to);
     if let Ok(text) = std::fs::read_to_string(files::resolve(&session.vault, from).map_err(code)?) {
         state.self_writes.record_text(to, &text); // the note itself is not an outside change
@@ -328,6 +330,20 @@ pub fn open_today(app: AppHandle, state: State<AppState>, lang: String) -> Resul
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_rename_takes_a_link_by_name_only_where_the_name_leads_to_the_note() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cache = pla_core::db::open_databases(tmp.path()).unwrap().cache;
+        for (rel, text) in
+            [("inbox/OpenCV.md", ""), ("notes/OpenCV.md", ""), ("notes/a.md", "[[OpenCV]]"), ("inbox/b.md", "[[OpenCV]]"), ("daily/c.md", "[[OpenCV]]")]
+        {
+            index::index_note(&cache, rel, text, 1, 1).unwrap();
+        }
+        let sources = ["notes/a.md".to_owned(), "inbox/b.md".to_owned(), "daily/c.md".to_owned()];
+        assert_eq!(links_by_name(&cache, &sources, "notes/OpenCV.md"), vec![true, false, false]);
+        assert_eq!(links_by_name(&cache, &sources, "inbox/OpenCV.md"), vec![false, true, true]);
+    }
 
     #[test]
     fn file_errors_become_codes_for_the_ui() {

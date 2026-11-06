@@ -23,6 +23,7 @@ const CACHE_MIGRATIONS: &[&str] = &[
     include_str!("../migrations/cache/004_yaml_frontmatter.sql"),
     include_str!("../migrations/cache/005_chunks.sql"),
     include_str!("../migrations/cache/006_summaries.sql"),
+    include_str!("../migrations/cache/007_parse_notes_again.sql"),
 ];
 
 pub struct Databases {
@@ -143,6 +144,20 @@ mod tests {
     fn tables(conn: &Connection) -> Vec<String> {
         let mut st = conn.prepare("SELECT name FROM sqlite_master WHERE type IN ('table') ORDER BY name").unwrap();
         st.query_map([], |r| r.get(0)).unwrap().map(Result::unwrap).collect()
+    }
+
+    #[test]
+    fn an_upgraded_cache_marks_its_notes_for_parsing_and_keeps_them() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut cache = connect(&tmp.path().join("cache.db")).unwrap();
+        migrate(&mut cache, &CACHE_MIGRATIONS[..6], None).unwrap();
+        cache
+            .execute("INSERT INTO note_index (note_path, title, aliases, tags, mtime, size, content_hash) VALUES ('a.md', 'a', '[]', '[]', 5, 7, 'h')", [])
+            .unwrap();
+        migrate(&mut cache, CACHE_MIGRATIONS, None).unwrap();
+        let row: (i64, i64, String) =
+            cache.query_row("SELECT mtime, size, content_hash FROM note_index", [], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).unwrap();
+        assert_eq!(row, (5, -1, "h".to_owned()), "only the size says so");
     }
 
     #[test]

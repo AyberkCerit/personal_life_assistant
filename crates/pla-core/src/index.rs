@@ -297,7 +297,8 @@ fn refresh(conn: &Connection, root: &Path, rel: &str, known: Option<(i64, i64, S
         }
         return Ok(Refresh::Unreadable);
     };
-    if known.as_ref().is_some_and(|(_, _, hash)| *hash == content_hash(text.as_bytes())) {
+    // size -1: a migration asks for the note to be parsed again though its text is the same
+    if known.as_ref().is_some_and(|(_, size, hash)| *size >= 0 && *hash == content_hash(text.as_bytes())) {
         conn.execute("UPDATE note_index SET mtime = ?2, size = ?3 WHERE note_path = ?1", params![rel, mtime, size])?;
         return Ok(Refresh::Unchanged);
     }
@@ -969,6 +970,28 @@ mod tests {
             "both directions are one edge; a missing note and a self link draw nothing"
         );
         assert!(graph(&db().1).unwrap().nodes.is_empty());
+    }
+
+    #[test]
+    fn a_note_marked_by_a_migration_is_parsed_again_and_keeps_its_vectors() {
+        let (t, conn) = db();
+        let root = t.path().join("kasa");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("a.md"), "![[Toplantı]]").unwrap();
+        std::fs::write(root.join("Toplantı.md"), "gündem").unwrap();
+        sync_vault(&conn, &root).unwrap();
+        conn.execute("UPDATE chunk SET embedded_model = 'm'", []).unwrap();
+        let stamp: (i64, String) =
+            conn.query_row("SELECT mtime, content_hash FROM note_index WHERE note_path = 'a.md'", [], |r| Ok((r.get(0)?, r.get(1)?))).unwrap();
+        conn.execute("DELETE FROM link", []).unwrap(); // as an older PLA left it: embeds not stored
+        conn.execute("UPDATE note_index SET size = -1", []).unwrap();
+        assert_eq!(sync_vault(&conn, &root).unwrap().indexed, 2);
+        assert_eq!(backlinks(&conn, "Toplantı.md").unwrap().len(), 1);
+        assert_eq!(conn.query_row("SELECT mtime, content_hash FROM note_index WHERE note_path = 'a.md'", [], |r| Ok((r.get(0)?, r.get(1)?))).unwrap(), stamp);
+        let embedded: i64 = conn.query_row("SELECT count(*) FROM chunk WHERE embedded_model = 'm'", [], |r| r.get(0)).unwrap();
+        let chunks: i64 = conn.query_row("SELECT count(*) FROM chunk", [], |r| r.get(0)).unwrap();
+        assert_eq!(embedded, chunks, "the text is the same: no chunk loses its vector");
+        assert_eq!(sync_vault(&conn, &root).unwrap().unchanged, 2, "once");
     }
 
     #[test]
