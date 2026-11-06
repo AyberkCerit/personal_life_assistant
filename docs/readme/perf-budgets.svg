@@ -1,0 +1,66 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 920 488" width="920" height="488" role="img" aria-labelledby="t d"><title id="t">Performance budgets</title><desc id="d">Ten measured p95 values against their limits on a 10,000-note vault. All ten are under budget.</desc>
+
+<style>
+  svg { --surface:#fbfbfc; --grid:#e3e6ec; --text:#2a2e37; --muted:#5d6472;
+         --s1:#2a78d6; --s2:#eb6834; --accent:#0f7a63; --track:#d2f1e7; --dim:#b8bec9; --rule:#2a2e37; }
+  @media (prefers-color-scheme: dark) {
+    svg { --surface:#1f2228; --grid:#2f343d; --text:#d2d6de; --muted:#9199a7;
+           --s1:#3987e5; --s2:#d95926; --accent:#5fbea1; --track:#243c3c; --dim:#4a5160; --rule:#d2d6de; }
+  }
+  text { font-family:'Segoe UI',-apple-system,BlinkMacSystemFont,'Helvetica Neue',Arial,sans-serif; fill:var(--text); }
+  .muted { fill:var(--muted); }
+  .t { font-size:15px; font-weight:600; }
+  .s { font-size:12px; }
+  .l { font-size:13px; }
+  .v { font-size:12px; font-variant-numeric:tabular-nums; }
+  .b { font-weight:650; }
+</style>
+<rect width="920" height="488" rx="12" fill="var(--surface)"/>
+<text x="18" y="34" class="t">Measured p95 as a share of each limit</text>
+<text x="18" y="56" class="s muted">p95 on a generated vault: 10,000 notes, 900 MB of attachments, 20,000 tasks, 50,000 metrics. Release build.</text>
+<text x="300.0" y="82" class="v muted" text-anchor="middle">0%</text>
+<text x="500.0" y="82" class="v muted" text-anchor="middle">50%</text>
+<text x="700.0" y="82" class="v muted" text-anchor="middle">100%</text>
+<text x="18" y="109" class="l">Cold start to an editable note</text>
+<rect x="300" y="98" width="400" height="16" rx="4" fill="var(--track)"/>
+<path d="M300,98 h225.3 a4,4 0 0 1 4,4 v8 a4,4 0 0 1 -4,4 h-225.3 z" fill="var(--accent)"/>
+<text x="714" y="110" class="v"><tspan class="b">1.72 s</tspan><tspan class="muted"> of 3 s  ·  57%</tspan></text>
+<text x="18" y="143" class="l">Open a 1 MB note</text>
+<rect x="300" y="132" width="400" height="16" rx="4" fill="var(--track)"/>
+<path d="M300,132 h140.0 a4,4 0 0 1 4,4 v8 a4,4 0 0 1 -4,4 h-140.0 z" fill="var(--accent)"/>
+<text x="714" y="144" class="v"><tspan class="b">72 ms</tspan><tspan class="muted"> of 200 ms  ·  36%</tspan></text>
+<text x="18" y="177" class="l">Keystroke to frame, model busy</text>
+<rect x="300" y="166" width="400" height="16" rx="4" fill="var(--track)"/>
+<path d="M300,166 h188.5 a4,4 0 0 1 4,4 v8 a4,4 0 0 1 -4,4 h-188.5 z" fill="var(--accent)"/>
+<text x="714" y="178" class="v"><tspan class="b">7.7 ms</tspan><tspan class="muted"> of 16 ms  ·  48%</tspan></text>
+<text x="18" y="211" class="l">Full-text search</text>
+<rect x="300" y="200" width="400" height="16" rx="4" fill="var(--track)"/>
+<path d="M300,200 h40.0 a4,4 0 0 1 4,4 v8 a4,4 0 0 1 -4,4 h-40.0 z" fill="var(--accent)"/>
+<text x="714" y="212" class="v"><tspan class="b">33 ms</tspan><tspan class="muted"> of 300 ms  ·  11%</tspan></text>
+<text x="18" y="245" class="l">Task, metric and report queries</text>
+<rect x="300" y="234" width="400" height="16" rx="4" fill="var(--track)"/>
+<path d="M300,234 h44.0 a4,4 0 0 1 4,4 v8 a4,4 0 0 1 -4,4 h-44.0 z" fill="var(--accent)"/>
+<text x="714" y="246" class="v"><tspan class="b">12 ms</tspan><tspan class="muted"> of 100 ms  ·  12%</tspan></text>
+<text x="18" y="279" class="l">Load the language model</text>
+<rect x="300" y="268" width="400" height="16" rx="4" fill="var(--track)"/>
+<path d="M300,268 h204.0 a4,4 0 0 1 4,4 v8 a4,4 0 0 1 -4,4 h-204.0 z" fill="var(--accent)"/>
+<text x="714" y="280" class="v"><tspan class="b">2.6 s</tspan><tspan class="muted"> of 5 s  ·  52%</tspan></text>
+<text x="18" y="313" class="l">Open the window from the tray</text>
+<rect x="300" y="302" width="400" height="16" rx="4" fill="var(--track)"/>
+<path d="M300,302 h81.5 a4,4 0 0 1 4,4 v8 a4,4 0 0 1 -4,4 h-81.5 z" fill="var(--accent)"/>
+<text x="714" y="314" class="v"><tspan class="b">641 ms</tspan><tspan class="muted"> of 3 s  ·  21%</tspan></text>
+<text x="18" y="347" class="l">First index of 10,000 notes</text>
+<rect x="300" y="336" width="400" height="16" rx="4" fill="var(--track)"/>
+<path d="M300,336 h216.0 a4,4 0 0 1 4,4 v8 a4,4 0 0 1 -4,4 h-216.0 z" fill="var(--accent)"/>
+<text x="714" y="348" class="v"><tspan class="b">165 s</tspan><tspan class="muted"> of 300 s  ·  55%</tspan></text>
+<text x="18" y="381" class="l">Memory, sitting in the tray</text>
+<rect x="300" y="370" width="400" height="16" rx="4" fill="var(--track)"/>
+<path d="M300,370 h68.0 a4,4 0 0 1 4,4 v8 a4,4 0 0 1 -4,4 h-68.0 z" fill="var(--accent)"/>
+<text x="714" y="382" class="v"><tspan class="b">27 MB</tspan><tspan class="muted"> of 150 MB  ·  18%</tspan></text>
+<text x="18" y="415" class="l">Memory, window open and idle</text>
+<rect x="300" y="404" width="400" height="16" rx="4" fill="var(--track)"/>
+<path d="M300,404 h328.4 a4,4 0 0 1 4,4 v8 a4,4 0 0 1 -4,4 h-328.4 z" fill="var(--accent)"/>
+<text x="714" y="416" class="v"><tspan class="b">374 MB</tspan><tspan class="muted"> of 450 MB  ·  83%</tspan></text>
+<line x1="700" y1="92" x2="700" y2="426" stroke="var(--rule)" stroke-width="1.5"/>
+<text x="18" y="468" class="s muted">Limits from the SRS (NFR-PERF-001…012). Model runs on 3 threads, what PLA gives it on the minimum 4-core machine.</text>
+</svg>
