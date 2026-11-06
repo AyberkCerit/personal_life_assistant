@@ -1,0 +1,52 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 640" width="1280" height="640" role="img" aria-labelledby="t d"><title id="t">PLA: a note becomes a task and a metric, on your own computer</title><desc id="d">A daily note says "Tomorrow at 8 I am hitting the gym, shoulder press, goal 40 kg. Slept 7 hours last night." PLA, running a local model, adds a task for Friday at 08:00 and logs 7 hours of sleep, both marked as added by AI.</desc>
+
+<style>
+  text { font-family:'Segoe UI',-apple-system,BlinkMacSystemFont,'Helvetica Neue',Arial,sans-serif; }
+  .mono { font-family:'Cascadia Mono','SFMono-Regular',Consolas,'Liberation Mono',monospace; }
+  .hl { animation: hl 9s ease-in-out infinite; }
+  .hl2 { animation: hl2 9s ease-in-out infinite; }
+  .flow { stroke-dasharray: 6 8; animation: flow 1.2s linear infinite; }
+  .c1 { animation: c1 9s ease-out infinite; }
+  .c2 { animation: c2 9s ease-out infinite; }
+  .chip { animation: chip 9s ease-in-out infinite; }
+  .caret { animation: caret 1s steps(1) infinite; }
+  @keyframes hl   { 0%,8% {opacity:0} 14%,40% {opacity:1} 50%,100% {opacity:0} }
+  @keyframes hl2  { 0%,40% {opacity:0} 46%,72% {opacity:1} 82%,100% {opacity:0} }
+  @keyframes c1   { 0%,22% {opacity:0; transform:translateX(24px)} 30%,92% {opacity:1; transform:none} 100% {opacity:0} }
+  @keyframes c2   { 0%,54% {opacity:0; transform:translateX(24px)} 62%,92% {opacity:1; transform:none} 100% {opacity:0} }
+  @keyframes chip { 0%,12% {opacity:.35} 18%,28% {opacity:1} 34%,44% {opacity:.35} 50%,60% {opacity:1} 66%,100% {opacity:.35} }
+  @keyframes flow { to { stroke-dashoffset:-14 } }
+  @keyframes caret { 50% { opacity:0 } }
+  @media (prefers-reduced-motion: reduce) {
+    .hl,.hl2,.flow,.c1,.c2,.chip,.caret { animation:none; }
+    .hl,.hl2 { opacity:0; }
+  }
+</style>
+<defs><radialGradient id="glow" cx="78%" cy="8%" r="70%"><stop offset="0" stop-color="#5fbea1" stop-opacity=".16"/><stop offset="1" stop-color="#5fbea1" stop-opacity="0"/></radialGradient><pattern id="dots" width="22" height="22" patternUnits="userSpaceOnUse"><circle cx="1" cy="1" r="1" fill="#ffffff" fill-opacity=".045"/></pattern></defs>
+<rect width="1280" height="640" rx="20" fill="#1a1d22"/>
+<rect width="1280" height="640" rx="20" fill="url(#dots)"/>
+<rect width="1280" height="640" rx="20" fill="url(#glow)"/>
+<g transform="translate(64,56) scale(.875)"><rect x="4" y="4" width="56" height="56" rx="14" fill="#5fbea1"/><path d="M22 48V16h12a10 10 0 0 1 0 20H22" fill="none" stroke="#0b1712" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/><circle cx="44" cy="46" r="4.5" fill="#0b1712"/></g>
+<text x="134" y="92" font-size="34" font-weight="700" fill="#d2d6de" letter-spacing="1">PLA</text>
+<text x="214" y="91" font-size="17" fill="#9199a7">Personal Life Assistant</text>
+<text x="64" y="168" font-size="46" font-weight="700" fill="#d2d6de">Your notes already hold your to-do list.</text>
+<text x="64" y="214" font-size="24" fill="#9199a7">PLA reads them with a small model that runs on your own CPU, offline.</text>
+<rect x="64" y="268" width="560" height="300" rx="14" fill="#1f2228" stroke="#343a45"/>
+<circle cx="86" cy="292" r="5" fill="#3a404b"/><circle cx="104" cy="292" r="5" fill="#3a404b"/><circle cx="122" cy="292" r="5" fill="#3a404b"/>
+<text x="144" y="297" class="mono" font-size="14" fill="#9199a7">daily/2026/2026-11-05.md</text>
+<line x1="64" y1="314" x2="624" y2="314" stroke="#343a45"/>
+<text x="92" y="356" font-size="22" font-weight="650" fill="#d2d6de">Thursday</text>
+<rect class="hl" x="84" y="380" width="520" height="64" rx="8" fill="#213c36"/>
+<text x="92" y="406" font-size="18" fill="#d2d6de">Tomorrow at 8 I&#8217;m hitting the gym,</text>
+<text x="92" y="432" font-size="18" fill="#d2d6de">shoulder press, goal 40 kg.</text>
+<rect class="hl2" x="84" y="452" width="520" height="38" rx="8" fill="#213c36"/>
+<text x="92" y="477" font-size="18" fill="#d2d6de">Slept 7 hours last night, finally.</text>
+<rect class="caret" x="93" y="504" width="2" height="22" fill="#5fbea1"/>
+<path class="flow" d="M632 418 H780" stroke="#5fbea1" stroke-width="2" fill="none"/>
+<path d="M774 411 l9 7 l-9 7" stroke="#5fbea1" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<g class="chip"><rect x="646" y="440" width="122" height="58" rx="10" fill="#262a32" stroke="#343a45"/><text x="707" y="464" font-size="13" font-weight="650" fill="#d2d6de" text-anchor="middle">Gemma 4 E2B</text><text x="707" y="484" font-size="12" fill="#9199a7" text-anchor="middle">on-device</text></g>
+<g class="c1"><rect x="796" y="268" width="380" height="104" rx="14" fill="#262a32" stroke="#343a45"/><text x="818" y="298" font-size="13" font-weight="650" fill="#9199a7" letter-spacing="1.2">TASK</text><rect x="1074" y="282" width="84" height="26" rx="13" fill="#213c36"/><g transform="translate(1082,287) scale(.66)"><path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z" fill="#94d4c0"/></g><text x="1104" y="300" font-size="13" font-weight="650" fill="#94d4c0">added</text><rect x="818" y="320" width="18" height="18" rx="4" fill="none" stroke="#6b7383" stroke-width="1.6"/><text x="848" y="335" font-size="19" font-weight="650" fill="#d2d6de">Shoulder workout</text><text x="848" y="358" font-size="15" fill="#9199a7">Fri 6 Nov · 08:00 · shoulder press 40 kg</text></g>
+<g class="c2"><rect x="796" y="392" width="380" height="104" rx="14" fill="#262a32" stroke="#343a45"/><text x="818" y="422" font-size="13" font-weight="650" fill="#9199a7" letter-spacing="1.2">METRIC · SLEEP</text><rect x="1074" y="406" width="84" height="26" rx="13" fill="#213c36"/><g transform="translate(1082,411) scale(.66)"><path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z" fill="#94d4c0"/></g><text x="1104" y="424" font-size="13" font-weight="650" fill="#94d4c0">added</text><text x="818" y="472" font-size="34" font-weight="700" fill="#d2d6de">7 h</text><text x="888" y="471" font-size="15" fill="#9199a7">Wed 4 Nov, the night before</text></g>
+<text x="796" y="536" font-size="15" fill="#9199a7">Dates are computed in Rust, not guessed by the model.</text>
+<text x="796" y="560" font-size="15" fill="#9199a7">Each added item has an Undo and a link to its line.</text>
+</svg>

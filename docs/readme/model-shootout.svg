@@ -1,0 +1,73 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 920 470" width="920" height="470" role="img" aria-labelledby="t d"><title id="t">Model shoot-out: extraction accuracy and memory</title><desc id="d">Five local models on the same 200 Turkish and English notes. Gemma 4 E2B Q3_K_M reaches 96% (TR) and 95% (EN) field accuracy in 1.85 GB of working memory and is the model PLA ships.</desc>
+
+<style>
+  svg { --surface:#fbfbfc; --grid:#e3e6ec; --text:#2a2e37; --muted:#5d6472;
+         --s1:#2a78d6; --s2:#eb6834; --accent:#0f7a63; --track:#d2f1e7; --dim:#b8bec9; --rule:#2a2e37; }
+  @media (prefers-color-scheme: dark) {
+    svg { --surface:#1f2228; --grid:#2f343d; --text:#d2d6de; --muted:#9199a7;
+           --s1:#3987e5; --s2:#d95926; --accent:#5fbea1; --track:#243c3c; --dim:#4a5160; --rule:#d2d6de; }
+  }
+  text { font-family:'Segoe UI',-apple-system,BlinkMacSystemFont,'Helvetica Neue',Arial,sans-serif; fill:var(--text); }
+  .muted { fill:var(--muted); }
+  .t { font-size:15px; font-weight:600; }
+  .s { font-size:12px; }
+  .l { font-size:13px; }
+  .v { font-size:12px; font-variant-numeric:tabular-nums; }
+  .b { font-weight:650; }
+</style>
+<rect width="920" height="470" rx="12" fill="var(--surface)"/>
+<text x="18" y="34" class="t">Extraction accuracy and memory: five local models on the same 200 notes</text>
+<text x="18" y="56" class="s muted">Field accuracy = expected items extracted exactly right. llama.cpp b11280, CPU only, 4 threads, grammar-constrained JSON.</text>
+<rect x="190" y="74" width="12" height="12" rx="3" fill="var(--s1)"/><text x="208" y="84" class="s">Turkish notes</text>
+<rect x="320" y="74" width="12" height="12" rx="3" fill="var(--s2)"/><text x="338" y="84" class="s">English notes</text>
+<text x="680" y="84" class="s b">Working memory</text>
+<line x1="190.0" y1="118" x2="190.0" y2="394" stroke="var(--grid)" stroke-width="1"/><text x="190.0" y="412" class="v muted" text-anchor="middle">0%</text>
+<line x1="290.0" y1="118" x2="290.0" y2="394" stroke="var(--grid)" stroke-width="1"/><text x="290.0" y="412" class="v muted" text-anchor="middle">25%</text>
+<line x1="390.0" y1="118" x2="390.0" y2="394" stroke="var(--grid)" stroke-width="1"/><text x="390.0" y="412" class="v muted" text-anchor="middle">50%</text>
+<line x1="490.0" y1="118" x2="490.0" y2="394" stroke="var(--grid)" stroke-width="1"/><text x="490.0" y="412" class="v muted" text-anchor="middle">75%</text>
+<line x1="590.0" y1="118" x2="590.0" y2="394" stroke="var(--grid)" stroke-width="1"/><text x="590.0" y="412" class="v muted" text-anchor="middle">100%</text>
+<line x1="510.0" y1="114" x2="510.0" y2="394" stroke="var(--rule)" stroke-width="1.5"/><text x="506.0" y="110" class="v muted" text-anchor="end">required: 80%</text>
+<line x1="680.0" y1="118" x2="680.0" y2="394" stroke="var(--grid)" stroke-width="1"/><text x="680.0" y="412" class="v muted" text-anchor="middle">0</text>
+<line x1="716.3636363636364" y1="118" x2="716.3636363636364" y2="394" stroke="var(--grid)" stroke-width="1"/><text x="716.3636363636364" y="412" class="v muted" text-anchor="middle">1</text>
+<line x1="752.7272727272727" y1="118" x2="752.7272727272727" y2="394" stroke="var(--grid)" stroke-width="1"/><text x="752.7272727272727" y="412" class="v muted" text-anchor="middle">2</text>
+<line x1="789.0909090909091" y1="118" x2="789.0909090909091" y2="394" stroke="var(--grid)" stroke-width="1"/><text x="789.0909090909091" y="412" class="v muted" text-anchor="middle">3</text>
+<line x1="825.4545454545455" y1="118" x2="825.4545454545455" y2="394" stroke="var(--grid)" stroke-width="1"/><text x="825.4545454545455" y="412" class="v muted" text-anchor="middle">4</text>
+<line x1="861.8181818181818" y1="118" x2="861.8181818181818" y2="394" stroke="var(--grid)" stroke-width="1"/><text x="861.8181818181818" y="412" class="v muted" text-anchor="middle">5 GB</text>
+<line x1="752.7272727272727" y1="114" x2="752.7272727272727" y2="394" stroke="var(--rule)" stroke-width="1.5"/><text x="756.7272727272727" y="110" class="v muted">budget 2 GB</text>
+<text x="18" y="144" class="l">Qwen2.5 1.5B</text><text x="18" y="161" class="s muted">Q4_K_M</text>
+<path d="M190,132 h180.0 a4,4 0 0 1 4,4 v6 a4,4 0 0 1 -4,4 h-180.0 z" fill="var(--s1)"/>
+<text x="380.0" y="143" class="v">46%</text>
+<path d="M190,148 h240.0 a4,4 0 0 1 4,4 v6 a4,4 0 0 1 -4,4 h-240.0 z" fill="var(--s2)"/>
+<text x="440.0" y="159" class="v">61%</text>
+<path d="M680,136 h65.5 a4,4 0 0 1 4,4 v12 a4,4 0 0 1 -4,4 h-65.5 z" fill="var(--dim)"/>
+<text x="755.4545454545455" y="150" class="v">1.91 GB</text>
+<text x="18" y="198" class="l">Qwen3 1.7B</text><text x="18" y="215" class="s muted">Q4_K_M</text>
+<path d="M190,186 h252.0 a4,4 0 0 1 4,4 v6 a4,4 0 0 1 -4,4 h-252.0 z" fill="var(--s1)"/>
+<text x="452.0" y="197" class="v">64%</text>
+<path d="M190,202 h300.0 a4,4 0 0 1 4,4 v6 a4,4 0 0 1 -4,4 h-300.0 z" fill="var(--s2)"/>
+<text x="500.0" y="213" class="v">76%</text>
+<path d="M680,190 h84.0 a4,4 0 0 1 4,4 v12 a4,4 0 0 1 -4,4 h-84.0 z" fill="var(--dim)"/>
+<text x="774.0" y="204" class="v">2.42 GB</text>
+<text x="18" y="252" class="l">Qwen3 4B 2507</text><text x="18" y="269" class="s muted">Q4_K_M</text>
+<path d="M190,240 h332.0 a4,4 0 0 1 4,4 v6 a4,4 0 0 1 -4,4 h-332.0 z" fill="var(--s1)"/>
+<text x="532.0" y="251" class="v">84%</text>
+<path d="M190,256 h340.0 a4,4 0 0 1 4,4 v6 a4,4 0 0 1 -4,4 h-340.0 z" fill="var(--s2)"/>
+<text x="540.0" y="267" class="v">86%</text>
+<path d="M680,244 h179.3 a4,4 0 0 1 4,4 v12 a4,4 0 0 1 -4,4 h-179.3 z" fill="var(--dim)"/>
+<text x="869.2727272727273" y="258" class="v">5.04 GB</text>
+<text x="18" y="306" class="l">Gemma 4 E2B</text><text x="18" y="323" class="s muted">Q4_0 QAT</text>
+<path d="M190,294 h384.0 a4,4 0 0 1 4,4 v6 a4,4 0 0 1 -4,4 h-384.0 z" fill="var(--s1)"/>
+<text x="584.0" y="305" class="v">97%</text>
+<path d="M190,310 h376.0 a4,4 0 0 1 4,4 v6 a4,4 0 0 1 -4,4 h-376.0 z" fill="var(--s2)"/>
+<text x="576.0" y="321" class="v">95%</text>
+<path d="M680,298 h96.0 a4,4 0 0 1 4,4 v12 a4,4 0 0 1 -4,4 h-96.0 z" fill="var(--dim)"/>
+<text x="786.0" y="312" class="v">2.75 GB</text>
+<text x="18" y="360" class="l b">Gemma 4 E2B</text><text x="18" y="377" class="s muted">Q3_K_M · shipped</text>
+<path d="M190,348 h380.0 a4,4 0 0 1 4,4 v6 a4,4 0 0 1 -4,4 h-380.0 z" fill="var(--s1)"/>
+<text x="580.0" y="359" class="v">96%</text>
+<path d="M190,364 h376.0 a4,4 0 0 1 4,4 v6 a4,4 0 0 1 -4,4 h-376.0 z" fill="var(--s2)"/>
+<text x="576.0" y="375" class="v">95%</text>
+<path d="M680,352 h63.3 a4,4 0 0 1 4,4 v12 a4,4 0 0 1 -4,4 h-63.3 z" fill="var(--accent)"/>
+<text x="753.2727272727273" y="366" class="v b">1.85 GB</text>
+<text x="18" y="452" class="s muted">Dev set, 100 TR + 100 EN notes. On a separate held-out set written after the prompt was frozen, the shipped model scores 91% / 91%.</text>
+</svg>
