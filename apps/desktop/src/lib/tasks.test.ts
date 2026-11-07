@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { aiMark, reviewReason, taskError, dayLabel, filterByOrigin, groupTasks, isOverdue, isReminder, msUntilNextDay, revealRange, todayIso, type Labels, type Task } from "./tasks";
+import { aiMark, reviewReason, taskError, dayLabel, filterByOrigin, groupTasks, isOverdue, isReminder, msUntilNextDay, reminderWhen, revealRange, todayIso, type Labels, type Task } from "./tasks";
 
 const L: Labels = { today: "Bugün", tomorrow: "Yarın", noDate: "Tarihsiz", overdue: "Gecikmiş" };
 const TODAY = "2026-10-06";
@@ -34,6 +34,13 @@ describe("tasks", () => {
     expect(dayLabel(TODAY, TODAY, L, "tr")).toBe("Bugün");
     expect(dayLabel("2026-10-07", TODAY, L, "tr")).toBe("Yarın");
     expect(dayLabel("2026-10-09", TODAY, L, "tr")).toContain("9");
+  });
+
+  it("shows a reminder's day unless it rings today", () => {
+    expect(reminderWhen(`${TODAY}T09:00`, TODAY, L, "tr")).toBe("09:00");
+    const old = reminderWhen("2026-10-05T09:00", TODAY, L, "tr");
+    expect(old).toContain("5");
+    expect(old).toMatch(/ 09:00$/);
   });
 
   it("puts overdue first in Today and undated last in Upcoming", () => {

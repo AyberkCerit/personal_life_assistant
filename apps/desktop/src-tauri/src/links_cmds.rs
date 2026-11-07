@@ -62,9 +62,10 @@ pub struct OpenedLink {
 
 /// FR-EDT-008/009: the note a wikilink points to; a missing one is created in the inbox and opened.
 #[tauri::command]
-pub fn open_link(state: State<AppState>, target: String) -> Result<OpenedLink, String> {
+pub fn open_link(state: State<AppState>, target: String, from: Option<String>) -> Result<OpenedLink, String> {
     with_session(&state, |session| {
-        if let Some(path) = index::resolve_link(&session.cache.lock().expect("cache lock"), &target).map_err(ue)? {
+        // `from`: the note the link is in, which picks among notes of one name
+        if let Some(path) = index::resolve_link(&session.cache.lock().expect("cache lock"), &target, from.as_deref()).map_err(ue)? {
             return Ok(OpenedLink { path, created: false });
         }
         // Not indexed yet (first open, a long sync, a note made a moment ago): the disk decides (I1).

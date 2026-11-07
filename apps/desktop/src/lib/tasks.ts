@@ -61,6 +61,12 @@ export function dayLabel(iso: string, today: string, labels: Labels, lang: strin
   return new Intl.DateTimeFormat(lang, { weekday: "short", day: "numeric", month: "short" }).format(new Date(y, m - 1, d));
 }
 
+/** When a reminder rings, as the banner shows it: the time alone today, the day too otherwise (a missed one may be days old). */
+export function reminderWhen(notifyAt: string, today: string, labels: Labels, lang: string): string {
+  const [date, time] = [notifyAt.slice(0, 10), notifyAt.slice(11, 16)];
+  return date === today ? time : `${dayLabel(date, today, labels, lang)} ${time}`;
+}
+
 export function groupTasks(tasks: Task[], list: TaskList, today: string, labels: Labels, lang: string): Group[] {
   if (list === "completed") return tasks.length ? [{ key: "completed", label: "", tasks }] : [];
   if (list === "today") {

@@ -1,0 +1,30 @@
+name: Feature request
+description: Suggest something PLA should do
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Check the [Status](https://github.com/AyberkCerit/personal_life_assistant#status) section first, your idea may already be planned.
+
+        PLA stays offline and keeps automation away from deleting anything, so requests that need a cloud service or an account are unlikely to fit.
+  - type: textarea
+    id: problem
+    attributes:
+      label: What are you trying to do?
+      description: Describe the situation, including what you do today.
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: What would help?
+    validations:
+      required: true
+  - type: textarea
+    id: example
+    attributes:
+      label: Example note
+      description: If this is about reading notes, show one with personal details removed.
+      render: text

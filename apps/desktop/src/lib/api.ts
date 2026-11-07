@@ -209,7 +209,8 @@ export const api = {
   listTags: () => call<TagCount[]>("list_tags"),
   noteGraph: () => call<NoteGraph>("note_graph"),
   /** Resolves a wikilink; a missing target is created in the inbox (FR-EDT-009). */
-  openLink: (target: string) => call<{ path: string; created: boolean }>("open_link", { target }),
+  /** `from`: the note the link is in, which picks among notes of one name. */
+  openLink: (target: string, from: string | null) => call<{ path: string; created: boolean }>("open_link", { target, from }),
   /** The memory's `Durum` file, created as an empty skeleton when missing. */
   openMemory: () => call<string>("open_memory"),
   onIndexChanged: (cb: () => void) => on<unknown>("index-changed", () => cb()),

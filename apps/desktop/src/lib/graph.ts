@@ -40,3 +40,17 @@ export function neighbours(count: number, edges: readonly (readonly [number, num
   }
   return out;
 }
+
+/** A label's box on the canvas: left, top, width, height. */
+export type Box = readonly [number, number, number, number];
+
+/** Whether two label boxes cover each other. */
+export function overlaps(a: Box, b: Box): boolean {
+  return a[0] < b[0] + b[2] && b[0] < a[0] + a[2] && a[1] < b[1] + b[3] && b[1] < a[1] + a[3];
+}
+
+/** A title cut to `max` characters for the graph, so one long name does not cover its neighbours. */
+export function shortLabel(title: string, max = 28): string {
+  const chars = [...title];
+  return chars.length <= max ? title : `${chars.slice(0, max - 1).join("").trimEnd()}…`;
+}

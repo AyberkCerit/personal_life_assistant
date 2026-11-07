@@ -1,0 +1,56 @@
+name: Bug report
+description: Something in the app crashes or doesn't work
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        If PLA misread a note or gave a wrong answer, please use the **Wrong result** form instead.
+
+        Issues are public, so remove personal details from logs and screenshots.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open a vault with...
+        2. Click...
+        3. See...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - Windows 11
+        - Windows 10
+        - Linux
+        - macOS (untested)
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: PLA version or commit
+      placeholder: "v0.1.0 or b1e543e"
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs or screenshots
+      render: text
