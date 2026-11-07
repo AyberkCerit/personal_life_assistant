@@ -1,0 +1,62 @@
+name: Wrong result
+description: PLA misread a note or gave a wrong answer
+title: "[Wrong result]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks, failing cases are the most useful thing you can send. English or Turkish is fine.
+
+        **Issues are public.** Rewrite your note first: remove names, places and health details you don't want to share, and keep the wording that confused PLA.
+  - type: dropdown
+    id: area
+    attributes:
+      label: Where did it go wrong?
+      options:
+        - Extraction from a note (tasks, reminders, measurements)
+        - Assistant answer or action
+        - Assistant memory
+        - Not sure
+    validations:
+      required: true
+  - type: textarea
+    id: input
+    attributes:
+      label: Note or question
+      description: The text PLA read, rewritten if needed.
+      placeholder: "yarin 8de spor, dun 7 saat uyudum"
+      render: text
+    validations:
+      required: true
+  - type: input
+    id: date
+    attributes:
+      label: Date of the note or question
+      description: Words like "tomorrow" are resolved against this date.
+      placeholder: "2026-11-07"
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+      placeholder: "A task tomorrow at 08:00 and 7 hours of sleep logged for yesterday."
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: What PLA did
+      placeholder: "It added the task but logged no sleep."
+    validations:
+      required: true
+  - type: input
+    id: model
+    attributes:
+      label: Model
+      description: Leave this as it is if you use the model PLA offers on first run.
+      value: "Gemma 4 E2B Q3_K_M"
+  - type: input
+    id: version
+    attributes:
+      label: PLA version or commit
+      placeholder: "v0.1.0 or b1e543e"

@@ -1,0 +1,58 @@
+name: Benchmark result
+description: Share PLA's numbers from your hardware
+title: "[Benchmark]: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Slower laptops and AMD CPUs help most. The commands are in the [Reproduce section of BENCHMARKS.md](https://github.com/AyberkCerit/personal_life_assistant/blob/main/BENCHMARKS.md#reproduce).
+  - type: input
+    id: cpu
+    attributes:
+      label: CPU
+      placeholder: "AMD Ryzen 5 5500U"
+    validations:
+      required: true
+  - type: input
+    id: ram
+    attributes:
+      label: RAM
+      placeholder: "8 GB"
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: Operating system
+      placeholder: "Windows 11"
+    validations:
+      required: true
+  - type: input
+    id: model
+    attributes:
+      label: Model and threads
+      value: "Gemma 4 E2B Q3_K_M, 3 threads"
+    validations:
+      required: true
+  - type: input
+    id: commit
+    attributes:
+      label: Commit
+      placeholder: "b1e543e"
+    validations:
+      required: true
+  - type: textarea
+    id: command
+    attributes:
+      label: Command
+      render: bash
+    validations:
+      required: true
+  - type: textarea
+    id: results
+    attributes:
+      label: Results
+      description: Paste the output.
+      render: text
+    validations:
+      required: true
