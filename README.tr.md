@@ -54,12 +54,16 @@ Her şeyi Markdown notlarına yazıyorum: yarın ne yapacağımı, nasıl uyudu�
 - Örneklerine benzemeyen ifadelerde asistan isteklerin %80 ile %87'sini doğru yapıyor. Hem görev hem ölçüm içeren bir mesajda bazen yalnız biri kaydediliyor.
 - 10 bloğu değişmiş bir notun çıkarımı ~46 sn sürüyor. Arka planda çalışıyor.
 - PLA Windows'ta test ediliyor. Linux'ta kaynaktan derlenip çalışıyor; macOS denenmedi.
-- Henüz hazır derlenmiş sürüm yok; derleyebileceğin Windows kurulumu da kod imzası taşımıyor.
+- Windows kurulumu kod imzası taşımıyor, bu yüzden SmartScreen bir kez uyarıyor. Linux ve macOS için hazır paket yok.
 - Dosyalar düz metin olarak durur. Disk şifrelemesi işletim sistemine kalmış.
 
 ## Kurulum
 
 4 çekirdekli 64 bit x86 işlemci (AVX2 şart değil), 8 GB RAM ve ~5 GB disk gerekiyor. GPU kullanılmıyor.
+
+**Windows:** [Releases](https://github.com/AyberkCerit/personal_life_assistant/releases/latest) sayfasından `PLA_<sürüm>_x64-setup.exe` dosyasını indirip çalıştır. Yönetici izni istemez. Kurulum imzasız olduğu için SmartScreen bir kez uyarır: **Ek bilgi → Yine de çalıştır**. Dil modeli kurulumda yok; PLA ilk açılışta indirmeyi önerir. İndirmeyi doğrulama, güncelleme ve kaldırma [`docs/INSTALL.md`](docs/INSTALL.md) içinde.
+
+**Kaynaktan** (Linux ya da geliştirme için Windows):
 
 ```bash
 git clone https://github.com/AyberkCerit/personal_life_assistant.git
@@ -71,7 +75,7 @@ npm run tauri dev
 
 Kararlı Rust, Node.js ve [Tauri 2 ön koşulları](https://v2.tauri.app/start/prerequisites/) gerekir. Dil modeli için ya llama.cpp'yi `npm run fetch-llama -- --from <llama.cpp b11280 klasörü>` ile pakete ekle ya da `PLA_LLAMA_SERVER`'ı mevcut bir `llama-server` ikilisine yönlendir.
 
-`npm run release` yönetici izni istemeyen, kullanıcı başına bir Windows kurulumu derler. İmzasız olduğu için SmartScreen bir kez uyarır. Güncelleme ve kaldırma [`docs/INSTALL.md`](docs/INSTALL.md) içinde.
+`npm run release` aynı kullanıcı başına Windows kurulumunu yerelde derler. Releases'taki kurulumu bir sürüm yayınlandığında [`windows-installer.yml`](.github/workflows/windows-installer.yml) derler.
 
 ```bash
 cargo test --workspace               # Rust: çekirdek ve masaüstü kabuğu
