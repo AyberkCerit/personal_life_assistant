@@ -54,12 +54,16 @@ I'm the first user, and many of the test cases started as screenshots of message
 - On phrasings unlike its examples, the assistant gets 80 to 87% of requests right. A message that mixes a task and a measurement sometimes records only one of them.
 - Extracting a note with 10 changed blocks takes about 46 s. It runs in the background.
 - Windows is where PLA is tested. Linux builds and runs from source; macOS hasn't been tried.
-- There are no prebuilt releases yet, and the Windows installer you can build isn't code-signed.
+- The Windows installer isn't code-signed, so SmartScreen warns once. There is no prebuilt Linux or macOS package.
 - Files are stored as plain text. Disk encryption is up to the OS.
 
 ## Install
 
 You need a 64-bit x86 CPU with 4 cores (AVX2 not required), 8 GB of RAM and about 5 GB of disk. A GPU isn't used.
+
+**Windows:** download `PLA_<version>_x64-setup.exe` from [Releases](https://github.com/AyberkCerit/personal_life_assistant/releases/latest) and run it. It needs no admin rights. SmartScreen warns once because the installer isn't signed: choose **More info → Run anyway**. The language model isn't in the installer; PLA offers to download it on first run. [`docs/INSTALL.md`](docs/INSTALL.md) covers checking the download, updating and uninstalling.
+
+**From source** (Linux, or Windows for development):
 
 ```bash
 git clone https://github.com/AyberkCerit/personal_life_assistant.git
@@ -71,7 +75,7 @@ npm run tauri dev
 
 This needs stable Rust, Node.js and the [Tauri 2 prerequisites](https://v2.tauri.app/start/prerequisites/). For the language model, either bundle llama.cpp with `npm run fetch-llama -- --from <llama.cpp b11280 folder>` or point `PLA_LLAMA_SERVER` at an existing `llama-server` binary.
 
-`npm run release` builds a per-user Windows installer that needs no admin rights. SmartScreen will warn once because it isn't signed. Updating and uninstalling are covered in [`docs/INSTALL.md`](docs/INSTALL.md).
+`npm run release` builds the same per-user Windows installer locally. The one on Releases is built by [`windows-installer.yml`](.github/workflows/windows-installer.yml) when a release is published.
 
 ```bash
 cargo test --workspace               # Rust: core and desktop shell

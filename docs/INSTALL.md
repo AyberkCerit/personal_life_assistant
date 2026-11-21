@@ -2,7 +2,7 @@
 
 ## Kurulum
 
-1. GitHub Releases'tan `PLA_<sürüm>_x64-setup.exe` dosyasını indir. Yanındaki `.sha256` dosyası
+1. [GitHub Releases](https://github.com/AyberkCerit/personal_life_assistant/releases/latest)'tan `PLA_<sürüm>_x64-setup.exe` dosyasını indir. Yanındaki `.sha256` dosyası
    indirdiğin dosyanın bozulmadığını doğrulamak içindir:
 
    ```powershell
@@ -61,6 +61,8 @@ npm run fetch-llama -- --from <llama.cpp b11280 Windows x64 CPU klasörü>
 npm run release
 ```
 
-Kurulum ve SHA-256 dosyası `dist-release/` klasörüne yazılır. `PLA_SIGN_COMMAND` ortam değişkeni
+Kurulum ve SHA-256 dosyası `dist-release/` klasörüne yazılır. Releases'taki dosyaları aynı adımlarla
+`.github/workflows/windows-installer.yml` derler: bir sürüm yayınlandığında, ya da Actions sekmesinden
+elle bir etiket verilerek çalıştırıldığında, kurulumu o sürüme ekler. `PLA_SIGN_COMMAND` ortam değişkeni
 tanımlıysa (örneğin `signtool sign /fd sha256 /a %1`; `%1` ayrı bir argüman olmalı) kurulum ve
 program onunla imzalanır. Tauri bunun için Windows SDK'daki `signtool`'u da arar.

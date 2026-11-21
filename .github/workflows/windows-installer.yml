@@ -1,0 +1,109 @@
+name: Windows installer
+
+# Builds PLA's per-user Windows installer on a Windows runner: `npm run release` needs Windows,
+# because it runs the bundled llama-server.exe to check its build.
+#
+# - A published release, or a manual run given a tag, builds that tag and attaches
+#   PLA_<version>_x64-setup.exe and its .sha256 to the release.
+# - A pull request that touches the build only builds, and keeps the files as a workflow artifact.
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to build and attach the installer to (empty: build the branch, attach nothing)"
+        required: false
+  pull_request:
+    paths:
+      - ".github/workflows/windows-installer.yml"
+      - "apps/desktop/scripts/release*.mjs"
+      - "apps/desktop/scripts/fetch-*.mjs"
+      - "apps/desktop/src-tauri/tauri.conf.json"
+      - "apps/desktop/src-tauri/installer/**"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-installer-${{ github.event.release.tag_name || inputs.tag || github.ref }}
+  cancel-in-progress: true
+
+env:
+  # The llama.cpp build PLA was tested with (LLAMA_BUILD in apps/desktop/scripts/release-lib.mjs)
+  # and GitHub's SHA-256 for its Windows x64 CPU archive.
+  LLAMA_BUILD: "11280"
+  LLAMA_SHA256: "656679929d893164f970b2d4b622c32ad9c51245ba820c736159a932683e0df9"
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.release.tag_name || inputs.tag || github.ref }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: apps/desktop/package-lock.json
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Download llama.cpp b${{ env.LLAMA_BUILD }} (Windows x64, CPU)
+        shell: pwsh
+        run: |
+          $zip = Join-Path $env:RUNNER_TEMP "llama.zip"
+          $url = "https://github.com/ggml-org/llama.cpp/releases/download/b$env:LLAMA_BUILD/llama-b$env:LLAMA_BUILD-bin-win-cpu-x64.zip"
+          Invoke-WebRequest $url -OutFile $zip
+          $hash = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLower()
+          if ($hash -ne $env:LLAMA_SHA256) { throw "llama.cpp archive has SHA-256 $hash, expected $env:LLAMA_SHA256" }
+          $out = Join-Path $env:RUNNER_TEMP "llama"
+          Expand-Archive $zip $out
+          $server = Get-ChildItem $out -Recurse -Filter llama-server.exe | Select-Object -First 1
+          if (-not $server) { throw "no llama-server.exe in the archive" }
+          "LLAMA_DIR=$($server.DirectoryName)" >> $env:GITHUB_ENV
+
+      - name: Install npm packages
+        working-directory: apps/desktop
+        run: npm ci
+
+      - name: Bundle PDFium and llama-server
+        working-directory: apps/desktop
+        shell: pwsh
+        run: |
+          npm run fetch-pdfium
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          npm run fetch-llama -- --from "$env:LLAMA_DIR"
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+
+      - name: Build the installer
+        working-directory: apps/desktop
+        run: npm run release
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pla-windows-installer
+          path: dist-release/*
+          if-no-files-found: error
+
+  attach:
+    needs: build
+    if: github.event_name == 'release' || inputs.tag != ''
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: pla-windows-installer
+          path: dist
+
+      - name: Attach to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event.release.tag_name || inputs.tag }}
+        run: gh release upload "$TAG" dist/* --clobber --repo "$GITHUB_REPOSITORY"
