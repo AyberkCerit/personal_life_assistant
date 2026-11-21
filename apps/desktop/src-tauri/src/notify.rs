@@ -10,6 +10,8 @@ use tauri::{AppHandle, Emitter};
 
 use crate::scheduler::{Notifier, SchedCommand};
 
+// Toasts, their buttons and the reminder texts exist on Windows only.
+#[cfg_attr(not(windows), allow(dead_code))]
 pub struct Strings {
     pub done: &'static str,
     pub snooze: &'static str,
@@ -159,6 +161,7 @@ pub fn ui_lang() -> &'static str {
 
 /// `tauri.conf.json > identifier`, which the installer writes on the Start menu shortcut as its
 /// AppUserModelID: Windows shows a release build's notifications under that name (build.rs).
+#[cfg_attr(not(windows), allow(dead_code))]
 pub(crate) const IDENTIFIER: &str = env!("PLA_IDENTIFIER");
 
 #[cfg(windows)]
@@ -177,6 +180,10 @@ pub fn show_info(title: &str, body: &str) {
         if let Err(e) = tauri_winrt_notification::Toast::new(app_id()).title(title).text1(body).show() {
             crate::applog::error(&format!("notification failed: {e}"));
         }
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = (title, body);
     }
 }
 
@@ -208,6 +215,8 @@ pub fn report_ready(app: &AppHandle, vault: &std::path::Path, week: pla_core::re
 
 pub struct AppNotifier {
     app: AppHandle,
+    // read by the toast buttons, which exist on Windows only
+    #[cfg_attr(not(windows), allow(dead_code))]
     commands: Mutex<Sender<SchedCommand>>,
 }
 

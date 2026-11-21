@@ -426,6 +426,14 @@
     const unMemory = api.onMemoryProgress((p) => (memory = p));
     const unTasks = api.onTasksChanged(() => tasksVersion++);
     const unNew = api.onNewNote(() => document.querySelector<HTMLInputElement>(".tree input")?.focus());
+    // Quit from the tray: the note being written is saved before PLA ends (code review 2026-11-14)
+    const unQuit = api.onQuitRequested(async () => {
+      try {
+        await editor?.close();
+      } finally {
+        await api.quitApp();
+      }
+    });
     const unPaused = api.onPausedChanged((p) => (status = { ...status, paused: p }));
     const unModel = api.onModelDownload((s) => (modelDownload = s));
     const unSettings = api.onOpenSettings(openSettings);
@@ -496,6 +504,7 @@
       void unClose.then((f) => f());
       void unTasks.then((f) => f());
       void unNew.then((f) => f());
+      void unQuit.then((f) => f());
       void unPaused.then((f) => f());
       void unModel.then((f) => f());
       void unSettings.then((f) => f());

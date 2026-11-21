@@ -44,7 +44,7 @@ Source: [`research/f1-model-eval/RESULTS.md`](research/f1-model-eval/RESULTS.md)
 
 ## 2. Performance on a 10,000-note vault
 
-`make_reference` generates a deterministic vault: five years of daily notes, one 1 MB note, about 900 MB of attachments, 20,000 tasks and 50,000 measurements. Limits come from the requirements spec (NFR-PERF-001 to 012) and were set before measuring. Release build, model on 3 threads, which is what PLA gives it on a 4-core machine.
+`make_reference` generates a deterministic vault: five years of daily notes, one 1 MB note, about 900 MB of attachments, 20,000 tasks and 50,000 measurements. Limits come from the requirements spec (NFR-PERF-001 to 012). Three were relaxed after the first measurements (spec v1.3, 15 October 2026): memory with the window open 150 MB → 450 MB, extracting a 10-block note 10 s → 60 s, and the first answer 2 s → 45 s (5 s → 70 s with a tool call). `research/perf/ui.json` still records the window-open memory against the old 150 MB limit. Release build, model on 3 threads, which is what PLA gives it on a 4-core machine.
 
 <img src="docs/readme/perf-budgets.svg" alt="Measured p95 as a share of each limit. Cold start 1.72 s of 3 s; open a 1 MB note 72 ms of 200 ms; keystroke to frame while the model is busy 7.7 ms of 16 ms; full-text search 33 ms of 300 ms; queries 12 ms of 100 ms; model load 2.6 s of 5 s; window from tray 641 ms of 3 s; first index 165 s of 300 s; memory in tray 27 MB of 150 MB; memory with the window open and idle 374 MB of 450 MB." width="100%">
 
@@ -101,7 +101,7 @@ Many of the older cases are close to sentences in the example bank, so 117/122 m
 
 Open failures include a message that mixes a measurement and a task ("dün 7 saat uyudum, yarın da 9'da toplantı var"), where only one of the two is recorded.
 
-The suite has grown since: [`crates/pla-core/tests/nl/`](crates/pla-core/tests/nl) now holds 133 assistant, 48 extraction and 122 memory-extraction cases.
+The suite has grown since: [`crates/pla-core/tests/nl/`](crates/pla-core/tests/nl) now holds 130 assistant, 47 extraction and 107 memory-extraction cases.
 
 Sources: [`research/nl-eval/RESULTS.md`](research/nl-eval/RESULTS.md), and for the persona settings (name, form of address, sen/siz), [`research/persona-eval/RESULTS.md`](research/persona-eval/RESULTS.md) with 24 of 25 cases passing.
 

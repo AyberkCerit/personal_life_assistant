@@ -99,6 +99,7 @@ pub fn run() {
             commands::setup_vault,
             commands::set_language,
             commands::take_ui_events,
+            commands::quit_app,
             commands::weekly_report_settings,
             commands::set_weekly_report,
             commands::finish_setup,

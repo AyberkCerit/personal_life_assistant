@@ -6,7 +6,7 @@ pub mod items;
 pub mod matching;
 
 use chrono::{DateTime, FixedOffset, Local, NaiveDate};
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, OptionalExtension};
 
 use crate::extraction::{parse_extraction, ValidationSettings};
 use crate::llm::LlmError;
@@ -143,7 +143,12 @@ pub fn process_queue_with(
     // Vanished notes first, so a renamed note can take over their blocks (decision 2026-10-02).
     queue.sort_by_key(|note| vault.root.join(note).exists());
     for note in queue {
-        let generation: i64 = conn.query_row("SELECT generation FROM extraction_queue WHERE note_path = ?1", [&note], |r| r.get(0))?;
+        // A rename in the UI moves the queue row meanwhile (fileops); the new path is queued under its own name.
+        let Some(generation) =
+            conn.query_row("SELECT generation FROM extraction_queue WHERE note_path = ?1", [&note], |r| r.get::<_, i64>(0)).optional()?
+        else {
+            continue;
+        };
         let path = vault.root.join(&note);
         let mut written = None;
         // Gone, excluded (moved into templates/, a conflict copy) or written by PLA: the note no
@@ -609,6 +614,57 @@ mod tests {
         write(&vault, "notes/plan.md", "- Yarın dişçiye git\n- Cuma faturayı öde".as_bytes());
         run(&vault, &mut conn, &mut x, T2);
         assert_eq!(tasks(&conn), vec![("Dişçi".into(), Some("2026-10-07".into()), 0), ("Fatura öde".into(), Some("2026-10-09".into()), 0)]);
+    }
+
+    #[test]
+    fn a_split_paragraph_keeps_its_tasks_when_the_model_was_away_meanwhile() {
+        // code review 2026-11-14: the split was synced in one run and extracted in the next, and the
+        // vanished paragraph's tasks were only looked for among blocks gone at that same instant
+        let tmp = tempfile::tempdir().unwrap();
+        let vault = open_vault(tmp.path()).unwrap();
+        let mut conn = open_databases(&tmp.path().join(".data")).unwrap().pla;
+        let para = "Yarın dişçiye git, cuma faturayı öde.";
+        let both = r#"{"items": [{"type": "task", "title": "Dişçi", "when": {"day_offset": 1}}, {"type": "task", "title": "Fatura öde", "when": {"weekday": "fri"}}]}"#;
+        let mut x = Scripted::new(&[
+            (para, both),
+            ("- Yarın dişçiye git", r#"{"items": [{"type": "task", "title": "Dişçi", "when": {"day_offset": 1}}]}"#),
+            ("- Cuma faturayı öde", r#"{"items": [{"type": "task", "title": "Fatura öde", "when": {"weekday": "fri"}}]}"#),
+        ]);
+        write(&vault, "notes/plan.md", para.as_bytes());
+        run(&vault, &mut conn, &mut x, T1);
+        write(&vault, "notes/plan.md", "- Yarın dişçiye git\n- Cuma faturayı öde".as_bytes());
+        x.down = true;
+        run(&vault, &mut conn, &mut x, "2026-10-06T18:00:00+03:00");
+        x.down = false;
+        run(&vault, &mut conn, &mut x, T2);
+        assert_eq!(tasks(&conn), vec![("Dişçi".into(), Some("2026-10-07".into()), 0), ("Fatura öde".into(), Some("2026-10-09".into()), 0)]);
+    }
+
+    #[test]
+    fn a_note_renamed_while_queued_is_skipped_not_the_whole_run() {
+        // code review 2026-11-14: the UI's rename moved the queue row and the run stopped with QueryReturnedNoRows
+        let tmp = tempfile::tempdir().unwrap();
+        let vault = open_vault(tmp.path()).unwrap();
+        let data = tmp.path().join(".data");
+        let mut conn = open_databases(&data).unwrap().pla;
+        write(&vault, "notes/a.md", "Bir şey.".as_bytes());
+        write(&vault, "notes/plan.md", DENTIST.as_bytes());
+        enqueue_all(&vault, &conn, at(T1)).unwrap();
+        let mut x = Scripted::new(&[(DENTIST, DENTIST_JSON)]);
+        // the first note's model call renames the second one's queue row, as fileops::move_note does
+        struct Renaming<'a>(&'a mut Scripted, Option<Connection>);
+        impl Extractor for Renaming<'_> {
+            fn extract_raw(&mut self, reference: NaiveDate, text: &str) -> Result<String, LlmError> {
+                if let Some(side) = self.1.take() {
+                    side.execute("UPDATE extraction_queue SET note_path = 'notes/plan2.md' WHERE note_path = 'notes/plan.md'", []).unwrap();
+                }
+                self.0.extract_raw(reference, text)
+            }
+        }
+        let side = Connection::open(data.join("pla.db")).unwrap();
+        let report = process_queue(&vault, &mut conn, &mut Renaming(&mut x, Some(side)), &PipelineSettings::default(), at(T1)).unwrap();
+        assert_eq!(report.model_error, None);
+        assert_eq!(queued_notes(&conn).unwrap(), vec!["notes/plan2.md"], "the renamed note stays queued under its new name");
     }
 
     #[test]

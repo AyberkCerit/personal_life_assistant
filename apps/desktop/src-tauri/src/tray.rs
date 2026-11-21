@@ -94,6 +94,25 @@ pub fn to_ui(app: &AppHandle, event: &str, payload: serde_json::Value) {
     }
 }
 
+/// How long Quit waits for an open window to save its note and answer with `quit_app`.
+const QUIT_GRACE: std::time::Duration = std::time::Duration::from_secs(4);
+
+/// Quit from the tray. An open window holds the note being written, which saves 2 s after the last
+/// key: it is asked to save first and answers with `quit_app` (code review 2026-11-14). A window
+/// that does not answer in time (still loading, or stuck) is not waited for any longer.
+fn quit(app: &AppHandle) {
+    let Some(window) = app.get_webview_window("main") else {
+        app.exit(0);
+        return;
+    };
+    let _ = window.emit("quit-requested", ());
+    let app = app.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(QUIT_GRACE);
+        app.exit(0);
+    });
+}
+
 /// FR-SET-016: one path for the tray item and the settings screen, so both agree.
 pub fn apply_autostart(app: &AppHandle, on: bool) -> Result<(), String> {
     let manager = app.autolaunch();
@@ -156,7 +175,7 @@ pub fn build(app: &AppHandle) -> tauri::Result<()> {
                     set_autostart_checked(app, !on); // the check shows what Windows really has
                 }
             }
-            "quit" => app.exit(0),
+            "quit" => quit(app),
             _ => {}
         })
         .on_tray_icon_event(|tray, event| {

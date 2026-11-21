@@ -11,6 +11,9 @@ use crate::metrics::{self, MetricInput};
 use crate::tasks::{self, TaskInput, TaskList};
 use crate::vault::Vault;
 
+/// How many of the tasks `query_tasks` finds go back to the model; `count` stays the full number.
+const QUERY_TASKS_SHOWN: usize = 30;
+
 pub const TOOLS: [&str; 8] = ["search_notes", "query_tasks", "query_metrics", "add_task", "complete_task", "log_metric", "create_note", "suggest_note"];
 fn kind_names() -> Vec<&'static str> {
     MetricKind::ALL.map(MetricKind::as_str).to_vec()
@@ -245,8 +248,14 @@ pub fn run(env: &ToolEnv<'_>, tool: &str, args: &Value) -> Result<ToolRecord, St
                     }
                 }
             }
-            found.truncate(30);
-            Ok(done(json!({ "tasks": found, "count": found.len() }), None))
+            // The count is of every match: rule 3 has the answer take its numbers from here.
+            let count = found.len();
+            found.truncate(QUERY_TASKS_SHOWN);
+            let mut out = json!({ "tasks": found, "count": count });
+            if count > QUERY_TASKS_SHOWN {
+                out["shown"] = json!(QUERY_TASKS_SHOWN);
+            }
+            Ok(done(out, None))
         }
         "query_metrics" => {
             unknown_keys(args, &["kind", "days"])?;
@@ -486,6 +495,22 @@ mod tests {
         super::super::undo(&pla, done.undo.as_ref().unwrap(), now()).unwrap();
         let status: String = pla.query_row("SELECT status FROM task WHERE task_id = ?1", [&id], |r| r.get(0)).unwrap();
         assert_eq!(status, "open");
+    }
+
+    #[test]
+    fn the_task_count_is_of_every_match_not_of_those_shown() {
+        // code review 2026-11-14: the list was cut to 30 before it was counted, and 45 tasks read as 30
+        let (_t, vault, pla, cache) = env_parts();
+        let env = ToolEnv { vault: &vault, pla: &pla, cache: &cache, now: now(), validation: ValidationSettings::default() };
+        for n in 0..45 {
+            run(&env, "add_task", &json!({ "title": format!("İş {n}"), "date": "2026-10-06" })).unwrap();
+        }
+        let q = run(&env, "query_tasks", &json!({ "list": "all" })).unwrap();
+        assert_eq!(q.result["count"], json!(45));
+        assert_eq!(q.result["tasks"].as_array().unwrap().len(), 30);
+        assert_eq!(q.result["shown"], json!(30));
+        let few = run(&env, "query_tasks", &json!({ "list": "all", "text": "İş 7" })).unwrap();
+        assert!(few.result.get("shown").is_none(), "{}", few.result);
     }
 
     #[test]

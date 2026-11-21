@@ -189,17 +189,19 @@ pub fn folder_state(path: &Path) -> FolderState {
 
 /// Dot-named, or marked hidden/system by Windows (`desktop.ini`, `Thumbs.db`).
 fn is_hidden(entry: &std::fs::DirEntry) -> bool {
-    if entry.file_name().to_string_lossy().starts_with('.') {
-        return true;
-    }
-    #[cfg(windows)]
-    {
-        use std::os::windows::fs::MetadataExt;
-        const HIDDEN_OR_SYSTEM: u32 = 0x2 | 0x4;
-        if entry.metadata().is_ok_and(|m| m.file_attributes() & HIDDEN_OR_SYSTEM != 0) {
-            return true;
-        }
-    }
+    entry.file_name().to_string_lossy().starts_with('.') || marked_hidden(entry)
+}
+
+#[cfg(windows)]
+fn marked_hidden(entry: &std::fs::DirEntry) -> bool {
+    use std::os::windows::fs::MetadataExt;
+    const HIDDEN_OR_SYSTEM: u32 = 0x2 | 0x4;
+    entry.metadata().is_ok_and(|m| m.file_attributes() & HIDDEN_OR_SYSTEM != 0)
+}
+
+/// Only Windows has hidden and system attributes; elsewhere the dot says it.
+#[cfg(not(windows))]
+fn marked_hidden(_entry: &std::fs::DirEntry) -> bool {
     false
 }
 

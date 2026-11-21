@@ -2,7 +2,7 @@
 //! Extraction adds and updates; it never deletes, and never touches what the user changed. The one
 //! exception is a routine cancelling the one-off copies it takes over (`take_over_copies`).
 
-use chrono::{DateTime, Datelike, FixedOffset, NaiveDate, NaiveTime};
+use chrono::{DateTime, Datelike, FixedOffset, NaiveDate, NaiveTime, TimeDelta};
 use rusqlite::{params, Connection, OptionalExtension};
 use serde_json::{Map, Value};
 
@@ -121,7 +121,8 @@ pub fn apply_block_items(
     }
 
     let rejections = load_rejections(conn, block_id)?;
-    let mut existing = load_existing(conn, block_id, &now_s)?;
+    let vanished_since = (now - TimeDelta::hours(super::blocks::REVIVE_WINDOW_HOURS)).to_rfc3339();
+    let mut existing = load_existing(conn, block_id, &vanished_since)?;
     let mut pairing: Vec<Option<usize>> = vec![None; accepted.len()];
     let mut rejected = vec![false; accepted.len()];
 
@@ -321,29 +322,32 @@ fn insert_review(conn: &Connection, block_id: &str, payload: &str, reason: &str,
     Ok(Outcome::Review { review_id, reason: reason.to_owned() })
 }
 
-/// This block's extracted items, plus those of blocks of the same note that disappeared in this
-/// same sync — so splitting or merging paragraphs moves items instead of duplicating them.
-fn load_existing(conn: &Connection, block_id: &str, now: &str) -> rusqlite::Result<Vec<Existing>> {
+/// This block's extracted items, plus those of blocks of the same note that disappeared since
+/// `vanished_since` — so splitting or merging paragraphs moves items instead of duplicating them,
+/// also when the model went away (or the app closed) between the sync and the extraction. An item
+/// moves once: it then points at the new block, no longer at the vanished one.
+fn load_existing(conn: &Connection, block_id: &str, vanished_since: &str) -> rusqlite::Result<Vec<Existing>> {
+    // julianday: the times carry their UTC offset, which a text comparison would not respect.
     const SOURCES: &str = "(block_id = ?1 OR block_id IN (SELECT o.block_id FROM block o JOIN block b ON o.note_path = b.note_path
-                           WHERE b.block_id = ?1 AND o.missing = 1 AND o.missing_since = ?2))";
+                           WHERE b.block_id = ?1 AND o.missing = 1 AND julianday(o.missing_since) >= julianday(?2)))";
     let mut out: Vec<Existing> = conn
         .prepare(&format!(
             "SELECT task_id, COALESCE(item_signature, ''), user_modified, status FROM task WHERE origin = 'extracted' AND routine_id IS NULL AND {SOURCES}"
         ))?
-        .query_map([block_id, now], |r| {
+        .query_map([block_id, vanished_since], |r| {
             let status: String = r.get(3)?;
             Ok(Existing { item: ItemRef::Task(r.get(0)?), signature: r.get(1)?, user_owned: r.get::<_, bool>(2)? || status != "open", claimed: false })
         })?
         .collect::<Result<_, _>>()?;
     let metrics: Vec<Existing> = conn
         .prepare(&format!("SELECT metric_id, COALESCE(item_signature, ''), user_modified FROM metric_record WHERE origin = 'extracted' AND {SOURCES}"))?
-        .query_map([block_id, now], |r| Ok(Existing { item: ItemRef::Metric(r.get(0)?), signature: r.get(1)?, user_owned: r.get(2)?, claimed: false }))?
+        .query_map([block_id, vanished_since], |r| Ok(Existing { item: ItemRef::Metric(r.get(0)?), signature: r.get(1)?, user_owned: r.get(2)?, claimed: false }))?
         .collect::<Result<_, _>>()?;
     out.extend(metrics);
     // A routine the user edited or paused is theirs.
     let routines: Vec<Existing> = conn
         .prepare(&format!("SELECT routine_id, COALESCE(item_signature, ''), user_modified OR paused FROM routine WHERE origin = 'extracted' AND {SOURCES}"))?
-        .query_map([block_id, now], |r| Ok(Existing { item: ItemRef::Routine(r.get(0)?), signature: r.get(1)?, user_owned: r.get(2)?, claimed: false }))?
+        .query_map([block_id, vanished_since], |r| Ok(Existing { item: ItemRef::Routine(r.get(0)?), signature: r.get(1)?, user_owned: r.get(2)?, claimed: false }))?
         .collect::<Result<_, _>>()?;
     out.extend(routines);
     Ok(out)

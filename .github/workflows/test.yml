@@ -1,0 +1,60 @@
+name: Tests
+
+# Runs the Rust and frontend test suites, clippy and svelte-check on every push to main and on
+# every pull request. The live tests that need llama-server, a model file or PDFium stay
+# `#[ignore]`d, and the NSIS hook test skips itself off Windows.
+#
+# rustfmt is not checked yet: the tree is not formatted throughout (`cargo fmt --all --check`
+# reports existing differences), and formatting it is a change of its own.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  rust:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      # what Tauri 2 needs to build on Linux (webview, tray, menus)
+      - name: Install system packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev libssl-dev
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+
+      - name: Test
+        run: cargo test --workspace --locked
+
+  frontend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: apps/desktop
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: apps/desktop/package-lock.json
+
+      - run: npm ci
+      - run: npm run check
+      - run: npm test
