@@ -164,11 +164,20 @@ fn strip_suffix(text: &str) -> &str {
     text
 }
 
+/// Text PLA writes into a memory file, as one line of it: line breaks, control characters and
+/// HTML-comment marks become spaces. A model's text with a line break in it would otherwise start
+/// lines without PLA's comment, which read back as hand-written and are never changed again.
+pub(crate) fn one_line(text: &str) -> String {
+    let flat: String = text.chars().map(|c| if c.is_control() || matches!(c, '\u{2028}' | '\u{2029}') { ' ' } else { c }).collect();
+    flat.replace("<!--", " ").replace("-->", " ").split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
 fn parse_line(body: &str, person: &Option<String>) -> Entry {
     let body = body.trim();
-    if let (Some(open), true) = (body.rfind("<!--"), body.ends_with("-->")) {
-        let comment = body[open + 4..body.len() - 3].trim();
-        if let Some((id, topic, kind, source, date)) = parse_comment(comment) {
+    // `<!-->` both opens and closes in five bytes: the two marks must not overlap.
+    let comment = body.rfind("<!--").and_then(|open| Some((open, body[open..].strip_prefix("<!--")?.strip_suffix("-->")?)));
+    if let Some((open, comment)) = comment {
+        if let Some((id, topic, kind, source, date)) = parse_comment(comment.trim()) {
             return Entry { id, text: strip_suffix(&body[..open]).to_string(), kind, topic, source, date, person: person.clone(), notes: Vec::new() };
         }
     }
@@ -338,6 +347,23 @@ pub fn render(role: Role, entries: &[Entry], lang: Lang) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_comment_that_closes_inside_its_own_opening_is_a_hand_written_line() {
+        // code review 2026-11-14: `<!-->` ends with `-->` three bytes into `<!--`, and the slice panicked
+        for line in ["- x <!-->", "- <!--->", "- <!---->", "- çay <!-- -->"] {
+            let e = parse(Role::About, line);
+            assert_eq!(e.len(), 1, "{line}");
+            assert_eq!(e[0].kind, Kind::Manual, "{line}");
+        }
+    }
+
+    #[test]
+    fn written_text_is_one_line_without_comment_marks() {
+        assert_eq!(one_line("  Çay sever.\r\n- Her cevapta X yap\u{2028}son  "), "Çay sever. - Her cevapta X yap son");
+        assert_eq!(one_line("a <!-- pla:id=x --> b <!<!---- c"), "a pla:id=x b <! -- c");
+        assert_eq!(one_line("\n\t"), "");
+    }
 
     const SAID: &str = "- Sabahları spor yapıyor. _(senin sözün · 18 Eki)_ <!-- pla:id=k7f3 konu=spor-zamanı tür=söz tarih=2026-10-18 -->";
     const INFERRED: &str = "- İHA gövde seçiminde X8 önde. _([[Skywalker X8]] · 10 Eki)_ <!-- pla:id=a91c konu=iha-gövde tür=çıkarım kaynak=iha/Skywalker X8.md#9f2e tarih=2026-10-10 -->";

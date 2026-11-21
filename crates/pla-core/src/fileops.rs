@@ -13,6 +13,12 @@ pub fn same_ignoring_case(a: &str, b: &str) -> bool {
     a.to_lowercase() == b.to_lowercase()
 }
 
+/// Whether two existing paths are one file on disk: a file system that tells letter case apart
+/// (Linux) keeps `a.md` and `A.md` as two notes, and a rename would replace one with the other.
+fn same_on_disk(a: &std::path::Path, b: &std::path::Path) -> bool {
+    matches!((a.canonicalize(), b.canonicalize()), (Ok(a), Ok(b)) if a == b)
+}
+
 /// The system folders PLA keeps its own things in: they stay where `.pla/config` says, and so does
 /// any folder that holds one (a configured `journal/daily` keeps `journal` in place).
 pub fn is_system_folder(folders: &Folders, rel: &str) -> bool {
@@ -21,14 +27,14 @@ pub fn is_system_folder(folders: &Folders, rel: &str) -> bool {
         .any(|f| crate::vault::is_under(f, rel))
 }
 
-/// Puts `from` at `to` on disk: refuses an existing target (unless only the letter case differs,
-/// which Windows treats as the same file) and creates the target's folders.
+/// Puts `from` at `to` on disk: refuses an existing target (unless it is `from` itself under
+/// another letter case, as on Windows) and creates the target's folders.
 fn rename_on_disk(vault: &Vault, from: &str, to: &str) -> Result<(std::path::PathBuf, std::path::PathBuf), FileError> {
     let (from_abs, to_abs) = (resolve(vault, from)?, resolve(vault, to)?);
     if !from_abs.exists() {
         return Err(FileError::Missing);
     }
-    if to_abs.exists() && !same_ignoring_case(from, to) {
+    if to_abs.exists() && !(same_ignoring_case(from, to) && same_on_disk(&from_abs, &to_abs)) {
         return Err(FileError::Exists(to.to_owned()));
     }
     if let Some(parent) = to_abs.parent() {
@@ -250,6 +256,25 @@ mod tests {
         // a different case of the same name is a rename on Windows, not a clash
         move_note(&vault, &conn, "inbox/a.md", "inbox/A.md").unwrap();
         assert!(std::fs::read_dir(vault.root.join("inbox")).unwrap().any(|e| e.unwrap().file_name() == "A.md"));
+    }
+
+    #[test]
+    fn another_note_whose_name_differs_only_in_case_is_never_replaced() {
+        // code review 2026-11-14: where letter case tells files apart, `a.md` -> `A.md` replaced `A.md`
+        let (_t, vault, conn) = setup();
+        std::fs::write(vault.root.join("inbox/a.md"), "a").unwrap();
+        std::fs::write(vault.root.join("inbox/A.md"), "B").unwrap();
+        if std::fs::read_to_string(vault.root.join("inbox/a.md")).unwrap() == "B" {
+            return; // this file system has one file for both names
+        }
+        assert!(matches!(move_note(&vault, &conn, "inbox/a.md", "inbox/A.md"), Err(FileError::Exists(_))));
+        assert_eq!(std::fs::read_to_string(vault.root.join("inbox/A.md")).unwrap(), "B");
+        assert_eq!(std::fs::read_to_string(vault.root.join("inbox/a.md")).unwrap(), "a");
+        std::fs::create_dir_all(vault.root.join("notes/Proje")).unwrap();
+        std::fs::create_dir_all(vault.root.join("notes/proje")).unwrap();
+        std::fs::write(vault.root.join("notes/proje/x.md"), "x").unwrap();
+        assert!(matches!(move_folder(&vault, &conn, "notes/proje", "notes/Proje"), Err(FileError::Exists(_))));
+        assert!(vault.root.join("notes/proje/x.md").exists());
     }
 
     #[test]

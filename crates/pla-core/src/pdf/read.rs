@@ -84,27 +84,63 @@ fn marks(p: &PdfPage<'_>) -> Vec<Mark> {
     out
 }
 
-fn outline(doc: &PdfDocument<'_>) -> Vec<OutlineEntry> {
-    fn walk(b: PdfBookmark<'_>, depth: usize, out: &mut Vec<OutlineEntry>) {
-        // a hostile PDF can nest without end; real outlines are a few levels deep
-        if depth > 16 || out.len() > 5000 {
+/// How many bookmarks of one PDF are looked at. PDFium leaves a bookmark that names itself (or an
+/// earlier one) as its next or its child to the caller, and such an outline has no end.
+const OUTLINE_NODES: usize = 20_000;
+/// How many of them become outline entries, and how deep they nest: real outlines are a few levels.
+const OUTLINE_ENTRIES: usize = 5000;
+const OUTLINE_DEPTH: usize = 16;
+
+/// A bookmark as the outline walk sees it.
+trait Bookmark: Sized {
+    /// Its title and 0-based page, when it has both.
+    fn entry(&self) -> Option<(String, usize)>;
+    fn child(&self) -> Option<Self>;
+    fn sibling(&self) -> Option<Self>;
+}
+
+impl Bookmark for PdfBookmark<'_> {
+    fn entry(&self) -> Option<(String, usize)> {
+        let page = self.destination().and_then(|d| d.page_index().ok())?;
+        Some((self.title()?, page as usize))
+    }
+
+    fn child(&self) -> Option<Self> {
+        self.first_child()
+    }
+
+    fn sibling(&self) -> Option<Self> {
+        self.next_sibling()
+    }
+}
+
+/// `first`, its siblings and everything under them, in document order; `left` is how many more
+/// bookmarks may be looked at.
+fn walk<B: Bookmark>(first: B, depth: usize, left: &mut usize, out: &mut Vec<OutlineEntry>) {
+    if depth > OUTLINE_DEPTH {
+        return;
+    }
+    let mut next = Some(first);
+    while let Some(b) = next {
+        if *left == 0 || out.len() >= OUTLINE_ENTRIES {
             return;
         }
-        let mut next = Some(b);
-        while let Some(b) = next {
-            let page = b.destination().and_then(|d| d.page_index().ok());
-            if let (Some(title), Some(page)) = (b.title(), page) {
-                out.push(OutlineEntry { title, page: page as usize, depth });
-            }
-            if let Some(child) = b.first_child() {
-                walk(child, depth + 1, out);
-            }
-            next = b.next_sibling();
+        *left -= 1;
+        if let Some((title, page)) = b.entry() {
+            out.push(OutlineEntry { title, page, depth });
         }
+        if let Some(child) = b.child() {
+            walk(child, depth + 1, left, out);
+        }
+        next = b.sibling();
     }
+}
+
+fn outline(doc: &PdfDocument<'_>) -> Vec<OutlineEntry> {
     let mut out = Vec::new();
     if let Some(root) = doc.bookmarks().root() {
-        walk(root, 0, &mut out);
+        let mut left = OUTLINE_NODES;
+        walk(root, 0, &mut left, &mut out);
     }
     out
 }
@@ -117,4 +153,51 @@ pub fn read(pdfium: &Pdfium, bytes: &[u8]) -> Result<RawDoc, PdfError> {
         pages.push(page(&p)?);
     }
     Ok(RawDoc { pages, outline: outline(&doc) })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A bookmark of a made-up outline: `(title, child, sibling)` by index.
+    #[derive(Clone, Copy)]
+    struct Fake<'a>(&'a [(Option<&'a str>, Option<usize>, Option<usize>)], usize);
+
+    impl Bookmark for Fake<'_> {
+        fn entry(&self) -> Option<(String, usize)> {
+            Some((self.0[self.1].0?.to_string(), self.1))
+        }
+
+        fn child(&self) -> Option<Self> {
+            self.0[self.1].1.map(|i| Fake(self.0, i))
+        }
+
+        fn sibling(&self) -> Option<Self> {
+            self.0[self.1].2.map(|i| Fake(self.0, i))
+        }
+    }
+
+    fn titles(nodes: &[(Option<&str>, Option<usize>, Option<usize>)]) -> Vec<(String, usize)> {
+        let mut out = Vec::new();
+        let mut left = OUTLINE_NODES;
+        walk(Fake(nodes, 0), 0, &mut left, &mut out);
+        out.into_iter().map(|e| (e.title, e.depth)).collect()
+    }
+
+    #[test]
+    fn an_outline_is_read_in_document_order_with_its_depths() {
+        let nodes = [(Some("1"), Some(1), Some(3)), (Some("1.1"), None, Some(2)), (None, None, None), (Some("2"), None, None)];
+        assert_eq!(titles(&nodes), [("1".to_string(), 0), ("1.1".to_string(), 1), ("2".to_string(), 0)]);
+    }
+
+    #[test]
+    fn an_outline_that_loops_ends() {
+        // code review 2026-11-14: only the depth was limited, and a bookmark whose next is itself never ended
+        assert_eq!(titles(&[(Some("a"), None, Some(0))]).len(), OUTLINE_ENTRIES);
+        // without a title nothing is collected, so the count of entries cannot end it either
+        assert!(titles(&[(None, None, Some(0))]).is_empty());
+        assert!(titles(&[(None, Some(1), None), (None, None, Some(0))]).is_empty());
+        // a bookmark that is its own child: the depth ends each branch, the budget the whole
+        assert!(titles(&[(Some("a"), Some(0), Some(0))]).len() <= OUTLINE_ENTRIES);
+    }
 }
