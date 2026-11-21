@@ -78,3 +78,17 @@ describe("final review (M6 translations)", () => {
     setLang("tr");
   });
 });
+
+describe("assistant tools", () => {
+  // code review 2026-11-14: suggest_note had no "using" line, and the panel showed `undefined`
+  // (the list is pla-core's qa::tools::TOOLS)
+  const TOOLS = ["search_notes", "query_tasks", "query_metrics", "add_task", "complete_task", "log_metric", "create_note", "suggest_note"];
+
+  it("every tool says what it is doing, in both languages", () => {
+    for (const l of ["tr", "en"] as const) {
+      setLang(l);
+      for (const tool of TOOLS) expect(lookup(`qa.using.${tool}`), `${l} qa.using.${tool}`).toBeTruthy();
+    }
+    setLang("tr");
+  });
+});

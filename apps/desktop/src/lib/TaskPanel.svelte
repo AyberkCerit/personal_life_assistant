@@ -79,19 +79,28 @@
     return ok;
   }
 
+  /** Counts loads: an answer that arrives after a newer load was asked is not shown (a tab
+   * switched meanwhile would otherwise show the old tab's list, code review 2026-11-14). */
+  let loads = 0;
   async function load() {
+    const mine = ++loads;
+    const current = () => mine === loads;
     today = todayIso();
     try {
       if (tab === "review") {
-        review = await api.listReview();
+        const found = await api.listReview();
+        if (!current()) return;
+        review = found;
         reviewForms = Object.fromEntries(review.map((r) => [r.review_id, reviewForms[r.review_id] ?? { title: r.title ?? "", date: "", time: "" }]));
       } else if (tab === "routines") {
-        routines = await api.listRoutines();
+        const found = await api.listRoutines();
+        if (current()) routines = found;
       } else {
-        tasks = await api.listTasks(tab);
+        const found = await api.listTasks(tab);
+        if (current()) tasks = found;
       }
     } catch (e) {
-      error = errorText(e);
+      if (current()) error = errorText(e);
     }
   }
 

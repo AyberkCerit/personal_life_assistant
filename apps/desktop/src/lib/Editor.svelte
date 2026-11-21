@@ -117,6 +117,8 @@
   let destroyed = false;
   let readOnly = $state(false);
   let problem = $state<"conflict" | "missing" | null>(null);
+  /** "Take the external version" was pressed once: the second press discards what the user wrote. */
+  let confirmTake = $state(false);
   let error = $state<string | Failure | null>(null);
   let imageError = $state<string | null>(null);
 
@@ -125,9 +127,17 @@
     error = doc?.error ? failure(doc.error) : null; // the save model keeps the raw code; it is said here
   }
 
-  async function load(): Promise<void> {
+  /** `outsideChange`: reloading because the file changed outside PLA while the text was saved. */
+  async function load(outsideChange = false): Promise<void> {
     const note = await api.readNote(path);
     if (destroyed) return;
+    // Typed while the outside version was being read: that text is not thrown away, it is a
+    // conflict like any other (code review 2026-11-14)
+    if (outsideChange && doc?.dirty) {
+      doc.externalChange();
+      return;
+    }
+    confirmTake = false;
     readOnly = note.read_only;
     view?.destroy();
     view = new EditorView({
@@ -199,7 +209,12 @@
     if (copy) onSavedCopy(copy);
   }
 
+  /** Discards the user's unsaved text; asked twice, as nothing keeps a copy of it. */
   async function takeExternal(): Promise<void> {
+    if (!confirmTake) {
+      confirmTake = true;
+      return;
+    }
     await load();
   }
 
@@ -217,7 +232,7 @@
     load().catch((e) => (error = failure(e)));
     const unChanged = api.onNoteChanged((changed) => {
       if (changed !== path || !doc) return;
-      if (doc.externalChange() === "reload") void load(); // clean: show the outside version at once
+      if (doc.externalChange() === "reload") void load(true); // clean: show the outside version at once
     });
     return () => {
       destroyed = true;
@@ -234,7 +249,7 @@
   <Banner kind="danger" icon={CircleAlert} role="alert">
     {t("conflict.message")}
     {#snippet actions()}
-      <Button onclick={takeExternal}>{t("conflict.takeExternal")}</Button>
+      <Button variant={confirmTake ? "danger" : "secondary"} onclick={takeExternal}>{t(confirmTake ? "conflict.takeExternalConfirm" : "conflict.takeExternal")}</Button>
       <Button variant="primary" onclick={keepMineAsCopy}>{t("conflict.keepMine")}</Button>
     {/snippet}
   </Banner>
