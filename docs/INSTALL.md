@@ -6,7 +6,7 @@
    indirdiğin dosyanın bozulmadığını doğrulamak içindir:
 
    ```powershell
-   Get-FileHash .\PLA_0.1.0_x64-setup.exe -Algorithm SHA256
+   Get-FileHash .\PLA_0.1.1_x64-setup.exe -Algorithm SHA256
    ```
 
 2. Kurulumu çalıştır. Yönetici izni istemez; PLA yalnız senin kullanıcı hesabına,
