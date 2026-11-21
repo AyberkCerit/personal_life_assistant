@@ -8,7 +8,7 @@ use crate::notes::Block;
 
 /// A block that disappeared is only brought back (with its items) within this time; after that
 /// the same text is a new block, so a line re-added weeks later is not mistaken for the old one.
-const REVIVE_WINDOW_HOURS: i64 = 24;
+pub(super) const REVIVE_WINDOW_HOURS: i64 = 24;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct SyncedBlock {

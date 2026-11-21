@@ -373,7 +373,9 @@ pub fn resolve_conflict(conn: &Connection, keep_id: &str, now: DateTime<FixedOff
     if kind == "water" || kind == "workout" {
         return Err(MetricError::NotFound); // these add up per day: there is nothing to choose between
     }
-    let tx = conn.unchecked_transaction()?; // the worker writes on its own connection meanwhile
+    // The worker writes on its own connection meanwhile: a deferred transaction that reads and then
+    // writes fails at once with SQLITE_BUSY_SNAPSHOT, an immediate one waits (pipeline::write_tx).
+    let tx = rusqlite::Transaction::new_unchecked(conn, rusqlite::TransactionBehavior::Immediate)?;
     let others: Vec<String> = tx
         .prepare("SELECT metric_id FROM metric_record WHERE type = ?1 AND date = ?2 AND metric_id <> ?3 AND origin = 'extracted' AND user_modified = 0")?
         .query_map(params![kind, date, keep_id], |r| r.get(0))?

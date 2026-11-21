@@ -281,13 +281,24 @@ fn fixed_size(ty: u32) -> Option<i64> {
     }
 }
 
+/// How deep arrays of arrays may nest in a header: a crafted file could otherwise recurse until
+/// the stack runs out. Real headers hold flat arrays (token lists, scores).
+const MAX_ARRAY_DEPTH: usize = 4;
+
 fn skip_value<R: Read + Seek>(r: &mut BufReader<R>, ty: u32) -> std::io::Result<()> {
+    skip_nested(r, ty, 0)
+}
+
+fn skip_nested<R: Read + Seek>(r: &mut BufReader<R>, ty: u32, depth: usize) -> std::io::Result<()> {
     if let Some(n) = fixed_size(ty) {
         return r.seek_relative(n);
     }
     match ty {
         STRING => skip_string(r),
         ARRAY => {
+            if depth >= MAX_ARRAY_DEPTH {
+                return Err(invalid("arrays nested too deep"));
+            }
             let item = read_u32(r)?;
             let len = read_u64(r)?;
             if let Some(n) = fixed_size(item) {
@@ -295,7 +306,7 @@ fn skip_value<R: Read + Seek>(r: &mut BufReader<R>, ty: u32) -> std::io::Result<
                 r.seek(SeekFrom::Current(bytes as i64)).map(|_| ())
             } else {
                 for _ in 0..len {
-                    skip_value(r, item)?;
+                    skip_nested(r, item, depth + 1)?;
                 }
                 Ok(())
             }
@@ -424,6 +435,42 @@ mod tests {
         let bert = tmp.path().join("b.gguf");
         put(&bert, &gguf(&[("general.architecture", V::Str("nomic-bert"))]));
         assert!(read_header(&bert).unwrap().is_embedding);
+    }
+
+    #[test]
+    fn arrays_nested_without_end_are_refused_not_recursed() {
+        // code review 2026-11-14: each level is 12 bytes, and a crafted file overflowed the stack
+        let mut b = b"GGUF".to_vec();
+        b.extend_from_slice(&3u32.to_le_bytes());
+        b.extend_from_slice(&0u64.to_le_bytes());
+        b.extend_from_slice(&1u64.to_le_bytes());
+        string(&mut b, "general.deep");
+        b.extend_from_slice(&ARRAY.to_le_bytes());
+        for _ in 0..200_000 {
+            b.extend_from_slice(&ARRAY.to_le_bytes());
+            b.extend_from_slice(&1u64.to_le_bytes());
+        }
+        let tmp = tempfile::tempdir().unwrap();
+        let p = tmp.path().join("deep.gguf");
+        put(&p, &b);
+        assert!(read_header(&p).is_err());
+        // a shallow array of arrays is still read
+        let mut ok = b"GGUF".to_vec();
+        ok.extend_from_slice(&3u32.to_le_bytes());
+        ok.extend_from_slice(&0u64.to_le_bytes());
+        ok.extend_from_slice(&2u64.to_le_bytes());
+        string(&mut ok, "general.pairs");
+        ok.extend_from_slice(&ARRAY.to_le_bytes());
+        ok.extend_from_slice(&ARRAY.to_le_bytes());
+        ok.extend_from_slice(&1u64.to_le_bytes());
+        ok.extend_from_slice(&4u32.to_le_bytes());
+        ok.extend_from_slice(&2u64.to_le_bytes());
+        ok.extend_from_slice(&[0u8; 8]);
+        string(&mut ok, "general.architecture");
+        ok.extend_from_slice(&STRING.to_le_bytes());
+        string(&mut ok, "llama");
+        put(&p, &ok);
+        assert_eq!(read_header(&p).unwrap().architecture.as_deref(), Some("llama"));
     }
 
     #[test]
