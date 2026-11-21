@@ -298,7 +298,9 @@ fn with_vault<T>(state: &AppState, f: impl FnOnce(&Vault) -> Result<T, FileError
     with_session(state, |session| f(&session.vault).map_err(ue))
 }
 
-#[tauri::command]
+// async (off the main thread): opening a vault after an unclean exit checks pla.db, and stopping
+// one waits for its worker; the window must keep painting meanwhile (code review 2026-11-14)
+#[tauri::command(async)]
 pub fn startup(app: AppHandle, state: State<AppState>) -> Result<StartupInfo, String> {
     begin(&app, &state)
 }
@@ -353,7 +355,8 @@ pub fn begin(app: &AppHandle, state: &AppState) -> Result<StartupInfo, String> {
     Ok(info)
 }
 
-#[tauri::command]
+// async for the same reason as `startup`: the previous vault's worker may be starting its model
+#[tauri::command(async)]
 pub fn open_vault(app: AppHandle, state: State<AppState>, path: String) -> Result<VaultInfo, String> {
     let _settings_guard = state.settings_lock.lock().expect("settings lock");
     open_vault_locked(&app, &state, &crate::wizard::clean_path(&path))
@@ -736,6 +739,12 @@ pub fn set_paused(app: AppHandle, paused: bool) -> Result<(), String> {
 #[tauri::command]
 pub fn take_ui_events(queue: State<crate::tray::UiQueue>) -> Vec<(String, serde_json::Value)> {
     queue.take()
+}
+
+/// Quit from the tray, asked back by the page once it saved its note (`tray::quit`).
+#[tauri::command]
+pub fn quit_app(app: AppHandle) {
+    app.exit(0);
 }
 
 /// FR-SCH-001: closing the window keeps PLA in the tray; the first time, say so.

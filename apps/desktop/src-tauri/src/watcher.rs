@@ -92,7 +92,17 @@ pub fn watch(
     let root = vault.root.clone();
     let index_root = vault.root.clone();
     let mut debouncer = new_debouncer(Duration::from_secs(2), None, move |result: DebounceEventResult| {
-        let Ok(events) = result else { return };
+        // The watcher lost track (an overflowing change buffer during a sync or checkout, or an
+        // error): which notes changed is unknown, so the index and the queue look at the whole vault.
+        let events = match result {
+            Ok(events) if !events.iter().any(|e| e.need_rescan()) => events,
+            Ok(_) => return rescan_everything(&indexer, &worker, &app),
+            Err(errors) => {
+                let said: Vec<String> = errors.iter().map(|e| e.to_string()).collect();
+                crate::applog::error(&format!("watcher: {}", said.join("; ")));
+                return rescan_everything(&indexer, &worker, &app);
+            }
+        };
         let paths: Vec<PathBuf> = events.iter().flat_map(|e| e.paths.iter().cloned()).collect();
         // The index follows every note, PLA's own saves included (M3).
         let (notes, rescan) = crate::indexer::index_events(&index_root, &paths);
@@ -119,6 +129,14 @@ pub fn watch(
     })?;
     debouncer.watch(&root, RecursiveMode::Recursive)?;
     Ok(WatchHandle { _debouncer: debouncer })
+}
+
+/// Code review 2026-11-14: these events were dropped, and what changed meanwhile waited for the
+/// next start.
+fn rescan_everything(indexer: &Sender<crate::indexer::IndexCommand>, worker: &Sender<Command>, app: &AppHandle) {
+    let _ = indexer.send(crate::indexer::IndexCommand::Rescan);
+    let _ = worker.send(Command::Rescan);
+    let _ = app.emit("tree-changed", ());
 }
 
 #[cfg(test)]

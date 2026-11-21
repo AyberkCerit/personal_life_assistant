@@ -55,7 +55,7 @@ fn apply_local_model(settings: &mut AppSettings, path: &Path) -> Result<Installe
         local::LocalModelError::NotFound(p) => own_code("not_found", p.display(), ""),
         local::LocalModelError::NotGguf(p) => own_code("not_gguf", p.display(), ""),
         local::LocalModelError::Incomplete { expected, actual } => own_code("incomplete", "", format!("{actual} of {expected} bytes")),
-        local::LocalModelError::Io(e) => format!("io:{e}"),
+        local::LocalModelError::Io(e) => ue(e),
     })?;
     settings.model_path = Some(model.path.clone());
     settings.model_id = None;

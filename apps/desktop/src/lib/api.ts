@@ -294,6 +294,9 @@ export const api = {
   onMissedReminders: (cb: (list: DueReminder[]) => void) => on<DueReminder[]>("missed-reminders", cb),
   onTasksChanged: (cb: () => void) => on<unknown>("tasks-changed", () => cb()),
   onNewNote: (cb: () => void) => on<unknown>("new-note", () => cb()),
+  /** Quit from the tray: save, then answer with `quitApp` (the tray quits anyway after a few seconds). */
+  onQuitRequested: (cb: () => void) => on<unknown>("quit-requested", () => cb()),
+  quitApp: () => call<void>("quit_app"),
   onPausedChanged: (cb: (paused: boolean) => void) => on<boolean>("paused-changed", cb),
   /** A background job (backup, weekly report) failed for the second time today (FR-SCH-015). */
   onBackgroundProblem: (cb: (message: string) => void) => on<string>("background-problem", cb),
