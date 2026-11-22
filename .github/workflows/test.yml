@@ -1,7 +1,7 @@
 name: Tests
 
-# Runs the Rust and frontend test suites, clippy and svelte-check on every push to main and on
-# every pull request. The live tests that need llama-server, a model file or PDFium stay
+# Runs the Rust and frontend test suites, clippy (on Linux and Windows) and svelte-check on every
+# push to main and on every pull request. The live tests that need llama-server, a model file or PDFium stay
 # `#[ignore]`d, and the NSIS hook test skips itself off Windows.
 #
 # rustfmt is not checked yet: the tree is not formatted throughout (`cargo fmt --all --check`
@@ -39,6 +39,20 @@ jobs:
 
       - name: Test
         run: cargo test --workspace --locked
+
+  # The `#[cfg(windows)]` code (job objects, power and input APIs, toast notifications, the
+  # registry) only compiles on Windows, so the Linux job above never sees it. This job runs clippy
+  # there; the tests stay on Linux for now.
+  rust-windows:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
 
   frontend:
     runs-on: ubuntu-latest
