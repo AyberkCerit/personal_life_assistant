@@ -23,7 +23,7 @@ use tauri::{AppHandle, Emitter, Manager, State};
 use crate::errors::{own_code, ue};
 use crate::notify::{show_info, strings, AppNotifier};
 use crate::scheduler::{Pending, SchedCommand, Scheduler, SchedulerHandle};
-use crate::system::WindowsProbe;
+use crate::system::DesktopProbe;
 use crate::watcher::{watch, SelfWrites, WatchHandle};
 use crate::worker::{Command, Worker, WorkerHandle};
 
@@ -237,7 +237,7 @@ fn start_session(app: &AppHandle, root: &Path, settings: &AppSettings, own: Arc<
     let notifier = AppNotifier::new(app.clone(), cmd_tx.clone());
     let weekly = Arc::new(Mutex::new(settings.weekly_report.clone()));
     let reports = vault.root.join(&vault.config.folders.reports).join("weekly");
-    let scheduler = Scheduler::new(vault.root.clone(), sched_db, Box::new(notifier), Box::new(WindowsProbe), Box::new(|| Local::now().fixed_offset()))
+    let scheduler = Scheduler::new(vault.root.clone(), sched_db, Box::new(notifier), Box::new(DesktopProbe), Box::new(|| Local::now().fixed_offset()))
         .with_weekly_report(reports, Arc::clone(&weekly));
     let pending = scheduler.pending();
     let scheduler = scheduler.spawn(std::time::Duration::from_secs(30));
@@ -745,6 +745,12 @@ pub fn take_ui_events(queue: State<crate::tray::UiQueue>) -> Vec<(String, serde_
 #[tauri::command]
 pub fn quit_app(app: AppHandle) {
     app.exit(0);
+}
+
+/// The user touched the window. Off Windows idle time is measured from this (`system.rs`).
+#[tauri::command]
+pub fn user_active() {
+    crate::system::mark_user_active();
 }
 
 /// FR-SCH-001: closing the window keeps PLA in the tray; the first time, say so.

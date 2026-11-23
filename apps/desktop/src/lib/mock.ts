@@ -595,6 +595,7 @@ export async function mockBackend<T>(cmd: string, args: Record<string, unknown>)
       pending.missed = pending.missed.filter((r) => r.task_id !== args.id);
       return undefined as T;
     case "hide_to_tray":
+    case "user_active":
       return undefined as T;
     case "pending_reminders": {
       const open = (r: { task_id: string }) => !tasks.some((t) => t.task_id === r.task_id && t.status === "done");
