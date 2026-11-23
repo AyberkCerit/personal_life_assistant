@@ -288,6 +288,8 @@ export const api = {
   onModelChanged: (cb: (m: InstalledModel) => void) => on<InstalledModel>("model-changed", cb),
   dismissMissed: () => call<void>("dismiss_missed"),
   hideToTray: () => call<void>("hide_to_tray"),
+  /** The user touched the window: off Windows, idle time for the daily maintenance starts again. */
+  userActive: () => call<void>("user_active"),
   /** What the tray or a notification asked while this window was being made (it hears them now). */
   takeUiEvents: () => call<[string, unknown][]>("take_ui_events"),
   onReminderDue: (cb: (r: DueReminder) => void) => on<DueReminder>("reminder-due", cb),

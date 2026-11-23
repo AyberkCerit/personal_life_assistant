@@ -12,6 +12,7 @@
   import EmptyState from "./lib/ui/EmptyState.svelte";
   import { open } from "@tauri-apps/plugin-dialog";
   import { api, inTauri, type DownloadState, type TreeEntry, type WorkerStatus } from "./lib/api";
+  import { ACTIVITY_EVENTS, activityReporter } from "./lib/activity";
   import FileTree from "./lib/FileTree.svelte";
   import CalendarDays from "@lucide/svelte/icons/calendar-days";
   import { followMove, type Folders, type TreeActions } from "./lib/tree";
@@ -488,6 +489,9 @@
     };
     window.addEventListener("dragover", noFileDrop);
     window.addEventListener("drop", noFileDrop);
+    // Off Windows the backend cannot see the user's input, so the window tells it (daily maintenance).
+    const active = activityReporter(() => void api.userActive().catch(() => {}));
+    for (const name of ACTIVITY_EVENTS) window.addEventListener(name, active, { capture: true, passive: true });
     const unClose = inTauri
       ? getCurrentWindow().onCloseRequested(async (event) => {
           // No vault open: nothing runs in the background, so closing quits (deferred F4c minor).
@@ -515,6 +519,7 @@
       window.removeEventListener("keydown", shortcut);
       window.removeEventListener("dragover", noFileDrop);
       window.removeEventListener("drop", noFileDrop);
+      for (const name of ACTIVITY_EVENTS) window.removeEventListener(name, active, { capture: true });
     };
   });
 </script>

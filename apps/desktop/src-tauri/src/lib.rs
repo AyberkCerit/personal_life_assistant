@@ -100,6 +100,7 @@ pub fn run() {
             commands::set_language,
             commands::take_ui_events,
             commands::quit_app,
+            commands::user_active,
             commands::weekly_report_settings,
             commands::set_weekly_report,
             commands::finish_setup,
